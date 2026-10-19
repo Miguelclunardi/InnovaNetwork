@@ -24,7 +24,13 @@ Documentação do projeto: **português**.
 
 1. `sudo ./install.sh` (consolidar pelo caminho oficial; conferir `logs/install.log`) e `./test.sh`.
 2. Manter o GitHub em dia: commitar e `git push` a cada mudança (`gh` em `~/.local/bin`, conta `Miguelclunardi`).
-3. Testar no **Ubuntu Server** (mesmo `config.env`): checar detecção de interface (`ens*`), netplan, SCTP (`linux-modules-extra`).
+3. Levar ao **Ubuntu Server** (plano combinado em 2026-10-19):
+   - no servidor, usuário Linux próprio; clonar com **deploy key só leitura** (sem login do GitHub no servidor):
+     `Host github-open5gk3s` em `~/.ssh/config` → `git clone git@github-open5gk3s:Miguelclunardi/open5GK3S.git`;
+   - `sudo ./install.sh` + `./test.sh`; checar `NODE_IFACE` se houver várias placas, AVX, SCTP (`linux-modules-extra`);
+   - desenvolvimento: ferramentas de IA **ficam no desktop** e operam o servidor por SSH (`Host server5g`, chave
+     `~/.ssh/server5g`), fluxo editar local → `git push` → `ssh server5g 'cd ~/open5GK3S && git pull --ff-only && ./test.sh'`;
+     comandos com sudo no servidor são rodados pelo usuário.
 4. Dashboard de acompanhamento (pedido do usuário, adiado): pods/NFs, UEs registrados, sessões, tráfego.
 5. Fase RAN real: **OCUDU** (CU/DU) + **LiteOn** (O-RU) — validar `EXPOSE_RAN` com SCTP real ou migrar N2/N3 para
    Multus/macvlan/SR-IOV; alinhar PLMN/TAC/S-NSSAI; cadastrar SIMs em `SUBSCRIBERS`; preparar host do DU (PTP, fronthaul).
