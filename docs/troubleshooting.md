@@ -69,6 +69,8 @@ sudo systemctl status k3s ; sudo journalctl -u k3s -f   # serviço do k3s
 | 8 | `failed to query scale subresource for StatefulSet/open5gs/ueransim` repetindo no `journalctl -u k3s` | Bug do chart `ueransim-gnb`: HPA (min=max=1) aponta para `StatefulSet`, mas o gNB é `Deployment`. | Post-renderer `helm/postrender/drop-gnb-hpa.sh` remove o HPA. |
 | 9 | `localhost:8080 was refused` no terminal do usuário | Sem kubeconfig do usuário (ver §1.1). | `install.sh` configura `~/.kube/config` do `$SUDO_USER` (merge idempotente). |
 | 10 | Arquivos com palavras soltas na pasta do projeto | `cmd \| tee install.log palavra palavra…` — o `tee` cria um arquivo por argumento. | `install.sh` grava o próprio log em `logs/install.log`; não use `\| tee`. |
+| 11 | k3s parado em `activating`; `kubectl`: `apiserver not ready`/`connection refused` depois de desligar o cabo | `node-ip` preso ao IP físico (191.4.204.79 em `enp0s31f6`); no Wi‑Fi o IP era outro. | `NODE_IP_MODE=stable`: interface dummy `k3s0` com IP fixo e privado, criada pela unit `open5gs-k3s-netif` antes do k3s. |
+| 12 | Após reboot ou restart do k3s: UE registrado e com IP, mas `ping` falha; o UPF loga `Cannot find PFCP-Node … from [IP do SMF]` | Os pods voltam em ordem qualquer; a associação PFCP (N4) entre SMF e UPF e as sessões dos UEs ficam dessincronizadas. | `scripts/heal.sh` (UEs e depois UPF → SMF → gNB → UEs), rodado no boot pela unit `open5gs-k3s-heal` (`AUTO_HEAL=true`) e pelo `install.sh`. |
 
 ### Ruído conhecido (não é erro)
 
@@ -89,7 +91,7 @@ sudo systemctl status k3s ; sudo journalctl -u k3s -f   # serviço do k3s
 | Ping ao gateway (10.45.0.1) OK, à internet não | N6: host sem saída, DNS, ou firewall (Docker/UFW/firewalld) bloqueando forward. `sudo iptables -L FORWARD -n -v`. |
 | Pods sem rede após instalar Docker | Docker põe `FORWARD` em `DROP`. O k3s cria regras para `10.42.0.0/16`; se preciso: `sudo iptables -I FORWARD -s 10.42.0.0/16 -j ACCEPT; sudo iptables -I FORWARD -d 10.42.0.0/16 -j ACCEPT`. |
 | Desktop perde rede / pods instáveis | NetworkManager gerenciando `cni0`/`flannel.1`: confira `/etc/NetworkManager/conf.d/90-open5gs-k3s-unmanaged.conf`. |
-| k3s quebra após o IP do nó mudar (DHCP) | `node-ip` fica fixo no `/etc/rancher/k3s/config.yaml`: rode `sudo ./install.sh` de novo (ou fixe o IP). |
+| k3s não sobe depois que o IP do host mudou (DHCP, cabo desligado, troca para Wi‑Fi) e o `journalctl -u k3s` mostra `node IP … not found in the host's network interfaces` | Instalação antiga com `node-ip` na placa física. Com `NODE_IP_MODE=stable` (padrão) rode `sudo ./install.sh` uma vez: o nó passa para `k3s0`/10.254.254.1 e isso não se repete. Verifique com `ip -br a show k3s0` e `systemctl status open5gs-k3s-netif`. |
 | `helm` timeout na 1ª instalação | Download lento: aumente `HELM_TIMEOUT` e rode de novo. |
 
 ## 4. Logs úteis

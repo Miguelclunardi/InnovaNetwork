@@ -34,7 +34,7 @@ Para operar e modificar, veja o [README](../README.md); para problemas, [trouble
 │  │ └─────────┘                                                                 │       │  │
 │  └─────────────────────────────────────────────────────────────────────────────┼───────┘  │
 │                                                         NAT do k3s/flannel ────▼          │
-│                                                         NODE_IFACE (ex.: enp0s31f6) ──► N6 / Internet
+│                                                         rota default (Wi-Fi/cabo) ──► N6 / Internet
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -85,10 +85,11 @@ Desligados (via `values-5g.yaml` dos charts): HSS, MME, PCRF, SGW-C/U (4G) e SEP
 
 ## 5. Rede do Kubernetes
 
-- **CNI**: flannel (VXLAN) amarrado a `NODE_IFACE`; pods em `K3S_CLUSTER_CIDR` (10.42.0.0/16), services em `K3S_SERVICE_CIDR` (10.43.0.0/16).
+- **Nó**: com `NODE_IP_MODE=stable` (padrão) o k3s usa a interface dummy `k3s0` (10.254.254.1/32), criada pela unit `open5gs-k3s-netif` antes do k3s. Assim o cluster não depende do IP físico, que pode vir de DHCP ou trocar entre Wi‑Fi e cabo.
+- **CNI**: flannel (VXLAN) amarrado à interface do nó (`k3s0`, ou `NODE_IFACE` no modo `iface`); pods em `K3S_CLUSTER_CIDR` (10.42.0.0/16), services em `K3S_SERVICE_CIDR` (10.43.0.0/16).
 - Cada NF tem só `eth0`; N2/N3/N4/SBI compartilham a rede de pods. Não usamos Multus (ver comparação abaixo).
 - Tráfego **via Service** (SBI, NGAP) passa por DNAT do kube-proxy; tráfego **direto pod↔pod** (RLS UE↔gNB, N3 gNB↔UPF) é roteado na bridge `cni0` — por isso um firewall do host (firewalld) pode quebrar só o plano de usuário/rádio.
-- O UPF faz NAT do pool de UEs para o IP do pod; o pod sai pelo NAT do flannel para `NODE_IFACE`.
+- O UPF faz NAT do pool de UEs para o IP do pod; o pod sai pelo NAT do flannel pela rota default do momento.
 
 ## 6. Decisões de projeto (resumo)
 

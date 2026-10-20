@@ -19,10 +19,12 @@ Documentação do projeto: **português**.
   cluster **sem root** (helm do scratchpad, `INSTALL_DIR` temporário). O `/opt/open5gs-k3s` tem o clone de charts
   feito pelo `sudo ./install.sh` do usuário. Rodar `sudo ./install.sh` uma vez deixa tudo consistente pelo caminho oficial
   (sem mudança de config ⇒ nenhum pod reinicia, exceto se o hash mudar).
+- Nó do k3s em `k3s0`/10.254.254.1 (decisão 27), validado com troca cabo→Wi‑Fi e com reboot.
+- Recuperação automática no boot (decisão 28): `heal.sh` validado (recuperou o 5/7 pós-reboot para 7/7).
 
 ## Próximos passos
 
-1. `sudo ./install.sh` (consolidar pelo caminho oficial; conferir `logs/install.log`) e `./test.sh`.
+1. `sudo ./install.sh` (consolidar pelo caminho oficial **e** migrar o nó para `k3s0`; conferir `logs/install.log`) e `./test.sh`.
 2. Manter o GitHub em dia: commitar e `git push` a cada mudança (`gh` em `~/.local/bin`, conta `Miguelclunardi`).
 3. Levar ao **Ubuntu Server** (plano combinado em 2026-10-19):
    - no servidor, usuário Linux próprio; clonar com **deploy key só leitura** (sem login do GitHub no servidor):
@@ -44,6 +46,7 @@ Documentação do projeto: **português**.
 | `uninstall.sh` | Padrão (releases/PVC/ns), `--k3s` (+ k3s + contexto kubeconfig), `--purge` (+ sistema, firewall, `/opt`, bashrc). |
 | `config.env` | Única fonte de parâmetros. Nada fixo no código. |
 | `scripts/lib/common.sh` | Biblioteca: log, `load_config`, `validate_config`, `detect_env`, render de values, assinantes, kubeconfig/bashrc do usuário. `PROJECT_DIR` = `../..` dela. |
+| `scripts/heal.sh` | Recupera o plano de usuário (UEs → UPF/SMF/gNB/UEs). Manual ou `--boot` (unit `open5gs-k3s-heal`, cópia root em `/opt/open5gs-k3s/heal`). |
 | `scripts/subscribers.sh` | sync/list/add/remove/reset via `open5gs-dbctl` no pod populate. |
 | `helm/postrender/drop-gnb-hpa.sh` | Post-renderer que remove o HPA do chart `ueransim-gnb`. |
 | `helm/generated/` | Values gerados (gitignored). |
@@ -78,6 +81,8 @@ Documentação do projeto: **português**.
 24. **`~/.bashrc`**: alias `k` + autocomplete em bloco `# >>> open5gs-k3s >>>` (não duplica; não sobrescreve `alias k` existente); `--purge` remove.
 25. **Log automático** do install em `logs/install.log` (o `| tee palavras…` criou arquivos soltos); `logs/` e `helm/generated/` devolvidos ao usuário (chown) no fim.
 26. **Estrutura**: `scripts/lib/common.sh` (biblioteca separada dos executáveis), `helm/` (generated + postrender), `docs/`, `logs/`.
+27. **Nó do k3s independente da rede física** (`NODE_IP_MODE=stable`, padrão). O `node-ip` ficava preso ao IP do cabo (191.4.204.79/`enp0s31f6`). Ao desligar o cabo e usar o Wi‑Fi, o k3s não subia (`node IP not found`). Agora uma interface dummy `k3s0` com 10.254.254.1/32, criada pela unit `open5gs-k3s-netif.service` e exigida pelo k3s via drop-in, é o node-ip e o flannel-iface. O host continua em DHCP, sem IP fixo; o N6 sai pela rota default do momento; NodePort e ServiceLB respondem em qualquer IP do host. `iface` mantém o comportamento antigo. Com `EXPOSE_RAN`, o IP físico anunciado ainda precisa ser estável. `uninstall --k3s` remove a unit e a interface.
+28. **Recuperação do plano de usuário** (`AUTO_HEAL=true`). Depois de um reboot ou restart do k3s, o UPF passou a rejeitar o SMF (`Cannot find PFCP-Node`): o UE registrava e recebia IP, mas não pingava. `ensure_user_plane` (common.sh) escalona: espera, depois reinicia os UEs, depois UPF → SMF → gNB → UEs. É usado pelo install e por `scripts/heal.sh`. A unit `open5gs-k3s-heal` (`Type=exec`, para não atrasar o boot) roda no boot uma **cópia root** em `/opt/open5gs-k3s/heal`: uma unit root não executa arquivos que o usuário pode editar. `uninstall --k3s` remove a unit.
 
 ## Ruído conhecido
 
@@ -85,7 +90,7 @@ Documentação do projeto: **português**.
 
 ## Ambiente de desenvolvimento
 
-Ubuntu 24.04.5 desktop (`lunardint1`), kernel 7.0.0-38-generic, 8 vCPU/32 GiB, AVX, interface `enp0s31f6` (191.4.204.79),
+Ubuntu 24.04.5 desktop (`lunardint1`), kernel 7.0.0-38-generic, 8 vCPU/32 GiB, AVX, rede física `enp0s31f6` (cabo) ou `wlp0s20f3` (Wi‑Fi) em DHCP,
 Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubectl` v1.36.1 próprio em `/usr/local/bin`.
 
 ## Histórico
@@ -96,3 +101,5 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
 - 2026-10-19: kubectl sem sudo para o usuário (23, 24), HPA do gNB (22), limpeza de 14 arquivos criados por `tee`,
   reorganização (25, 26), docs/ e README reescritos, Helm arm64, repositório git.
 - 2026-10-19: publicado em https://github.com/Miguelclunardi/open5GK3S (privado).
+- 2026-10-19: cabo desligado ⇒ k3s não subia (node-ip preso ao IP físico). Criado `NODE_IP_MODE=stable` com interface
+  dummy `k3s0` (27); o host continua em DHCP. Reboot revelou dessincronia PFCP ⇒ `heal.sh` + unit de boot (28).

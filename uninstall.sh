@@ -34,7 +34,7 @@ confirm() {
 
 step "Plano"
 info "remover releases '${UERANSIM_RELEASE}' e '${OPEN5GS_RELEASE}' e namespace '${K8S_NAMESPACE}' (inclui dados do MongoDB)"
-if ${REMOVE_K3S}; then info "desinstalar o k3s (TODOS os workloads do cluster serão apagados)"; fi
+if ${REMOVE_K3S}; then info "desinstalar o k3s (TODOS os workloads do cluster serão apagados) e a interface ${STABLE_IFACE}"; fi
 if ${PURGE}; then info "remover ${SYSCTL_FILE}, ${MODULES_FILE}, ${NM_CONF_FILE}, regras UFW, ${INSTALL_DIR}, ${GENERATED_DIR}"; fi
 confirm "Continuar?" || { info "cancelado"; exit 0; }
 
@@ -70,6 +70,19 @@ if ${REMOVE_K3S}; then
     info "k3s não instalado"
   fi
   rm -f "${INSTALL_DIR}/state/k3s.sig"
+  if [[ -f "${HEAL_UNIT_FILE}" ]]; then
+    systemctl disable open5gs-k3s-heal.service >/dev/null 2>&1 || true
+    rm -f "${HEAL_UNIT_FILE}"; rm -rf "${INSTALL_DIR}/heal"; systemctl daemon-reload
+    ok "unit open5gs-k3s-heal removida"
+  fi
+  if [[ -f "${NETIF_UNIT_FILE}" ]]; then
+    systemctl disable --now open5gs-k3s-netif.service >/dev/null 2>&1 || true
+    rm -f "${NETIF_UNIT_FILE}" "${K3S_DROPIN_FILE}"
+    rmdir "$(dirname "${K3S_DROPIN_FILE}")" 2>/dev/null || true
+    systemctl daemon-reload
+    ip link del "${STABLE_IFACE}" 2>/dev/null || true
+    ok "interface estável ${STABLE_IFACE} e unit open5gs-k3s-netif removidas"
+  fi
 fi
 
 # 3) Ajustes de sistema ---------------------------------------------------------------

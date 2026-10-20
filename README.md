@@ -120,6 +120,7 @@ open5GK3S/
 ├── .gitignore
 ├── scripts/
 │   ├── subscribers.sh       # assinantes no MongoDB
+│   ├── heal.sh              # recupera o plano de usuário (após reboot; roda sozinho no boot)
 │   └── lib/
 │       └── common.sh        # funções compartilhadas (não executar direto)
 ├── helm/
@@ -144,6 +145,8 @@ Fora do repositório (criados pelo install):
 | `~/.kube/config`, `~/.kube/open5gs-k3s.yaml` | kubeconfig do seu usuário (contexto `open5gs-k3s`) |
 | `/etc/sysctl.d/90-open5gs-k3s.conf`, `/etc/modules-load.d/open5gs-k3s.conf` | sysctl e módulos |
 | `/etc/NetworkManager/conf.d/90-open5gs-k3s-unmanaged.conf` | só se o NetworkManager estiver ativo |
+| `/etc/systemd/system/open5gs-k3s-netif.service` + drop-in `k3s.service.d/10-open5gs-k3s-netif.conf` | cria a interface `k3s0` (10.254.254.1) antes do k3s (`NODE_IP_MODE=stable`) |
+| `/etc/systemd/system/open5gs-k3s-heal.service`, `/opt/open5gs-k3s/heal/` | recuperação no boot (`AUTO_HEAL`); roda uma cópia root do `heal.sh` |
 | bloco `# >>> open5gs-k3s >>>` no `~/.bashrc` | alias `k` e autocomplete do kubectl |
 
 ---
@@ -157,16 +160,18 @@ Cada passo só age se algo mudou — rodar de novo é seguro.
 3. **Pacotes** que faltarem (`curl git iptables lksctp-tools bash-completion …`).
 4. **Módulos** `sctp tun br_netfilter overlay` (carregados e persistidos).
 5. **sysctl**: `ip_forward`, `bridge-nf-call-iptables`, inotify, buffers.
-6. **Perfil do host**: NetworkManager ignora `cni0/flannel*/veth*`; regras UFW; **firewalld** com as redes do cluster na zona `trusted`; avisos (Docker, AVX, RAM).
-7. **k3s** `K3S_VERSION` via `/etc/rancher/k3s/config.yaml` (node-ip, interface do flannel, CIDRs, sem Traefik, kubelet com mais QPS de pull, kubeconfig 0600). Mudou o config ⇒ restart do k3s.
-8. **Helm** `HELM_VERSION` (SHA-256 verificado) se não houver um Helm 3 no sistema.
-9. **Charts Gradiant** no commit `GRADIANT_CHARTS_REF` + `helm dependency build`.
-10. **Open5GS**: gera `helm/generated/open5gs-values.yaml` e faz `helm upgrade --install --wait`.
-11. **Assinantes**: sincroniza UEs simulados + `SUBSCRIBERS` no MongoDB.
-12. **UERANSIM**: gera `helm/generated/ueransim-values.yaml`, instala com o post-renderer, espera o NG Setup e garante o registro dos UEs (reinicia o pod dos UEs uma vez se necessário).
-13. **kubeconfig do usuário real** (`$SUDO_USER`): cria/mescla `~/.kube/config` (0600), alias `k` + autocomplete, e testa `kubectl get nodes` como esse usuário.
+6. **Perfil do host**: NetworkManager ignora `cni0/flannel*/veth*/k3s0`; regras UFW; **firewalld** com as redes do cluster na zona `trusted`; avisos (Docker, AVX, RAM).
+7. **Interface estável** `k3s0` (unit `open5gs-k3s-netif`), para o cluster não depender do IP do host.
+8. **k3s** `K3S_VERSION` via `/etc/rancher/k3s/config.yaml` (node-ip, interface do flannel, CIDRs, sem Traefik, kubelet com mais QPS de pull, kubeconfig 0600). Mudou o config ⇒ restart do k3s.
+9. **Helm** `HELM_VERSION` (SHA-256 verificado) se não houver um Helm 3 no sistema.
+10. **Charts Gradiant** no commit `GRADIANT_CHARTS_REF` + `helm dependency build`.
+11. **Open5GS**: gera `helm/generated/open5gs-values.yaml` e faz `helm upgrade --install --wait`.
+12. **Assinantes**: sincroniza UEs simulados + `SUBSCRIBERS` no MongoDB.
+13. **UERANSIM**: gera `helm/generated/ueransim-values.yaml`, instala com o post-renderer, espera o NG Setup e garante UEs registrados **e pingando o UPF** (se preciso reinicia os UEs e, depois, UPF → SMF → gNB → UEs).
+14. **Recuperação no boot** (`AUTO_HEAL`): instala a unit `open5gs-k3s-heal`.
+15. **kubeconfig do usuário real** (`$SUDO_USER`): cria/mescla `~/.kube/config` (0600), alias `k` + autocomplete, e testa `kubectl get nodes` como esse usuário.
 
-Opções: `--deploy-only` (pula 3–8; só values, deploy, assinantes e kubeconfig), `-h`.
+Opções: `--deploy-only` (pula 3–9; só values, deploy, assinantes e kubeconfig), `-h`.
 
 ---
 
@@ -251,8 +256,16 @@ sudo systemctl stop k3s && sudo /usr/local/bin/k3s-killall.sh   # para tudo (lib
 sudo systemctl start k3s                                        # sobe de novo (pods voltam sozinhos)
 ```
 
-O k3s é `enabled` no systemd: após reboot tudo volta sozinho (módulos e sysctl são persistidos).
-Rode `./test.sh` depois de ~2 min. Se o UE não registrar, `kubectl -n open5gs rollout restart deploy/ueransim-ues`.
+Após reboot tudo volta sozinho: a `k3s0` é criada, o k3s sobe e a unit `open5gs-k3s-heal` espera
+os pods e confere se o UE pinga o UPF. Se não pingar, ela reinicia os UEs e, se ainda falhar,
+UPF → SMF → gNB → UEs. Isso acontece porque, depois de um reboot, os pods voltam em ordem qualquer e
+o UPF pode não reconhecer mais o SMF (`Cannot find PFCP-Node`).
+
+```bash
+journalctl -u open5gs-k3s-heal -b      # o que a recuperação fez neste boot
+./test.sh                              # ~3–5 min após o boot
+./scripts/heal.sh                      # mesma recuperação, manual (também após 'systemctl restart k3s')
+```
 
 ### 7.8 Backup e restauração dos assinantes
 
@@ -291,7 +304,9 @@ recriados (estratégia `Recreate`, todos juntos) e o gNB/UEs também; os assinan
 | Variável | Padrão | Função |
 |----------|--------|--------|
 | `ENV_PROFILE` | `auto` | `auto`/`desktop`/`server` (ver §9) |
-| `NODE_IFACE`, `NODE_IP` | vazio (rota default) | interface/IP do nó: flannel, saída N6, anúncio N3 externo |
+| `NODE_IP_MODE` | `stable` | `stable`: o k3s usa a interface virtual `STABLE_IFACE` com `STABLE_IP` (padrão `k3s0` / `10.254.254.1`), recriada a cada boot. Assim o cluster não depende do IP do host (DHCP, troca entre Wi‑Fi e cabo, outra rede). `iface`: usa a placa física, e se o IP mudar é preciso rodar o install de novo |
+| `STABLE_IFACE`, `STABLE_IP` | `k3s0`, `10.254.254.1` | interface e IP virtuais do nó (o IP deve ser privado e fora da LAN e de `K3S_*_CIDR`) |
+| `NODE_IFACE`, `NODE_IP` | vazio (rota default) | interface e IP físicos do host. No modo `stable` servem só para a URL da WebUI e para o anúncio do N3 externo (`EXPOSE_RAN`); no modo `iface` também são o nó do k3s |
 | `KUBECONFIG_USER` | vazio (`$SUDO_USER`) | usuário que recebe `~/.kube/config` |
 | `SHELL_EXTRAS` | `true` | alias `k` + autocomplete no `~/.bashrc` |
 | `INSTALL_DIR` | `/opt/open5gs-k3s` | charts clonados, helm, estado |
@@ -314,6 +329,7 @@ recriados (estratégia `Recreate`, todos juntos) e o gNB/UEs também; os assinan
 | `MONGODB_PERSISTENCE`, `MONGODB_PERSISTENCE_SIZE` | `true`, `2Gi` | volume do banco |
 | `MONGODB_IMAGE_REGISTRY/REPOSITORY/TAG` | vazio (Bitnami latest) | imagem alternativa (ex.: CPU sem AVX) |
 | `DEPLOY_UERANSIM` | `true` | `false` remove gNB/UEs simulados (para RAN real) |
+| `AUTO_HEAL` | `true` | unit `open5gs-k3s-heal`: no boot, confere o plano de usuário e reinicia UEs/UPF/SMF/gNB se preciso |
 | `EXPOSE_RAN` | `false` | expõe N2/N3 no `NODE_IP` para gNB externo (ver §8.7) |
 | `UE_COUNT`, `UE_MSIN_START`, `UE_KEY`, `UE_OPC` | `1`, `0000000001`, chaves de teste | UEs simulados (cadastrados automaticamente) |
 | `SUBSCRIBERS` | `()` | assinantes extras (SIMs reais) |
@@ -353,7 +369,7 @@ do UERANSIM — para testar outra, coloque-a em primeiro.
 |-------------|------|
 | Pool de IP dos UEs | 4º campo de cada item de `SLICES` |
 | DNS / MTU do UE | `DNS_SERVERS`, `UE_MTU` |
-| Interface / IP do nó | `NODE_IFACE`, `NODE_IP` → `sudo ./install.sh` (regrava o config do k3s e reinicia) |
+| Endereço do nó do k3s | `NODE_IP_MODE`, `STABLE_IFACE`, `STABLE_IP`, `NODE_IFACE`, `NODE_IP` → `sudo ./install.sh` (regrava o config do k3s e reinicia) |
 | Redes do cluster | `K3S_CLUSTER_CIDR`, `K3S_SERVICE_CIDR` → **exige** `sudo ./uninstall.sh --k3s` antes |
 | Porta da WebUI | `WEBUI_NODEPORT` (30000–32767) |
 
@@ -414,15 +430,15 @@ O mesmo `config.env` serve aos dois; as diferenças de host são detectadas (`EN
 | Perfil | `graphical.target`, NetworkManager | `multi-user.target`, netplan + networkd | `auto` ou force `desktop`/`server` |
 | NetworkManager | ativo — tentaria gerenciar `cni0`/`flannel.1`/`veth*` | normalmente ausente | arquivo de `unmanaged-devices` se o NM estiver ativo |
 | Interface | `enp*`, `wlp*` (Wi-Fi) | `ens*`, `eno*`, bonds, VLANs | rota default ou `NODE_IFACE`/`NODE_IP` |
-| IP | DHCP pode mudar | normalmente fixo | IP muda ⇒ `sudo ./install.sh` (ou fixe o IP) |
+| IP | DHCP pode mudar, Wi‑Fi ou cabo | normalmente fixo | `NODE_IP_MODE=stable`: o nó do k3s fica em `k3s0` (10.254.254.1) e a troca de IP não afeta o cluster |
 | SCTP | kernel `generic` já tem | kernels `-virtual`/cloud podem não ter | instala `linux-modules-extra-$(uname -r)` |
 | Firewall | firewalld/UFW podem estar ativos | idem | redes do cluster liberadas automaticamente |
 | Docker | comum | raro | aviso (política FORWARD DROP) |
 | kubectl | pode já existir em `/usr/local/bin` | normalmente vem do k3s | `~/.kube/config` do `$SUDO_USER`; scripts usam kubeconfig explícito |
 | Arquitetura | x86_64 | x86_64 ou arm64 | Helm baixado para a arquitetura certa |
 
-Com mais de uma placa no servidor, fixe `NODE_IFACE` (e `NODE_IP`) para escolher por onde saem o
-flannel e o N6.
+A saída para a internet (N6) segue sempre a rota default do momento. Com mais de uma placa, fixe
+`NODE_IFACE` e `NODE_IP` para escolher o IP anunciado a um gNB externo (`EXPOSE_RAN`).
 
 ---
 

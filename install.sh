@@ -96,13 +96,15 @@ step_host_profile() {
   if ${HAS_NM}; then
     # Sem isso o NetworkManager tenta gerenciar cni0/flannel/veth e derruba a rede dos pods
     local content
-    content=$'# Gerado por open5GK3S/install.sh\n[keyfile]\nunmanaged-devices=interface-name:cni0;interface-name:flannel*;interface-name:veth*\n'
+    local devs="interface-name:cni0;interface-name:flannel*;interface-name:veth*"
+    if [[ "${NODE_IP_MODE}" == stable ]]; then devs+=";interface-name:${STABLE_IFACE}"; fi
+    content=$'# Gerado por open5GK3S/install.sh\n[keyfile]\nunmanaged-devices='"${devs}"$'\n'
     if [[ ! -f "${NM_CONF_FILE}" ]] || [[ "$(cat "${NM_CONF_FILE}")"$'\n' != "${content}" ]]; then
       mkdir -p "$(dirname "${NM_CONF_FILE}")"
       printf '%s' "${content}" >"${NM_CONF_FILE}"
       systemctl reload NetworkManager || true
     fi
-    ok "NetworkManager ignora cni0/flannel*/veth*"
+    ok "NetworkManager ignora cni0/flannel*/veth*$([[ "${NODE_IP_MODE}" == stable ]] && echo "/${STABLE_IFACE}" || true)"
   else
     info "NetworkManager inativo (típico de server/netplan+networkd) — nada a fazer"
   fi
@@ -153,6 +155,67 @@ step_host_profile() {
 }
 
 # ----------------------------------------------------------------------------
+#  4b. Interface estável do nó (NODE_IP_MODE=stable)
+#  O k3s guarda o node-ip no config; se o IP do host mudar (DHCP, Wi-Fi x cabo,
+#  outra rede) o k3s não sobe. Uma interface dummy com IP fixo e privado, criada
+#  a cada boot antes do k3s, torna o cluster independente da rede física.
+#  A saída para a internet (N6) continua pela rota default, qualquer que seja.
+# ----------------------------------------------------------------------------
+step_stable_netif() {
+  step "Interface estável do nó (NODE_IP_MODE=${NODE_IP_MODE})"
+  if [[ "${NODE_IP_MODE}" != stable ]]; then
+    if [[ -f "${NETIF_UNIT_FILE}" ]]; then
+      systemctl disable --now open5gs-k3s-netif.service >/dev/null 2>&1 || true
+      rm -f "${NETIF_UNIT_FILE}" "${K3S_DROPIN_FILE}"
+      systemctl daemon-reload
+      ok "interface estável removida; k3s usa ${K3S_NODE_IFACE} (${K3S_NODE_IP})"
+    else
+      info "k3s usa a interface física ${K3S_NODE_IFACE} (${K3S_NODE_IP}) — sensível a troca de IP"
+    fi
+    return 0
+  fi
+  local unit dropin changed=false
+  unit=$(cat <<EOU
+# Gerado por open5GK3S/install.sh
+[Unit]
+Description=open5GK3S: interface estavel do no k3s (${STABLE_IFACE} ${STABLE_IP}), independente de DHCP
+Before=k3s.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'ip link show ${STABLE_IFACE} >/dev/null 2>&1 || ip link add ${STABLE_IFACE} type dummy; ip addr replace ${STABLE_IP}/32 dev ${STABLE_IFACE}; ip link set ${STABLE_IFACE} up'
+
+[Install]
+WantedBy=multi-user.target
+EOU
+)
+  dropin=$'# Gerado por open5GK3S/install.sh
+[Unit]
+Requires=open5gs-k3s-netif.service
+After=open5gs-k3s-netif.service'
+  if [[ "$(cat "${NETIF_UNIT_FILE}" 2>/dev/null)" != "${unit}" ]]; then
+    printf '%s
+' "${unit}" >"${NETIF_UNIT_FILE}"; changed=true
+  fi
+  if [[ "$(cat "${K3S_DROPIN_FILE}" 2>/dev/null)" != "${dropin}" ]]; then
+    mkdir -p "$(dirname "${K3S_DROPIN_FILE}")"
+    printf '%s
+' "${dropin}" >"${K3S_DROPIN_FILE}"; changed=true
+  fi
+  if ${changed}; then systemctl daemon-reload; fi
+  systemctl enable open5gs-k3s-netif.service >/dev/null 2>&1
+  # 'restart' reaplica IP/nome se mudaram no config
+  if ${changed}; then systemctl restart open5gs-k3s-netif.service; else systemctl start open5gs-k3s-netif.service; fi
+  ip -4 -o addr show dev "${STABLE_IFACE}" 2>/dev/null | grep -q " ${STABLE_IP}/" \
+    || die "não foi possível criar ${STABLE_IFACE} com ${STABLE_IP}"
+  ok "${STABLE_IFACE} = ${STABLE_IP} (recriada a cada boot antes do k3s)"
+  if is_true "${EXPOSE_RAN}"; then
+    warn "EXPOSE_RAN=true: o gNB externo usa o IP físico ${NODE_IP}; se ele mudar, rode 'sudo ./install.sh --deploy-only'"
+  fi
+}
+
+# ----------------------------------------------------------------------------
 #  5. k3s
 # ----------------------------------------------------------------------------
 step_k3s() {
@@ -161,8 +224,8 @@ step_k3s() {
   cfg=$(
     echo "# Gerado por open5GK3S/install.sh a partir de config.env"
     echo "write-kubeconfig-mode: \"0600\"   # só root; o usuário recebe ~/.kube/open5gs-k3s.yaml"
-    echo "node-ip: \"${NODE_IP}\""
-    echo "flannel-iface: \"${NODE_IFACE}\""
+    echo "node-ip: \"${K3S_NODE_IP}\"   # NODE_IP_MODE=${NODE_IP_MODE}"
+    echo "flannel-iface: \"${K3S_NODE_IFACE}\""
     echo "cluster-cidr: \"${K3S_CLUSTER_CIDR}\""
     echo "service-cidr: \"${K3S_SERVICE_CIDR}\""
     echo "disable:"
@@ -324,38 +387,55 @@ step_deploy_ueransim() {
     --wait --timeout "${HELM_TIMEOUT}" >/dev/null \
     || { kc -n "${K8S_NAMESPACE}" get pods; die "deploy do UERANSIM falhou"; }
   ok "UERANSIM implantado"
-  ensure_ues_registered
+  ensure_user_plane || warn "plano de usuário não ficou OK — rode ./test.sh -v"
 }
 
-# O UE do UERANSIM pode ficar preso em LIMITED-SERVICE se selecionar a célula
-# antes do gNB estar pronto (corrida conhecida). Se não registrar, reinicia uma vez.
-ue_all_registered() {
-  local i
-  for (( i = 0; i < UE_COUNT; i++ )); do
-    kc -n "${K8S_NAMESPACE}" exec "deploy/${UERANSIM_RELEASE}-ues" -c ues -- \
-      nr-cli "imsi-$(ue_imsi "$i")" --exec status 2>/dev/null | grep -q "RM-REGISTERED" || return 1
-  done
-}
-ensure_ues_registered() {
-  local t=0 attempt
-  until kc -n "${K8S_NAMESPACE}" logs "deploy/${UERANSIM_RELEASE}" 2>/dev/null | grep -q "NG Setup procedure is successful"; do
-    (( t += 3 )); if (( t >= 120 )); then warn "gNB sem NG Setup após 120s (rode ./test.sh -v)"; return 0; fi
-    sleep 3
-  done
-  ok "gNB: NG Setup com o AMF concluído"
-  for attempt in 1 2; do
-    t=0
-    while (( t < 60 )); do
-      if ue_all_registered; then ok "${UE_COUNT} UE(s) registrado(s)"; return 0; fi
-      sleep 5; (( t += 5 ))
-    done
-    if (( attempt == 1 )); then
-      info "UE(s) ainda não registrados; reiniciando o pod dos UEs uma vez"
-      kc -n "${K8S_NAMESPACE}" rollout restart "deploy/${UERANSIM_RELEASE}-ues" >/dev/null
-      kc -n "${K8S_NAMESPACE}" rollout status "deploy/${UERANSIM_RELEASE}-ues" --timeout=180s >/dev/null
+# ----------------------------------------------------------------------------
+#  8b. Recuperação automática no boot (AUTO_HEAL)
+#  Depois de um reboot os pods voltam em ordem qualquer e o plano de usuário
+#  pode ficar sem sincronia (UPF/SMF/UE). A unit roda scripts/heal.sh a cada boot.
+#  Ela roda como root, então executa uma CÓPIA em ${INSTALL_DIR} (dono root),
+#  nunca os arquivos editáveis do projeto do usuário.
+# ----------------------------------------------------------------------------
+step_boot_heal() {
+  step "Recuperação automática no boot (AUTO_HEAL=${AUTO_HEAL})"
+  if ! is_true "${AUTO_HEAL}"; then
+    if [[ -f "${HEAL_UNIT_FILE}" ]]; then
+      systemctl disable open5gs-k3s-heal.service >/dev/null 2>&1 || true
+      rm -f "${HEAL_UNIT_FILE}"; systemctl daemon-reload
+      ok "unit open5gs-k3s-heal removida"
+    else
+      info "desligada; depois de um reboot rode ./scripts/heal.sh se o ./test.sh falhar"
     fi
-  done
-  warn "UE(s) não registraram — rode ./test.sh -v para diagnóstico"
+    return 0
+  fi
+  local dst="${INSTALL_DIR}/heal" unit
+  install -d -m 0755 -o root -g root "${dst}" "${dst}/scripts" "${dst}/scripts/lib"
+  install -m 0755 -o root -g root "${PROJECT_DIR}/scripts/heal.sh" "${dst}/scripts/heal.sh"
+  install -m 0644 -o root -g root "${PROJECT_DIR}/scripts/lib/common.sh" "${dst}/scripts/lib/common.sh"
+  install -m 0600 -o root -g root "${CONFIG}" "${dst}/config.env"
+  unit=$(cat <<EOU
+# Gerado por open5GK3S/install.sh
+[Unit]
+Description=open5GK3S: verifica e recupera o plano de usuario apos o boot
+After=k3s.service
+Wants=k3s.service
+
+[Service]
+# exec (não oneshot): não atrasa o boot enquanto espera os pods
+Type=exec
+Environment=CONFIG=${dst}/config.env HOME=/root
+ExecStart=${dst}/scripts/heal.sh --boot
+
+[Install]
+WantedBy=multi-user.target
+EOU
+)
+  if [[ "$(cat "${HEAL_UNIT_FILE}" 2>/dev/null)" != "${unit}" ]]; then
+    printf '%s\n' "${unit}" >"${HEAL_UNIT_FILE}"; systemctl daemon-reload
+  fi
+  systemctl enable open5gs-k3s-heal.service >/dev/null 2>&1
+  ok "unit open5gs-k3s-heal ativa no boot (cópia em ${dst}; log: journalctl -u open5gs-k3s-heal)"
 }
 
 # ----------------------------------------------------------------------------
@@ -390,7 +470,9 @@ final_summary() {
   kc -n "${K8S_NAMESPACE}" get pods -o wide
   echo
   info "Teste:            ./test.sh"
-  if is_true "${WEBUI_ENABLED}"; then info "WebUI:            http://${NODE_IP}:${WEBUI_NODEPORT}  (admin / 1423)"; fi
+  if is_true "${WEBUI_ENABLED}"; then
+    info "WebUI:            http://${NODE_IP:-localhost}:${WEBUI_NODEPORT}  (admin / 1423; vale qualquer IP do host)"
+  fi
   info "kubectl:          kubectl -n ${K8S_NAMESPACE} get pods   (como ${TARGET_USER}, sem sudo)"
   if is_true "${EXPOSE_RAN}"; then
     info "gNB externo:      AMF N2 = ${NODE_IP}:38412/SCTP   UPF N3 = ${NODE_IP}:2152/UDP"
@@ -427,6 +509,7 @@ main() {
     step_modules
     step_sysctl
     step_host_profile
+    step_stable_netif
     step_k3s
     step_helm
   fi
@@ -434,6 +517,7 @@ main() {
   step_deploy_core
   step_subscribers
   step_deploy_ueransim
+  step_boot_heal
   step_user_kubeconfig
   final_summary
 }

@@ -8,13 +8,17 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GENERATED_DIR="${PROJECT_DIR}/helm/generated"   # values Helm gerados do config.env
 LOG_DIR="${PROJECT_DIR}/logs"
 K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"     # 0600, só root
-USER_KUBECONFIG="${HOME}/.kube/open5gs-k3s.yaml" # cópia do install.sh para o usuário do sudo
+# HOME pode faltar (units do systemd): cai para o home do usuário atual
+USER_KUBECONFIG="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}/.kube/open5gs-k3s.yaml" # cópia do install.sh para o usuário do sudo
 # Usa o kubeconfig do k3s se legível (root); senão a cópia do usuário
 if [[ -r "${K3S_KUBECONFIG}" ]]; then KUBECONFIG_PATH="${K3S_KUBECONFIG}"; else KUBECONFIG_PATH="${USER_KUBECONFIG}"; fi
 K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml"
 SYSCTL_FILE="/etc/sysctl.d/90-open5gs-k3s.conf"
 MODULES_FILE="/etc/modules-load.d/open5gs-k3s.conf"
 NM_CONF_FILE="/etc/NetworkManager/conf.d/90-open5gs-k3s-unmanaged.conf"
+NETIF_UNIT_FILE="/etc/systemd/system/open5gs-k3s-netif.service"   # interface estável do nó
+K3S_DROPIN_FILE="/etc/systemd/system/k3s.service.d/10-open5gs-k3s-netif.conf"
+HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"      # recuperação no boot
 HASH_ANNOTATION="open5gs-k3s/config-hash"
 
 # ----------------------------------------------------------------------------
@@ -50,6 +54,7 @@ load_config() {
 
   # Padrões para variáveis ausentes (config antigo/mínimo)
   : "${ENV_PROFILE:=auto}" "${NODE_IFACE:=}" "${NODE_IP:=}"
+  : "${AUTO_HEAL:=true}" "${NODE_IP_MODE:=stable}" "${STABLE_IFACE:=k3s0}" "${STABLE_IP:=10.254.254.1}"
   : "${INSTALL_DIR:=/opt/open5gs-k3s}" "${KUBECONFIG_USER:=}" "${SHELL_EXTRAS:=true}"
   : "${AUTO_INSTALL_MODULES_EXTRA:=true}" "${CONFIGURE_UFW:=true}" "${CONFIGURE_FIREWALLD:=true}"
   : "${K3S_VERSION:?defina K3S_VERSION}" "${HELM_VERSION:?defina HELM_VERSION}"
@@ -201,6 +206,11 @@ validate_config() {
     bad "MONGODB_IMAGE_REPOSITORY e MONGODB_IMAGE_TAG devem ser definidos juntos"
   fi
   if [[ -n "${NODE_IP}" ]] && ! valid_ipv4 "${NODE_IP}"; then bad "NODE_IP inválido"; fi
+  [[ "${NODE_IP_MODE}" =~ ^(stable|iface)$ ]] || bad "NODE_IP_MODE deve ser stable|iface"
+  if [[ "${NODE_IP_MODE}" == stable ]]; then
+    valid_ipv4 "${STABLE_IP}" || bad "STABLE_IP inválido"
+    [[ "${STABLE_IFACE}" =~ ^[a-zA-Z0-9_-]{1,15}$ ]] || bad "STABLE_IFACE inválido (até 15 caracteres)"
+  fi
 
   (( errors == 0 )) || die "${errors} erro(s) no ${CONFIG}"
   unset -f bad
@@ -228,16 +238,32 @@ detect_env() {
     DETECTED_PROFILE=${ENV_PROFILE}
   fi
 
+  # Interface/IP físicos do host (rota default). Podem mudar (DHCP, Wi-Fi x cabo).
+  local need_phys=true
+  if [[ "${NODE_IP_MODE}" == stable ]] && ! is_true "${EXPOSE_RAN}"; then need_phys=false; fi
   if [[ -z "${NODE_IFACE}" ]]; then
     NODE_IFACE=$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
-    [[ -n "${NODE_IFACE}" ]] || die "Não foi possível detectar a interface default; defina NODE_IFACE no config"
   fi
-  ip link show "${NODE_IFACE}" &>/dev/null || die "Interface NODE_IFACE='${NODE_IFACE}' não existe"
+  if [[ -n "${NODE_IFACE}" ]] && ip link show "${NODE_IFACE}" &>/dev/null; then
+    if [[ -z "${NODE_IP}" ]]; then
+      NODE_IP=$(ip -4 -o addr show dev "${NODE_IFACE}" scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
+    elif ! ip -4 -o addr show dev "${NODE_IFACE}" | grep -q " ${NODE_IP}/"; then
+      warn "NODE_IP ${NODE_IP} não está configurado em ${NODE_IFACE}"
+    fi
+  else
+    NODE_IFACE=""
+  fi
   if [[ -z "${NODE_IP}" ]]; then
-    NODE_IP=$(ip -4 -o addr show dev "${NODE_IFACE}" scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
-    [[ -n "${NODE_IP}" ]] || die "Interface ${NODE_IFACE} sem IPv4; defina NODE_IP no config"
-  elif ! ip -4 -o addr show dev "${NODE_IFACE}" | grep -q " ${NODE_IP}/"; then
-    warn "NODE_IP ${NODE_IP} não está configurado em ${NODE_IFACE}"
+    ${need_phys} && die "Sem interface/IP de rede detectável; defina NODE_IFACE/NODE_IP no config"
+    warn "host sem rede agora (sem rota default) — o cluster funciona mesmo assim (NODE_IP_MODE=stable)"
+  fi
+
+  # Endereço que o k3s usa como nó. Em 'stable' é uma interface dummy própria,
+  # independente de DHCP/troca de rede; em 'iface' é a interface física.
+  if [[ "${NODE_IP_MODE}" == stable ]]; then
+    K3S_NODE_IFACE="${STABLE_IFACE}"; K3S_NODE_IP="${STABLE_IP}"
+  else
+    K3S_NODE_IFACE="${NODE_IFACE}"; K3S_NODE_IP="${NODE_IP}"
   fi
 
   MEM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
@@ -246,7 +272,8 @@ detect_env() {
 
 print_env_summary() {
   info "Perfil do host     : ${C_B}${DETECTED_PROFILE}${C_0} (ENV_PROFILE=${ENV_PROFILE})"
-  info "Interface / IP     : ${NODE_IFACE} / ${NODE_IP}"
+  info "Host (físico)      : ${NODE_IFACE:-sem rede} / ${NODE_IP:-sem IP}"
+  info "Nó do k3s          : ${K3S_NODE_IFACE} / ${K3S_NODE_IP} (NODE_IP_MODE=${NODE_IP_MODE})"
   info "CPU / RAM          : ${CPUS} vCPU / ${MEM_MB} MiB (AVX: ${HAS_AVX})"
   info "NetworkManager     : ${HAS_NM}   UFW ativo: ${UFW_ACTIVE}   firewalld: ${HAS_FIREWALLD}   Docker: ${HAS_DOCKER}"
   info "PLMN / TAC         : ${MCC}-${MNC} / ${TAC}"
@@ -610,4 +637,58 @@ remove_user_bashrc() {
   # apaga o bloco e a linha em branco que o precede
   sed -i "/^${BASHRC_BEGIN//\//\\/}\$/,/^${BASHRC_END//\//\\/}\$/d" "${rc}"
   sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "${rc}"
+}
+
+# ----------------------------------------------------------------------------
+#  Recuperação do plano de usuário (install.sh, scripts/heal.sh, boot)
+#  Depois de reboot/restart do k3s os pods voltam em ordem qualquer e o SMF pode
+#  ficar com uma associação PFCP que o UPF não reconhece ("Cannot find
+#  PFCP-Node"), ou o gNB/UE ficam presos. Sintoma: UE registra mas não pinga.
+# ----------------------------------------------------------------------------
+_ues_dep()  { echo "deploy/${UERANSIM_RELEASE}-ues"; }
+_gnb_has_ngsetup() {
+  kc -n "${K8S_NAMESPACE}" logs "deploy/${UERANSIM_RELEASE}" 2>/dev/null | grep -q "NG Setup procedure is successful"
+}
+# Todos os UEs registrados e pingando o gateway do UPF pela uesimtunN
+ue_plane_ok() {
+  local i imsi gw; parse_slice "${SLICES[0]}"; gw="${S_GW}"
+  for (( i = 0; i < UE_COUNT; i++ )); do
+    imsi=$(ue_imsi "$i")
+    kc -n "${K8S_NAMESPACE}" exec "$(_ues_dep)" -c ues -- nr-cli "imsi-${imsi}" --exec status 2>/dev/null \
+      | grep -q "RM-REGISTERED" || return 1
+    kc -n "${K8S_NAMESPACE}" exec "$(_ues_dep)" -c ues -- ping -I "uesimtun${i}" -c 2 -W 2 -q "${gw}" &>/dev/null || return 1
+  done
+}
+_wait_plane() {  # $1 = segundos
+  local t=0
+  while (( t < $1 )); do ue_plane_ok && return 0; sleep 5; (( t += 5 )); done
+  return 1
+}
+_restart() {  # deployments em sequência, cada um esperando ficar pronto
+  local d
+  for d in "$@"; do
+    kc -n "${K8S_NAMESPACE}" get "deploy/${d}" &>/dev/null || continue
+    kc -n "${K8S_NAMESPACE}" rollout restart "deploy/${d}" >/dev/null
+    kc -n "${K8S_NAMESPACE}" rollout status "deploy/${d}" --timeout=300s >/dev/null || warn "deploy/${d} demorou a ficar pronto"
+  done
+}
+# Garante UEs registrados com plano de usuário funcionando. Escalonado:
+# espera -> reinicia só os UEs (corrida do UERANSIM) -> reinicia UPF, SMF, gNB e UEs
+# nessa ordem (refaz a associação PFCP e o NG Setup). Retorna 1 se não resolver.
+ensure_user_plane() {
+  kc -n "${K8S_NAMESPACE}" get "$(_ues_dep)" &>/dev/null || { info "UERANSIM não implantado; nada a verificar"; return 0; }
+  local t=0
+  until _gnb_has_ngsetup; do (( t += 3 )); (( t < 120 )) || break; sleep 3; done
+  if _gnb_has_ngsetup && _wait_plane 60; then ok "${UE_COUNT} UE(s) registrado(s) e plano de usuário OK"; return 0; fi
+
+  info "UE(s) sem registro/ping; reiniciando o pod dos UEs"
+  _restart "${UERANSIM_RELEASE}-ues"
+  if _wait_plane 60; then ok "plano de usuário OK após reiniciar os UEs"; return 0; fi
+
+  info "ainda falhando; reiniciando UPF -> SMF -> gNB -> UEs (refaz PFCP/N4 e NG Setup)"
+  _restart "${OPEN5GS_RELEASE}-upf" "${OPEN5GS_RELEASE}-smf"
+  sleep 5
+  _restart "${UERANSIM_RELEASE}" "${UERANSIM_RELEASE}-ues"
+  if _wait_plane 120; then ok "plano de usuário OK após reiniciar UPF/SMF/gNB/UEs"; return 0; fi
+  return 1
 }

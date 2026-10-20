@@ -50,6 +50,7 @@ finish() {
   fi
   dump_logs
   echo "${C_RED}${C_B}RESULTADO: ${PASS} OK, ${FAIL} falha(s)${C_0}  (use -v para ver logs)"
+  echo "    Depois de reboot/restart do k3s, tente: ./scripts/heal.sh"
   exit 1
 }
 
