@@ -250,7 +250,7 @@ step_k3s() {
   if command -v k3s &>/dev/null; then installed=$(k3s --version 2>/dev/null | awk 'NR==1{print $3}'); fi
   if [[ "${installed}" != "${K3S_VERSION}" ]] || [[ "$(cat "${sig_file}" 2>/dev/null)" != "${sig}" ]]; then
     info "instalando k3s ${K3S_VERSION} (atual: ${installed:-nenhum})"
-    curl -sfL https://get.k3s.io -o "${INSTALL_DIR}/state/get-k3s.sh"
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 15 https://get.k3s.io -o "${INSTALL_DIR}/state/get-k3s.sh"
     INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="server ${K3S_EXTRA_ARGS[*]}" \
       sh "${INSTALL_DIR}/state/get-k3s.sh" >/dev/null
     echo "${sig}" >"${sig_file}"
@@ -304,8 +304,8 @@ step_helm() {
       x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;;
       *) die "arquitetura $(uname -m) não suportada pelo download do helm" ;;
     esac
-    curl -sfL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" -o "${tmp}/helm.tgz"
-    curl -sfL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz.sha256sum" -o "${tmp}/helm.sha"
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 15 "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" -o "${tmp}/helm.tgz"
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 15 "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz.sha256sum" -o "${tmp}/helm.sha"
     (cd "${tmp}" && echo "$(awk '{print $1}' helm.sha)  helm.tgz" | sha256sum -c --quiet) || die "checksum do helm inválido"
     tar xzf "${tmp}/helm.tgz" -C "${tmp}"
     install -D -m 0755 "${tmp}/linux-${arch}/helm" "${INSTALL_DIR}/bin/helm"

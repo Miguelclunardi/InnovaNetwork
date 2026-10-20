@@ -229,7 +229,9 @@ detect_env() {
   if grep -qw avx /proc/cpuinfo; then HAS_AVX=true; fi
 
   if [[ "${ENV_PROFILE}" == "auto" ]]; then
-    if [[ "$(systemctl get-default 2>/dev/null)" == "graphical.target" ]] || ${HAS_NM}; then
+    # graphical.target sozinho não basta: servidores costumam vir com ele como padrão sem
+    # nenhuma interface gráfica. Desktop = NetworkManager ativo ou gerenciador de login instalado.
+    if ${HAS_NM} || [[ -e /etc/systemd/system/display-manager.service ]]; then
       DETECTED_PROFILE=desktop
     else
       DETECTED_PROFILE=server

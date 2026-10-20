@@ -427,7 +427,7 @@ O mesmo `config.env` serve aos dois; as diferenças de host são detectadas (`EN
 
 | Aspecto | Desktop | Server | Tratamento |
 |---------|---------|--------|------------|
-| Perfil | `graphical.target`, NetworkManager | `multi-user.target`, netplan + networkd | `auto` ou force `desktop`/`server` |
+| Perfil | NetworkManager ativo ou gerenciador de login (gdm etc.) | sem os dois (netplan + networkd), mesmo com `graphical.target` | `auto` ou force `desktop`/`server` |
 | NetworkManager | ativo — tentaria gerenciar `cni0`/`flannel.1`/`veth*` | normalmente ausente | arquivo de `unmanaged-devices` se o NM estiver ativo |
 | Interface | `enp*`, `wlp*` (Wi-Fi) | `ens*`, `eno*`, bonds, VLANs | rota default ou `NODE_IFACE`/`NODE_IP` |
 | IP | DHCP pode mudar, Wi‑Fi ou cabo | normalmente fixo | `NODE_IP_MODE=stable`: o nó do k3s fica em `k3s0` (10.254.254.1) e a troca de IP não afeta o cluster |

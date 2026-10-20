@@ -26,13 +26,16 @@ Documentação do projeto: **português**.
 
 1. `sudo ./install.sh` (consolidar pelo caminho oficial **e** migrar o nó para `k3s0`; conferir `logs/install.log`) e `./test.sh`.
 2. Manter o GitHub em dia: commitar e `git push` a cada mudança (`gh` em `~/.local/bin`, conta `Miguelclunardi`).
-3. Levar ao **Ubuntu Server** (plano combinado em 2026-10-19):
-   - no servidor, usuário Linux próprio; clonar com **deploy key só leitura** (sem login do GitHub no servidor):
-     `Host github-open5gk3s` em `~/.ssh/config` → `git clone git@github-open5gk3s:Miguelclunardi/open5GK3S.git`;
-   - `sudo ./install.sh` + `./test.sh`; checar `NODE_IFACE` se houver várias placas, AVX, SCTP (`linux-modules-extra`);
-   - desenvolvimento: ferramentas de IA **ficam no desktop** e operam o servidor por SSH (`Host server5g`, chave
-     `~/.ssh/server5g`), fluxo editar local → `git push` → `ssh server5g 'cd ~/open5GK3S && git pull --ff-only && ./test.sh'`;
-     comandos com sudo no servidor são rodados pelo usuário.
+3. Levar ao **Ubuntu Server** `torre2` (em andamento desde 2026-10-20):
+   - acesso do desktop por SSH com chave: `Host torre2` em `~/.ssh/config` (usuário `torre2`; IP por DHCP,
+     hoje 191.4.205.114 — atualizar `HostName` quando mudar);
+   - repositório clonado em `~/open5GK3S` com **deploy key só leitura** (`~/.ssh/github-open5gk3s`,
+     `Host github-open5gk3s`; título "torre2 (leitura)" no GitHub), sem login do GitHub no servidor;
+   - o servidor tinha um k3s manual (v1.36.5, kubeconfig 644) com uma tentativa antiga do Open5GS quebrada:
+     removido com `k3s-uninstall.sh` (autorizado pelo usuário) antes do `sudo ./install.sh`;
+   - desenvolvimento: ferramentas de IA **ficam no desktop** e operam o servidor por SSH; fluxo editar local →
+     `git push` → `ssh torre2 'cd ~/open5GK3S && git pull --ff-only && ./test.sh'`;
+     comandos com sudo no servidor são rodados pelo usuário (`ssh -t torre2 'sudo …'`).
 4. Dashboard de acompanhamento (pedido do usuário, adiado): pods/NFs, UEs registrados, sessões, tráfego.
 5. Fase RAN real: **OCUDU** (CU/DU) + **LiteOn** (O-RU) — validar `EXPOSE_RAN` com SCTP real ou migrar N2/N3 para
    Multus/macvlan/SR-IOV; alinhar PLMN/TAC/S-NSSAI; cadastrar SIMs em `SUBSCRIBERS`; preparar host do DU (PTP, fronthaul).
@@ -65,7 +68,7 @@ Documentação do projeto: **português**.
 8. **Assinantes** via `open5gs-dbctl` remove+add (idempotente); `populate.initCommands` vazio.
 9. **MongoDB** Bitnami `latest` (8.x) ⇒ CPU com AVX; `MONGODB_IMAGE_*` para alternativa.
 10. **kubeconfig explícito** nos scripts (`kc`/`hm`): `/etc/rancher/k3s/k3s.yaml` se legível (root), senão `~/.kube/open5gs-k3s.yaml`.
-11. **Desktop × Server** (`ENV_PROFILE=auto`): NM unmanaged, `linux-modules-extra`, UFW, firewalld, aviso Docker, interface pela rota default, Helm amd64/arm64.
+11. **Desktop × Server** (`ENV_PROFILE=auto`; desktop = NetworkManager ativo ou `display-manager.service` — `graphical.target` sozinho não conta, o torre2 vem assim sem GUI): NM unmanaged, `linux-modules-extra`, UFW, firewalld, aviso Docker, interface pela rota default, Helm amd64/arm64.
 12. **PLMN 001-01, TAC 1** (definido pelo usuário).
 13. **UERANSIM**: `fullnameOverride=UERANSIM_RELEASE` ⇒ `ueransim` (gNB) e `ueransim-ues`; `amf.hostname=<release>-amf-ngap`.
 14. **Reaplicar config**: anotação `open5gs-k3s/config-hash` nos pods (charts sem checksum de ConfigMap); hash do UERANSIM inclui o do core.
