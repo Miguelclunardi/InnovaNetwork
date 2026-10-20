@@ -26,7 +26,7 @@ Documentação do projeto: **português**.
 
 1. `sudo ./install.sh` (consolidar pelo caminho oficial **e** migrar o nó para `k3s0`; conferir `logs/install.log`) e `./test.sh`.
 2. Manter o GitHub em dia: commitar e `git push` a cada mudança (`gh` em `~/.local/bin`, conta `Miguelclunardi`).
-3. Levar ao **Ubuntu Server** `torre2` (em andamento desde 2026-10-20):
+3. **Ubuntu Server `torre2`: migrado e validado em 2026-10-20** (`./test.sh` 7/7, ping 8.8.8.8 a ~19 ms; units netif e heal habilitadas):
    - acesso do desktop por SSH com chave: `Host torre2` em `~/.ssh/config` (usuário `torre2`; IP por DHCP,
      hoje 191.4.205.114 — atualizar `HostName` quando mudar);
    - repositório clonado em `~/open5GK3S` com **deploy key só leitura** (`~/.ssh/github-open5gk3s`,
