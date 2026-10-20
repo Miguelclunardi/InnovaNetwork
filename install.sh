@@ -252,7 +252,7 @@ step_k3s() {
     info "instalando k3s ${K3S_VERSION} (atual: ${installed:-nenhum})"
     curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 15 https://get.k3s.io -o "${INSTALL_DIR}/state/get-k3s.sh"
     INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="server ${K3S_EXTRA_ARGS[*]}" \
-      sh "${INSTALL_DIR}/state/get-k3s.sh" >/dev/null
+      retry sh "${INSTALL_DIR}/state/get-k3s.sh" >/dev/null
     echo "${sig}" >"${sig_file}"
     restart=false
   elif ${restart}; then
@@ -319,25 +319,33 @@ step_helm() {
 # ----------------------------------------------------------------------------
 #  7. Charts da Gradiant (git, ref fixa) + dependências
 # ----------------------------------------------------------------------------
+_clone_charts() {
+  rm -rf "${CHARTS_DIR}"   # clone interrompido deixa a pasta pela metade
+  git clone -q --filter=blob:none "${GRADIANT_CHARTS_REPO}" "${CHARTS_DIR}"
+}
+_fetch_charts_ref() {
+  git -C "${CHARTS_DIR}" fetch -q origin "${GRADIANT_CHARTS_REF}" || git -C "${CHARTS_DIR}" fetch -q --tags origin
+}
+
 step_charts() {
   step "Charts Gradiant @ ${GRADIANT_CHARTS_REF:0:12}"
   if [[ ! -d "${CHARTS_DIR}/.git" ]]; then
-    git clone -q --filter=blob:none "${GRADIANT_CHARTS_REPO}" "${CHARTS_DIR}"
+    retry _clone_charts
   fi
   if ! git -C "${CHARTS_DIR}" cat-file -e "${GRADIANT_CHARTS_REF}^{commit}" 2>/dev/null; then
-    git -C "${CHARTS_DIR}" fetch -q origin "${GRADIANT_CHARTS_REF}" || git -C "${CHARTS_DIR}" fetch -q --tags origin
+    retry _fetch_charts_ref
   fi
   local head; head=$(git -C "${CHARTS_DIR}" rev-parse HEAD)
   if [[ "${head}" != "$(git -C "${CHARTS_DIR}" rev-parse "${GRADIANT_CHARTS_REF}^{commit}")" ]]; then
     git -C "${CHARTS_DIR}" checkout -q --force "${GRADIANT_CHARTS_REF}"
     rm -f "${CHARTS_DIR}"/charts/*/.deps-ok
   fi
-  "${HELM_BIN}" repo add bitnami https://charts.bitnami.com/bitnami --force-update >/dev/null
+  retry "${HELM_BIN}" repo add bitnami https://charts.bitnami.com/bitnami --force-update >/dev/null
   local c
   for c in open5gs ueransim-gnb; do
     if [[ ! -f "${CHARTS_DIR}/charts/${c}/.deps-ok" ]]; then
       info "helm dependency build ${c}"
-      "${HELM_BIN}" dependency build "${CHARTS_DIR}/charts/${c}" >/dev/null
+      retry "${HELM_BIN}" dependency build "${CHARTS_DIR}/charts/${c}" >/dev/null
       touch "${CHARTS_DIR}/charts/${c}/.deps-ok"
     fi
   done

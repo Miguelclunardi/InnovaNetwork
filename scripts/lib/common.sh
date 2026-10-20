@@ -38,6 +38,17 @@ warn() { echo "    ${C_YEL}[aviso]${C_0} $*" >&2; }
 err()  { echo "    ${C_RED}[erro]${C_0} $*" >&2; }
 die()  { err "$*"; exit 1; }
 
+# Repete um comando que depende da internet (DNS/rede podem falhar por alguns segundos).
+# Uso: retry <comando> [args...]   — até 5 tentativas, espera 5, 10, 15, 20 s entre elas.
+retry() {
+  local n=1 max=5
+  until "$@"; do
+    if (( n >= max )); then err "falhou ${max} vezes: $*"; return 1; fi
+    warn "falhou (tentativa ${n}/${max}): $* — nova tentativa em $((n * 5))s"
+    sleep $((n * 5)); n=$((n + 1))
+  done
+}
+
 require_root() {
   if [[ ${EUID} -ne 0 ]]; then
     # Reexecuta com sudo preservando CONFIG, se definido
