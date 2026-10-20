@@ -11,7 +11,9 @@ K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"     # 0600, só root
 # HOME pode faltar (units do systemd): cai para o home do usuário atual
 USER_KUBECONFIG="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}/.kube/open5gs-k3s.yaml" # cópia do install.sh para o usuário do sudo
 # Usa o kubeconfig do k3s se legível (root); senão a cópia do usuário
-if [[ -r "${K3S_KUBECONFIG}" ]]; then KUBECONFIG_PATH="${K3S_KUBECONFIG}"; else KUBECONFIG_PATH="${USER_KUBECONFIG}"; fi
+# Root usa sempre a credencial do k3s, mesmo que ela ainda não exista (instalação do zero:
+# o k3s cria o arquivo depois que a biblioteca já foi carregada).
+if [[ ${EUID} -eq 0 || -r "${K3S_KUBECONFIG}" ]]; then KUBECONFIG_PATH="${K3S_KUBECONFIG}"; else KUBECONFIG_PATH="${USER_KUBECONFIG}"; fi
 K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml"
 SYSCTL_FILE="/etc/sysctl.d/90-open5gs-k3s.conf"
 MODULES_FILE="/etc/modules-load.d/open5gs-k3s.conf"

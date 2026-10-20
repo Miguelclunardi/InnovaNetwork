@@ -67,7 +67,7 @@ Documentação do projeto: **português**.
 7. **TAC em decimal** (o template do gNB injeta cru).
 8. **Assinantes** via `open5gs-dbctl` remove+add (idempotente); `populate.initCommands` vazio.
 9. **MongoDB** Bitnami `latest` (8.x) ⇒ CPU com AVX; `MONGODB_IMAGE_*` para alternativa.
-10. **kubeconfig explícito** nos scripts (`kc`/`hm`): `/etc/rancher/k3s/k3s.yaml` se legível (root), senão `~/.kube/open5gs-k3s.yaml`.
+10. **kubeconfig explícito** nos scripts (`kc`/`hm`): root usa sempre `/etc/rancher/k3s/k3s.yaml` (mesmo antes de existir — numa instalação do zero ele só aparece depois do k3s subir), usuário usa `~/.kube/open5gs-k3s.yaml`.
 11. **Desktop × Server** (`ENV_PROFILE=auto`; desktop = NetworkManager ativo ou `display-manager.service` — `graphical.target` sozinho não conta, o torre2 vem assim sem GUI): NM unmanaged, `linux-modules-extra`, UFW, firewalld, aviso Docker, interface pela rota default, Helm amd64/arm64.
 12. **PLMN 001-01, TAC 1** (definido pelo usuário).
 13. **UERANSIM**: `fullnameOverride=UERANSIM_RELEASE` ⇒ `ueransim` (gNB) e `ueransim-ues`; `amf.hostname=<release>-amf-ngap`.
