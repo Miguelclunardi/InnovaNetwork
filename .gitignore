@@ -1,4 +1,0 @@
-# Values gerados a partir do config.env
-helm/generated/
-# Logs de execução
-logs/
