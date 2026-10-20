@@ -29,13 +29,17 @@ Documentação do projeto: **português**.
 3. **Ubuntu Server `torre2`: migrado e validado em 2026-10-20** (`./test.sh` 7/7, ping 8.8.8.8 a ~19 ms; units netif e heal habilitadas):
    - acesso do desktop por SSH com chave: `Host torre2` em `~/.ssh/config` (usuário `torre2`; IP por DHCP,
      hoje 191.4.205.114 — atualizar `HostName` quando mudar);
-   - repositório clonado em `~/open5GK3S` com **deploy key só leitura** (`~/.ssh/github-open5gk3s`,
-     `Host github-open5gk3s`; título "torre2 (leitura)" no GitHub), sem login do GitHub no servidor;
+   - **o servidor é o ambiente principal** (decisão do usuário, 2026-10-20): edita-se direto em `torre2:~/open5GK3S`,
+     aplica-se com `sudo ./install.sh`, testa-se com `./test.sh` e **o git vai do servidor para o GitHub**
+     (`git commit` + `git push` no servidor). O clone do desktop vira cópia: `git pull` antes de mexer nele;
+   - push pelo servidor com **deploy key de leitura e escrita** só deste repositório (`~/.ssh/github-open5gk3s`,
+     `Host github-open5gk3s`; título "torre2 (leitura e escrita)" no GitHub), sem login do GitHub no servidor;
+     identidade do git configurada só no clone (`git config user.name/user.email`). Risco aceito: quem usar a conta
+     `torre2` pode fazer push neste repositório;
    - o servidor tinha um k3s manual (v1.36.5, kubeconfig 644) com uma tentativa antiga do Open5GS quebrada:
      removido com `k3s-uninstall.sh` (autorizado pelo usuário) antes do `sudo ./install.sh`;
-   - desenvolvimento: ferramentas de IA **ficam no desktop** e operam o servidor por SSH; fluxo editar local →
-     `git push` → `ssh torre2 'cd ~/open5GK3S && git pull --ff-only && ./test.sh'`;
-     comandos com sudo no servidor são rodados pelo usuário (`ssh -t torre2 'sudo …'`).
+   - o assistente de IA fica no desktop e opera o servidor por SSH (`ssh torre2`); comandos com sudo no servidor
+     são rodados pelo usuário (`ssh -t torre2 'sudo …'`).
 4. Dashboard de acompanhamento (pedido do usuário, adiado): pods/NFs, UEs registrados, sessões, tráfego.
 5. Fase RAN real: **OCUDU** (CU/DU) + **LiteOn** (O-RU) — validar `EXPOSE_RAN` com SCTP real ou migrar N2/N3 para
    Multus/macvlan/SR-IOV; alinhar PLMN/TAC/S-NSSAI; cadastrar SIMs em `SUBSCRIBERS`; preparar host do DU (PTP, fronthaul).
