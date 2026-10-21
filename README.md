@@ -233,7 +233,8 @@ assinantes, AMBR, QoS (5QI/ARP), IP fixo e múltiplas slices por assinante.
 
 `http://<NODE_IP>:30998` (**v1.0**) — logs de todos os pods e do gNB real, métricas de rádio (vazão DL/UL, BLER,
 MCS, CQI, SNR por UE, com cada UE identificado por nome/IMSI/IP), UEs, sessões e eventos do core, CPU/temperatura
-das máquinas e edição do `config.env` pela web (aba Configuração, senha de administrador). Só o painel: `sudo ./install.sh --dashboard-only` (não
+das máquinas, edição do `config.env` pela web (aba Configuração, senha de administrador) e **histórico persistente
+com experimentos** para comparar setups (`DASHBOARD_PERSIST=true`, aba Histórico). Só o painel: `sudo ./install.sh --dashboard-only` (não
 toca no core). Detalhes em **[docs/dashboard.md](docs/dashboard.md)**.
 
 ### 7.5 Assinantes

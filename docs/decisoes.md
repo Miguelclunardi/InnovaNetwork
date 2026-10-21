@@ -131,6 +131,10 @@ Documentação do projeto: **português**.
     - **aba Configuração**: edita o `config.env` pela web com senha de administrador própria, diff, validação do
       install, backup/restauração. Salvar não aplica: o painel mostra o `sudo ./install.sh ...` necessário (o
       pod não ganha root). Pod com o projeto só leitura e só o `config.env` gravável (grupo do dono);
+    - **histórico persistente** (`DASHBOARD_PERSIST`): SQLite no host (`/var/lib/open5gs-k3s/dashboard`), todas as
+      séries em blocos de 60 s comprimidos, eventos do core, **experimentos** (marcadores com nome/notas/setup) e
+      comparação lado a lado. Escolhido SQLite da biblioteca padrão em vez de InfluxDB/Prometheus: nada novo para
+      instalar, um arquivo só, fácil de copiar;
     - **energia** do innovaserver pelo medidor MiEnergy: o painel lê `http://IP/Data` direto (sem InfluxDB/Grafana do
       projeto original). Pendente: o medidor ficar alcançável a partir do torre2 (`ENERGY_METER_URL`).
 

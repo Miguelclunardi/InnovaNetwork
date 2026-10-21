@@ -73,6 +73,8 @@ if [[ -f "${HOSTS_UNIT_FILE}" ]]; then
 fi
 rm -f "${INSTALL_DIR}/state/dashboard-ingest-token" "${INSTALL_DIR}/state/dashboard-admin-password"
 rm -rf "${INSTALL_DIR}/state/config-backups"
+# O histórico de métricas do painel NÃO é apagado (comparações futuras). Para apagar: sudo rm -rf /var/lib/open5gs-k3s/dashboard
+if [[ -d /var/lib/open5gs-k3s/dashboard ]]; then echo "    histórico do painel mantido em /var/lib/open5gs-k3s/dashboard"; fi
 
 # 2) k3s --------------------------------------------------------------------------
 if ${REMOVE_K3S}; then

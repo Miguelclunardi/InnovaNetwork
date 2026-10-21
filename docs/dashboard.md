@@ -8,6 +8,7 @@ Página web que roda **no próprio cluster do core** (máquina do core) e junta 
 | **Rádio (gNB)** | UEs identificados por **nome, IMSI, IP e tipo** (SIM real / UERANSIM), não só RNTI; RNTIs parados há mais de 2 min ficam escondidos (botão "Mostrar antigos"); vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
 | **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
+| **Histórico** | métricas **persistentes** (rádio 1 s, core, máquinas, energia, eventos) de qualquer período; **experimentos** (botão "● Gravar experimento" no topo) com nome, notas e retrato do setup; **comparação** lado a lado de 2+ experimentos (KPIs com o melhor em destaque + gráficos sobrepostos); exportação CSV | SQLite em `/var/lib/open5gs-k3s/dashboard` (`DASHBOARD_PERSIST=true`) |
 | **Configuração** | edita o `config.env` (senha de administrador): campos por seção com a explicação do próprio arquivo, diff antes de salvar, validação do install, backup e restauração, e o comando para aplicar | `config.env` da máquina do core |
 | **Core** | sempre: gNBs, UEs registrados, sessões, tráfego dos UEs no UPF por DNN (N6) e no link com o gNB (N3), CPU/memória/threads de cada NF, erros/avisos por NF, interfaces do UPF. Opcional: métricas Prometheus dos NFs | `/proc` do host (processos `open5gs-*d` e interfaces do UPF) + logs; Prometheus só com `OPEN5GS_METRICS=true` |
 
@@ -193,6 +194,43 @@ painel iniciou, gráficos e a tabela com todas as grandezas.
   3. Cabo de uma porta LAN do roteador numa porta livre do torre2 (`enp5s0f0`), com DHCP **sem rota padrão**
      (`dhcp4-overrides: {use-routes: false}` no netplan) — senão a internet do core passaria pelo Wi‑Fi.
 
+## Histórico persistente e experimentos (aba Histórico)
+
+`DASHBOARD_PERSIST=true` (padrão `false`) + `sudo ./install.sh --dashboard-only`. Sem isso, o painel guarda só os
+últimos `DASHBOARD_HISTORY_SECONDS` em memória (some a cada reinício do pod).
+
+**O que é gravado** (sempre, enquanto ligado — não precisa apertar nada):
+
+| Série | Conteúdo | Resolução |
+|---|---|---|
+| `cell:<pci>` | vazão DL/UL, PRBs, UEs, latência e falhas do escalonador | 1 s |
+| `ue:<pci>:<rnti>` | todos os campos do UE (vazão, MCS, CQI, RI, BLER, SNR, RSRP, buffers, TA, PHR…) + **IMSI/nome/IP** | 1 s |
+| `du` | latência e CPU do MAC | 1 s |
+| `host:<máquina>` | CPU, memória, temperatura, carga, rede por interface | 2 s |
+| `core:cpu`, `core:upf` | CPU de cada NF; tráfego do UPF por interface (N6 por DNN, N3) | 2 s |
+| `prom:<nf>` | métricas Prometheus (só com `OPEN5GS_METRICS=true`) | ~5 s |
+| `energy` | medidor de energia (se ligado) | 2 s |
+| eventos | avisos/erros/sessões do core (AMF/SMF/UPF) | cada evento |
+
+Formato: SQLite (`/var/lib/open5gs-k3s/dashboard/history.db`, fora do projeto e do `INSTALL_DIR`), blocos de 60 s
+comprimidos. Ordem de grandeza: **~150–400 MB por dia** com poucos UEs (mais UEs = mais dados). Retenção:
+`DASHBOARD_PERSIST_DAYS` (padrão 365; 0 = nunca apaga) e teto `DASHBOARD_PERSIST_MAX_GB` (padrão 50; passando disso
+apaga os blocos mais antigos). O pod grava o buffer ao ser parado (SIGTERM); numa queda brusca perde até 60 s.
+O `uninstall.sh` **não** apaga o histórico.
+
+**Experimentos** — o jeito de comparar setups:
+1. Prepare o setup (ex.: mudou a largura de banda do gNB) e clique **● Gravar experimento** (topo, ao lado do tema).
+   Dê um nome e notas (o que mudou, posição do UE, comando de teste). O painel guarda junto: UEs no rádio
+   (IMSI/nome), versão, gNB e o `config.env` do momento (chaves de 32 hex mascaradas).
+2. Faça o teste (ex.: `iperf3 -u -b 800M` por 2 min). O botão fica vermelho com o cronômetro.
+3. Clique de novo para **encerrar**.
+4. Aba **Histórico**: marque 2 ou mais experimentos → **Comparar**: tabela com médias, p95 e picos de DL/UL da
+   célula, BLER (todos os blocos do período), MCS, CQI, RI, SNR, latência do escalonador, CPU e temperatura de cada
+   máquina — o melhor de cada linha em verde — e gráficos sobrepostos com eixo "tempo desde o início".
+
+Também dá para ver **qualquer período** (1 h, 24 h, 7 dias, personalizado) e exportar CSV (`timestamp, série, IMSI,
+campo, valor`). Apagar um experimento (só o marcador; os dados continuam) exige a senha de administrador.
+
 ## Aba Configuração (editar o `config.env`)
 
 Liga com `DASHBOARD_CONFIG_EDIT=true` (padrão no config deste repositório) + `sudo ./install.sh --dashboard-only`.
@@ -230,6 +268,10 @@ Liga com `DASHBOARD_CONFIG_EDIT=true` (padrão no config deste repositório) + `
 | `GET /api/logs?pod=&container=&tail=` | log de um pod |
 | `GET /api/logs/stream?pod=&container=` | log ao vivo (Server-Sent Events) |
 | `GET /api/gnb-log?tail=` · `/api/gnb-log/stream` | log do gNB |
+| `GET /api/history/summary?from=&to=` | KPIs do período (epoch em segundos) |
+| `GET /api/history/data?from=&to=&series=&prefix=&points=` | séries reamostradas (média e máximo por balde) |
+| `GET /api/history/csv?from=&to=` · `/api/history/experiments` | CSV completo · experimentos |
+| `POST /api/history/experiments` | `{"action":"start","name":...,"notes":...}` · `{"action":"stop"}` |
 | `GET /api/hosts` · `GET /api/hosts/<nome>?window=` | máquinas: resumo · detalhes e séries |
 | `POST /api/ingest/host` | entrada do agente das máquinas (`X-Ingest-Token`) |
 | `POST /api/ingest/gnb-log` | entrada do agente (cabeçalho `X-Ingest-Token`) |

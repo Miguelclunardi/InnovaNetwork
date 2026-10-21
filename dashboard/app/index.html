@@ -21,11 +21,13 @@
     <button role="tab" data-tab="logs">Logs</button>
     <button role="tab" data-tab="core">Core</button>
     <button role="tab" data-tab="hosts">Máquinas</button>
+    <button role="tab" data-tab="history">Histórico</button>
     <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Configuração</button>
   </nav>
   <div class="topright">
     <span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span>
     <span class="pill" id="pill-core" title="Pods do core">core …</span>
+    <button class="rec hidden" id="rec">● Gravar experimento</button>
     <button class="icon" id="theme" title="Tema claro/escuro" aria-label="Alternar tema">◐</button>
   </div>
 </header>
@@ -211,6 +213,75 @@
       </div>
     </div>
   </section>
+  <!-- ======================= HISTÓRICO ======================= -->
+  <section id="tab-history" class="tab">
+    <div id="hist-off" class="card hidden">
+      <h2>Histórico desligado</h2>
+      <p>Para guardar <b>todas</b> as métricas (rádio, core, máquinas) e os eventos do core e poder comparar setups depois,
+        defina <code>DASHBOARD_PERSIST=true</code> no <code>config.env</code> e rode <code>sudo ./install.sh --dashboard-only</code>.</p>
+    </div>
+    <div id="hist-on" class="hidden">
+      <div class="muted" id="hist-status" style="margin-bottom:10px"></div>
+      <div class="card">
+        <div class="toolbar"><h2>Experimentos</h2><span class="muted">marque dois ou mais para comparar</span>
+          <button class="btn on" id="hist-compare-btn" disabled>Comparar</button></div>
+        <div class="tablewrap"><table id="hist-exps" class="exps"></table></div>
+      </div>
+      <div class="toolbar" style="margin-top:12px">
+        <label>Período <select id="hist-preset"></select></label>
+        <span id="hist-custom" class="hidden"><input type="datetime-local" id="hist-from"> até <input type="datetime-local" id="hist-to">
+          <button class="btn" id="hist-go">Ver</button></span>
+        <a class="btn" id="hist-csv" href="#" download>Exportar CSV</a>
+      </div>
+      <div id="hist-view">
+        <h3 class="sect" id="hist-view-title"></h3>
+        <div class="kpis" id="hist-kpis"></div>
+        <div class="charts two" style="margin-top:12px">
+          <div class="chart card"><h4>Vazão da célula <span class="unit">Mbit/s</span></h4><div id="hc-cell"></div></div>
+          <div class="chart card"><h4>PRBs usados</h4><div id="hc-prb"></div></div>
+          <div class="chart card"><h4>Downlink por UE <span class="unit">Mbit/s</span></h4><div id="hc-ue-dl"></div></div>
+          <div class="chart card"><h4>BLER DL por UE <span class="unit">%</span></h4><div id="hc-ue-bler"></div></div>
+          <div class="chart card"><h4>MCS DL por UE</h4><div id="hc-ue-mcs"></div></div>
+          <div class="chart card"><h4>CQI por UE</h4><div id="hc-ue-cqi"></div></div>
+          <div class="chart card"><h4>SNR PUSCH por UE <span class="unit">dB</span></h4><div id="hc-ue-snr"></div></div>
+          <div class="chart card"><h4>Máquinas: CPU e temperatura <span class="unit">% · °C</span></h4><div id="hc-hosts"></div></div>
+          <div class="chart card"><h4>CPU por função do core <span class="unit">% de 1 núcleo</span></h4><div id="hc-nf"></div></div>
+          <div class="chart card"><h4>Tráfego no UPF (N6) <span class="unit">Mbit/s</span></h4><div id="hc-upf"></div></div>
+        </div>
+        <div class="card" style="margin-top:12px"><h2>UEs no período <span class="muted">(por IMSI; o RNTI muda a cada conexão)</span></h2>
+          <div class="tablewrap"><table id="hist-ues"></table></div></div>
+        <div class="card" style="margin-top:12px"><h2>Eventos do core no período</h2><div id="hist-events"></div></div>
+      </div>
+      <div id="hist-compare" class="hidden">
+        <div class="toolbar"><h3 class="sect" style="margin:0">Comparação de experimentos</h3><button class="btn" id="hist-back">Voltar</button></div>
+        <div class="card"><div class="tablewrap" style="max-height:none"><table id="hist-cmp-table" class="cmp"></table></div>
+          <p class="muted" style="margin:8px 0 0">Em destaque: o melhor valor de cada linha. BLER calculado com todos os blocos do período.</p></div>
+        <p class="muted">Gráficos sobrepostos: eixo X = tempo desde o início de cada experimento (min:s).</p>
+        <div class="charts two">
+          <div class="chart card"><h4>DL da célula <span class="unit">Mbit/s</span></h4><div id="hcc-dl"></div></div>
+          <div class="chart card"><h4>UL da célula <span class="unit">Mbit/s</span></h4><div id="hcc-ul"></div></div>
+          <div class="chart card"><h4>PRBs DL</h4><div id="hcc-prb"></div></div>
+          <div class="chart card"><h4 id="hcc-host-title">CPU</h4><div id="hcc-cpu"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <dialog id="rec-dialog" class="dlg">
+    <form method="dialog">
+      <h2>Gravar experimento</h2>
+      <p class="muted">Marca um período com nome e notas. O painel guarda junto o setup (UEs, config.env com chaves mascaradas).
+        As métricas continuam sendo gravadas sempre; o experimento é o marcador para comparar depois.</p>
+      <label>Nome<br><input type="text" id="rec-name" maxlength="120" placeholder="ex.: 100 MHz, 4x4 MIMO, MCS 256QAM"></label>
+      <label>Notas<br><textarea id="rec-notes" rows="4" placeholder="o que mudou no setup, posição do UE, teste (iperf -u -b 800M)…"></textarea></label>
+      <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="rec-cancel">Cancelar</button>
+        <button class="btn on" id="rec-start">● Iniciar</button></div>
+    </form>
+  </dialog>
+  <dialog id="cfg-dialog" class="dlg wide">
+    <h2 id="cfg-dialog-title"></h2>
+    <pre class="cfgdiff" id="cfg-dialog-body" style="max-height:60vh"></pre>
+    <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="cfg-dialog-close">Fechar</button></div>
+  </dialog>
   <!-- ======================= CONFIGURAÇÃO ======================= -->
   <section id="tab-settings" class="tab">
     <div id="cfg-msg" class="cfgmsg hidden"></div>
@@ -259,5 +330,6 @@
 <script src="app.js"></script>
 <script src="hosts.js"></script>
 <script src="settings.js"></script>
+<script src="history.js"></script>
 </body>
 </html>

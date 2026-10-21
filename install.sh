@@ -493,6 +493,11 @@ step_dashboard() {
   fi
   DASHBOARD_INGEST_TOKEN=$(<"${tokf}")
   dashboard_config_edit
+  # Histórico persistente: diretório do pod (usuário 65534); fica no host mesmo com o painel desligado
+  if is_true "${DASHBOARD_PERSIST}"; then
+    install -d -m 0750 -o 65534 -g 65534 "${DASHBOARD_DATA_DIR}"
+    info "histórico persistente em ${DASHBOARD_DATA_DIR} (retenção ${DASHBOARD_PERSIST_DAYS} dias, máx. ${DASHBOARD_PERSIST_MAX_GB} GB)"
+  fi
   kc create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kc apply -f - >/dev/null
   render_dashboard
   # server-side: os arquivos do painel passam de 256 KB (limite da anotação last-applied do apply comum)

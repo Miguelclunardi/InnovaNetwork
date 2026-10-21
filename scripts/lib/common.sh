@@ -22,7 +22,8 @@ NETIF_UNIT_FILE="/etc/systemd/system/open5gs-k3s-netif.service"   # interface es
 K3S_DROPIN_FILE="/etc/systemd/system/k3s.service.d/10-open5gs-k3s-netif.conf"
 HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"
 GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # log do gNB -> painel
-HOSTS_UNIT_FILE="/etc/systemd/system/open5gs-k3s-hosts.service"        # outras máquinas -> painel      # recuperação no boot
+HOSTS_UNIT_FILE="/etc/systemd/system/open5gs-k3s-hosts.service"        # outras máquinas -> painel
+DASHBOARD_DATA_DIR="/var/lib/open5gs-k3s/dashboard"   # histórico persistente do painel (fora do INSTALL_DIR)
 HASH_ANNOTATION="open5gs-k3s/config-hash"
 
 # ----------------------------------------------------------------------------
@@ -100,6 +101,7 @@ load_config() {
   declare -p K3S_EXTRA_ARGS &>/dev/null || K3S_EXTRA_ARGS=()
   declare -p DASHBOARD_UE_NAMES &>/dev/null || DASHBOARD_UE_NAMES=()
   declare -p DASHBOARD_HOSTS &>/dev/null || DASHBOARD_HOSTS=()
+  : "${DASHBOARD_PERSIST:=false}" "${DASHBOARD_PERSIST_DAYS:=365}" "${DASHBOARD_PERSIST_MAX_GB:=50}"
   : "${DASHBOARD_CONFIG_EDIT:=false}" "${DASHBOARD_ADMIN_PASSWORD:=}" "${DASHBOARD_CONFIG_GID:=}"
   : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}" "${ENERGY_METER_URL:=}" "${ENERGY_METER_HOST:=}"
 
@@ -242,6 +244,8 @@ validate_config() {
       [[ "$e" =~ ^[A-Za-z0-9._-]+\|[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+\|[^\;\"]*$ ]] \
         || bad "DASHBOARD_HOSTS: use 'nome|usuario@host|papel' (atual: $e)"
     done
+    [[ "${DASHBOARD_PERSIST_DAYS}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_DAYS deve ser um número de dias (0 = sem limite)"
+    [[ "${DASHBOARD_PERSIST_MAX_GB}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_MAX_GB deve ser um número de GB (0 = sem limite)"
     [[ -z "${ENERGY_METER_URL}" || "${ENERGY_METER_URL}" =~ ^https?://[^[:space:]]+$ ]] \
       || bad "ENERGY_METER_URL deve ser http://IP/Data"
     if [[ -n "${GNB_LOG_DROP}" ]] && ! python3 -c 'import re,sys; re.compile(sys.argv[1])' "${GNB_LOG_DROP}" 2>/dev/null; then
@@ -604,14 +608,26 @@ render_dashboard() {
         - {name: config-env, hostPath: {path: $(_q "${PROJECT_DIR}/config.env"), type: File}}
         - {name: config-backups, hostPath: {path: $(_q "${INSTALL_DIR}/state/config-backups"), type: Directory}}"
   fi
-  for f in server.py configedit.py settings.js hoststats.py index.html app.js hosts.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
+  # Histórico persistente: diretório do host gravável pelo pod (usuário 65534)
+  local hist_env="" hist_mount="" hist_vol=""
+  if is_true "${DASHBOARD_PERSIST}"; then
+    hist_env="
+            - {name: PERSIST_PATH, value: /data/history.db}
+            - {name: PERSIST_DAYS, value: $(_q "${DASHBOARD_PERSIST_DAYS}")}
+            - {name: PERSIST_MAX_MB, value: $(_q "$(( DASHBOARD_PERSIST_MAX_GB * 1024 ))")}"
+    hist_mount="
+            - {name: history, mountPath: /data}"
+    hist_vol="
+        - {name: history, hostPath: {path: $(_q "${DASHBOARD_DATA_DIR}"), type: Directory}}"
+  fi
+  for f in server.py configedit.py history.py history.js settings.js hoststats.py index.html app.js hosts.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -709,7 +725,7 @@ spec:
             - {name: ENERGY_METER_HOST, value: $(_q "${ENERGY_METER_HOST}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
             - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
-            - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}${cfg_env}
+            - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}${cfg_env}${hist_env}
           readinessProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 10
@@ -730,14 +746,14 @@ spec:
             - {name: host-proc, mountPath: /host/proc, readOnly: true}
             - {name: host-sys, mountPath: /host/sys, readOnly: true}
             - {name: host-root, mountPath: /host/root, readOnly: true}
-            - {name: tmp, mountPath: /tmp}${cfg_mounts}
+            - {name: tmp, mountPath: /tmp}${cfg_mounts}${hist_mount}
       volumes:
         - name: app
           configMap: {name: dashboard-app}
         - {name: host-proc, hostPath: {path: /proc, type: Directory}}
         - {name: host-sys, hostPath: {path: /sys, type: Directory}}
         - {name: host-root, hostPath: {path: /, type: Directory}}
-        - {name: tmp, emptyDir: {sizeLimit: 16Mi}}${cfg_vols}
+        - {name: tmp, emptyDir: {sizeLimit: 16Mi}}${cfg_vols}${hist_vol}
 ---
 apiVersion: v1
 kind: Service

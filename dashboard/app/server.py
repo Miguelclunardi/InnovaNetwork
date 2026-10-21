@@ -26,9 +26,11 @@ import time
 import urllib.parse
 import urllib.request
 import secrets
+import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import configedit
+import history
 
 # ----------------------------------------------------------------------------
 #  Configuração (variáveis de ambiente)
@@ -81,6 +83,12 @@ LOCAL_HOST_NAME = _env("LOCAL_HOST_NAME")
 LOCAL_HOST_ROLE = _env("LOCAL_HOST_ROLE", "Core 5G (k3s)")
 HOSTS = [h.split("|", 1) for h in _env("HOSTS").split(";") if "|" in h]
 # Interfaces de túnel do UPF -> DNN ("ogstun=internet;ogstun2=internet2")
+# Histórico persistente (DASHBOARD_PERSIST): arquivo SQLite num diretório do host. Vazio = desligado.
+PERSIST_PATH = _env("PERSIST_PATH")
+PERSIST_DAYS = int(_env("PERSIST_DAYS", "180"))
+PERSIST_MAX_MB = int(_env("PERSIST_MAX_MB", "20000"))
+PERSIST_CHUNK = int(_env("PERSIST_CHUNK_SECONDS", "60"))
+HISTORY = None
 WEBUI_PORT = _env("WEBUI_PORT")      # NodePort da WebUI do Open5GS (vazio = sem a sub-aba Assinantes)
 UPF_DEVS = dict(kv.split("=", 1) for kv in _env("UPF_DEVS").split(";") if "=" in kv)
 HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
@@ -235,11 +243,14 @@ class WSClient:
 class Series:
     """Amostras (t, {campo: valor}) dos últimos HISTORY_SECONDS."""
 
-    def __init__(self):
+    def __init__(self, name=None):
         self.data = collections.deque()
+        self.name = name   # nome no histórico persistente (None = não grava)
 
     def add(self, t, values):
         self.data.append((t, values))
+        if HISTORY is not None and self.name:
+            HISTORY.add(self.name, t, values)
         limit = t - HISTORY_SECONDS
         while self.data and self.data[0][0] < limit:
             self.data.popleft()
@@ -289,7 +300,7 @@ class GnbCollector(threading.Thread):
         self.lock = threading.Lock()
         self.ues = {}          # (pci, rnti) -> {"series": Series, "first": t, "last": t}
         self.cell = {}         # pci -> Series
-        self.du = Series()
+        self.du = Series("du")
         self.status = {"enabled": bool(url), "url": url, "connected": False,
                        "since": None, "last_msg": None, "error": None, "messages": 0, "reconnects": 0}
 
@@ -362,10 +373,10 @@ class GnbCollector(threading.Thread):
             tot_ul += v["ul_brate"] or 0
             e = self.ues.get(key)
             if e is None:
-                e = self.ues[key] = {"series": Series(), "first": t}
+                e = self.ues[key] = {"series": Series("ue:%s:%s" % key), "first": t}
             e["last"] = t
             e["series"].add(t, v)
-        s = self.cell.setdefault(pci, Series())
+        s = self.cell.get(pci) or self.cell.setdefault(pci, Series("cell:%s" % pci))
         s.add(t, {
             "nof_ues": len(ues),
             "dl_brate": tot_dl, "ul_brate": tot_ul,
@@ -625,6 +636,8 @@ class CoreState:
         else:
             e = {"ts": ts, "first": ts, "src": src, "level": lvl, "msg": msg, "count": 1}
         self.events[key] = e
+        if HISTORY is not None:
+            HISTORY.event(ts, src, lvl, msg)
         while len(self.events) > 400:
             self.events.popitem(last=False)
 
@@ -759,7 +772,7 @@ class CoreCollector(threading.Thread):
                     sums = {k: sum(v for _, v in vals) for k, vals in latest.items()
                             if not k.startswith(("process_", "go_", "promhttp_"))}
                     with self.lock:
-                        self.metric_series.setdefault(nf, Series()).add(now, sums)
+                        (self.metric_series.get(nf) or self.metric_series.setdefault(nf, Series("prom:" + nf))).add(now, sums)
                 except Exception as e:  # noqa: BLE001
                     entry["error"] = str(e)
             with self.lock:
@@ -807,7 +820,7 @@ class Hosts:
         e = self.h.get(name)
         if e is None:
             e = self.h[name] = {"name": name, "role": role, "source": source, "last": None, "ts": None,
-                                "error": None, "series": Series()}
+                                "error": None, "series": Series("host:" + name)}
         if role:
             e["role"] = role
         return e
@@ -863,7 +876,7 @@ class EnergyMeter(threading.Thread):
         super().__init__(daemon=True, name="energia")
         self.url = url
         self.lock = threading.Lock()
-        self.series = Series()
+        self.series = Series("energy")
         self.last = {}
         self.ts = None
         self.error = None
@@ -944,8 +957,8 @@ class CoreProcs:
     def __init__(self, root):
         self.proc = root.rstrip("/") + "/proc"
         self.lock = threading.Lock()
-        self.cpu = Series()        # {nf: %CPU}
-        self.traffic = Series()    # {iface_rx/iface_tx: bit/s} do UPF
+        self.cpu = Series("core:cpu")        # {nf: %CPU}
+        self.traffic = Series("core:upf")    # {iface_rx/iface_tx: bit/s} do UPF
         self.nfs = {}
         self.ifaces = {}
         self.prev = None
@@ -1216,7 +1229,44 @@ def settings_plan(body):
                           "validation": configedit.validate(PROJECT_DIR, new) if names else {"ok": True, "output": ""}}
 
 
-STATIC_FILES = {"settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
+# ----------------------------------------------------------------------------- histórico
+def history_meta(series):
+    """Metadados gravados com cada bloco: quem é o UE (o RNTI muda a cada conexão)."""
+    if series.startswith("ue:"):
+        ident = ue_identity(series.rsplit(":", 1)[-1])
+        if ident:
+            ident = dict(ident)
+            ident.pop("sessions", None)
+            ident["ips"] = [s.get("ipv4") for s in ue_identity(series.rsplit(":", 1)[-1]).get("sessions", [])]
+            return ident
+    return None
+
+
+def experiment_setup():
+    """Retrato do setup no início de um experimento (para comparar depois)."""
+    ran = GNB.snapshot(30)
+    ues = [dict(rnti=u["rnti"], **{k: v for k, v in ue_identity(u["rnti"]).items() if k != "sessions"})
+           for u in ran["ues"] if u["active"]]
+    cfg = None
+    if CONFIG:
+        try:
+            cfg = re.sub(r"\b[0-9A-Fa-f]{32}\b", "••••", CONFIG.read()[0])
+        except OSError:
+            cfg = None
+    return cfg, {"version": VERSION, "gnb_name": GNB_NAME, "network": NETWORK_NAME, "gnb_url": GNB_METRICS_URL,
+                 "ues": ues, "hosts": [h["name"] for h in HOSTS_STATE.summary()]}
+
+
+def _range(qs):
+    now = time.time()
+    t1 = _q(qs, "to", now, float)
+    t0 = _q(qs, "from", t1 - 3600, float)
+    if t0 >= t1:
+        t0 = t1 - 60
+    return t0, min(t1, now + 60)
+
+
+STATIC_FILES = {"history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -1301,7 +1351,10 @@ class Handler(BaseHTTPRequestHandler):
                                         "history_seconds": HISTORY_SECONDS, "core_metrics": CORE_METRICS,
                                         "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE,
                                         "config_edit": bool(CONFIG), "version": VERSION,
-                                        "webui_port": WEBUI_PORT})
+                                        "webui_port": WEBUI_PORT, "persist": HISTORY is not None,
+                                        "local_host": LOCAL_HOST_NAME})
+            if path.startswith("/api/history"):
+                return self._history_get(path, qs)
             if path == "/api/settings":
                 if not self._admin():
                     return None
@@ -1369,6 +1422,80 @@ class Handler(BaseHTTPRequestHandler):
             log("erro", path, repr(e))
             return self._send(500, {"error": str(e)})
 
+    def _history_get(self, path, qs):
+        if HISTORY is None:
+            return self._send(200 if path == "/api/history/status" else 404,
+                              {"enabled": False, "error": "histórico desligado (DASHBOARD_PERSIST=false)"})
+        if path == "/api/history/status":
+            return self._send(200, HISTORY.status())
+        if path == "/api/history/experiments":
+            return self._send(200, {"experiments": HISTORY.experiments(), "running": HISTORY.running()})
+        if path == "/api/history/experiment":
+            e = HISTORY.experiment(_q(qs, "id", 0, int))
+            return self._send(200, e) if e else self._send(404, {"error": "experimento não encontrado"})
+        t0, t1 = _range(qs)
+        if path == "/api/history/series":
+            return self._send(200, {"series": HISTORY.series_list(t0, t1)})
+        if path == "/api/history/data":
+            names = [x for x in _q(qs, "series", "").split(",") if x]
+            prefix = [x for x in _q(qs, "prefix", "").split(",") if x]
+            return self._send(200, HISTORY.data(t0, t1, names or None, prefix or None,
+                                                min(_q(qs, "points", 1200, int), 5000), _q(qs, "rel", "") == "1"))
+        if path == "/api/history/summary":
+            return self._send(200, HISTORY.summary(t0, t1))
+        if path == "/api/history/events":
+            return self._send(200, HISTORY.events(t0, t1, min(_q(qs, "limit", 500, int), 5000)))
+        if path == "/api/history/csv":
+            raw = HISTORY._load(t0, t1, [x for x in _q(qs, "series", "").split(",") if x] or None)
+            out = io.StringIO()
+            w = csv.writer(out)
+            w.writerow(("timestamp_utc", "serie", "imsi", "campo", "valor"))
+            for s, e in sorted(raw.items()):
+                imsi = (e["meta"] or {}).get("imsi", "")
+                for t, v in e["rows"]:
+                    ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".%03dZ" % int((t % 1) * 1000)
+                    for k, x in sorted(v.items()):
+                        w.writerow((ts, s, imsi, k, x))
+            return self._send(200, out.getvalue(), "text/csv; charset=utf-8",
+                              {"Content-Disposition": 'attachment; filename="historico-%d.csv"' % int(t0)})
+        return self._send(404, {"error": "não encontrado"})
+
+    def _history_post(self, path):
+        if not self._auth_ok():
+            return self._send(401, {"error": "autenticação necessária"},
+                              extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
+        if HISTORY is None:
+            return self._send(404, {"error": "histórico desligado (DASHBOARD_PERSIST=false)"})
+        try:
+            body = self._json_body(64 * 1024)
+        except (ValueError, configedit.ConfigError) as e:
+            return self._send(400, {"error": str(e)})
+        act = body.get("action")
+        name = str(body.get("name") or "").strip()[:120]
+        notes = str(body.get("notes") or "").strip()[:4000]
+        HISTORY.flush()
+        if act == "start":
+            if not name:
+                return self._send(400, {"error": "dê um nome ao experimento"})
+            cfg, setup = experiment_setup()
+            eid = HISTORY.start(name, notes, cfg, setup)
+            log("histórico: experimento %d '%s' iniciado" % (eid, name))
+            return self._send(200, {"ok": True, "id": eid})
+        if act == "stop":
+            HISTORY.stop()
+            log("histórico: experimento encerrado")
+            return self._send(200, {"ok": True})
+        if act == "update":
+            HISTORY.update(int(body.get("id", 0)), name or "sem nome", notes)
+            return self._send(200, {"ok": True})
+        if act == "delete":
+            # Apagar exige a senha de administrador (os dados medidos continuam; some só o marcador)
+            if not (CONFIG and ADMIN.check(self.headers.get("X-Admin-Token", ""))):
+                return self._send(403, {"error": "apagar experimento exige entrar como administrador (aba Configuração)"})
+            HISTORY.delete(int(body.get("id", 0)))
+            return self._send(200, {"ok": True})
+        return self._send(400, {"error": "ação desconhecida"})
+
     def _admin(self):
         """Exige a sessão de administrador (cabeçalho X-Admin-Token). Responde 401/404 se faltar."""
         if not CONFIG:
@@ -1430,6 +1557,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path == "/api/history/experiments":
+            return self._history_post(u.path)
         if u.path in ("/api/admin/login", "/api/admin/logout", "/api/settings/preview", "/api/settings/save"):
             return self._settings_post(u.path)
         if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host"):
@@ -1561,6 +1690,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global HISTORY
+    if PERSIST_PATH:
+        try:
+            HISTORY = history.History(PERSIST_PATH, PERSIST_DAYS, PERSIST_MAX_MB, PERSIST_CHUNK,
+                                      meta_fn=history_meta, log=log)
+
+            def _bye(signum, frame):   # pod parando: grava o que está no buffer (até 60 s)
+                try:
+                    HISTORY.flush()
+                    log("histórico: buffer gravado antes de sair")
+                finally:
+                    os._exit(0)
+            signal.signal(signal.SIGTERM, _bye)
+            threading.Thread(target=HISTORY.run, daemon=True, name="historico").start()
+            log("histórico persistente: %s (retenção %d dias, máx. %d MB)" % (PERSIST_PATH, PERSIST_DAYS, PERSIST_MAX_MB))
+        except Exception as e:  # noqa: BLE001
+            log("histórico persistente DESLIGADO — erro ao abrir %s: %s" % (PERSIST_PATH, e))
     log("painel: namespace=%s gNB=%s métricas do core=%s porta=%s" % (
         NAMESPACE, GNB_METRICS_URL or "(desligado)", CORE_METRICS, PORT))
     if GNB_METRICS_URL:

@@ -130,15 +130,15 @@ const Charts = {
       width: Math.max(280, el.clientWidth),
       height: opts.height || 220,
       cursor: { drag: { x: true, y: false } },
-      scales: { x: { time: true }, ...(opts.scales || {}) },
+      scales: { x: { time: !opts.xrel }, ...(opts.scales || {}) },
       legend: { live: true },
       axes: [
-        { ...axis, values: (u, vals) => vals.map((v) => new Date(v * 1000).toLocaleTimeString("pt-BR", { hour12: false })) },
+        { ...axis, values: (u, vals) => vals.map(Charts.xfmt(opts)) },
         { ...axis, size: 60, values: opts.yfmt ? (u, vals) => vals.map(opts.yfmt) : undefined },
         ...(opts.y2 ? [{ ...axis, side: 1, scale: "y2", size: 55, grid: { show: false } }] : []),
       ],
       series: [
-        { value: (u, v) => (v == null ? "–" : new Date(v * 1000).toLocaleTimeString("pt-BR", { hour12: false })) },
+        { label: opts.xrel ? "Tempo" : "Hora", value: (u, v) => (v == null ? "–" : Charts.xfmt(opts)(v)) },
         ...series.map((s, i) => ({
           label: s.label, stroke: s.color || colorFor(i), width: s.width || 1.6,
           scale: s.scale || "y", dash: s.dash, spanGaps: !!opts.spanGaps,
@@ -151,6 +151,11 @@ const Charts = {
     u._opts = { series, opts };
     this.list[id] = u;
     return u;
+  },
+  xfmt(opts) {
+    if (opts.xfmt) return opts.xfmt;
+    if (opts.xrel) return (v) => { const s = Math.round(v); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+    return (v) => new Date(v * 1000).toLocaleTimeString("pt-BR", { hour12: false });
   },
   set(id, data) {
     const u = this.list[id];
@@ -214,6 +219,7 @@ async function refreshNow() {
       else if (currentTab === "core") await Core.refresh();
       else if (currentTab === "hosts") await Machines.refresh();
       else if (currentTab === "settings") await Settings.refresh();
+      else if (currentTab === "history") await Hist.refresh();
       else if (currentTab === "logs" && Logs.src === null) Logs.renderSources();
     }
     banner(null);
@@ -746,12 +752,14 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     CONFIG = await api("api/config");
     $("#tabbtn-settings").classList.toggle("hidden", !CONFIG.config_edit);
     $("#core-seg-webui").classList.toggle("hidden", !CONFIG.webui_port);
+    $("#rec").classList.toggle("hidden", !CONFIG.persist);
+    Hist.refreshHeader();
     if (CONFIG.webui_port && store.get("core.view", "metrics") === "webui") Core.setView("webui");
     $("#netname").textContent = CONFIG.network_name ? "· " + CONFIG.network_name : "";
     $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · namespace ${CONFIG.namespace} · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
   } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
   const start = (location.hash || "").slice(1) || store.get("tab", "overview");
-  showTab(["overview", "ran", "logs", "core", "hosts", "settings"].includes(start) ? start : "overview");
+  showTab(["overview", "ran", "logs", "core", "hosts", "history", "settings"].includes(start) ? start : "overview");
   setInterval(refreshNow, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();
