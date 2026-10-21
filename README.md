@@ -231,8 +231,9 @@ assinantes, AMBR, QoS (5QI/ARP), IP fixo e múltiplas slices por assinante.
 
 ### 7.4b Painel (Innova Center Dashboard)
 
-`http://<NODE_IP>:30998` — logs de todos os pods e do gNB real, métricas de rádio (vazão DL/UL, BLER, MCS,
-CQI, SNR por UE), UEs, sessões e eventos do core. Só o painel: `sudo ./install.sh --dashboard-only` (não
+`http://<NODE_IP>:30998` (**v1.0**) — logs de todos os pods e do gNB real, métricas de rádio (vazão DL/UL, BLER,
+MCS, CQI, SNR por UE, com cada UE identificado por nome/IMSI/IP), UEs, sessões e eventos do core, CPU/temperatura
+das máquinas e edição do `config.env` pela web (aba Configuração, senha de administrador). Só o painel: `sudo ./install.sh --dashboard-only` (não
 toca no core). Detalhes em **[docs/dashboard.md](docs/dashboard.md)**.
 
 ### 7.5 Assinantes

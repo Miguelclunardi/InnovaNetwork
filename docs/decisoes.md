@@ -41,8 +41,10 @@ Documentação do projeto: **português**.
    - o assistente de IA fica no desktop e opera o servidor por SSH (`ssh torre2`); comandos com sudo no servidor
      são rodados pelo usuário (`ssh -t torre2 'sudo …'`).
 4. **Painel (Innova Center Dashboard) no ar desde 2026-10-21 19:12 UTC** em http://191.4.205.17:30998 (decisão 32;
-   `sudo ./install.sh --dashboard-only`, core sem reinício). Próximos: chave SSH
-   torre2 → innovaserver e `GNB_LOG_SSH` para o log do gNB; `OPEN5GS_METRICS=true` numa janela livre (reinicia o core).
+   `sudo ./install.sh --dashboard-only`, core sem reinício). **v1.0 em 2026-10-21**: chave SSH torre2 → innovaserver
+   feita, log do gNB (`GNB_LOG_SSH`), aba Máquinas, aba Configuração, UEs do rádio por nome/IMSI/IP. Pendentes:
+   medidor de energia atrás do NAT do Wi‑Fi (docs/dashboard.md, "Energia"); `OPEN5GS_METRICS=true` numa janela
+   livre (reinicia o core); `/tmp/gnb.log` do OCUDU com 9 GB (rotacionar).
 5. Fase RAN real: **OCUDU** (CU/DU) + **LiteOn** (O-RU) — validar `EXPOSE_RAN` com SCTP real ou migrar N2/N3 para
    Multus/macvlan/SR-IOV; alinhar PLMN/TAC/S-NSSAI; cadastrar SIMs em `SUBSCRIBERS`; preparar host do DU (PTP, fronthaul).
 
@@ -154,3 +156,6 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
 - 2026-10-21: Setor 2 no torre2: Multus + link direto com o OCUDU (30), PFCP headless (31), rede InnovaSplit, UEs reais
   conectados. Painel Innova Center Dashboard (32) escrito e testado fora do cluster (só leitura); instalação adiada
   porque havia pessoas testando a rede.
+- 2026-10-21 (noite): painel **v1.0** — aba Configuração (edita o `config.env` com senha de administrador, diff,
+  validação e backup; aplicar continua sendo `sudo ./install.sh`), UEs do rádio identificados (RNTI → IMSI/IP pelos
+  logs do gNB, AMF e SMF), log do gNB ligado. Medidor MiEnergy integrado mas desligado: está atrás do NAT do Wi‑Fi.

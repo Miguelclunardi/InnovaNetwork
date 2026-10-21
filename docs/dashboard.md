@@ -1,11 +1,11 @@
-# Painel — Innova Center Dashboard
+# Painel — Innova Center Dashboard (v1.0)
 
 Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar:
 
 | Aba | O que mostra | De onde vem |
 |---|---|---|
 | **Visão geral** | UEs no rádio (vazão, MCS, CQI, RI, BLER, SNR), assinantes vistos pelo core (registro, sessões DNN → IP), pods (estado, reinícios, IP, IP no link RAN), eventos do core (avisos/erros iguais agrupados com contador) | métricas do gNB + API do Kubernetes + logs do AMF/SMF/UPF |
-| **Rádio (gNB)** | vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
+| **Rádio (gNB)** | UEs identificados por **nome, IMSI, IP e tipo** (SIM real / UERANSIM), não só RNTI; RNTIs parados há mais de 2 min ficam escondidos (botão "Mostrar antigos"); vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
 | **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
 | **Configuração** | edita o `config.env` (senha de administrador): campos por seção com a explicação do próprio arquivo, diff antes de salvar, validação do install, backup e restauração, e o comando para aplicar | `config.env` da máquina do core |
@@ -103,6 +103,24 @@ segundo; nos cartões e tabelas é dos **últimos 10 s** (com poucos blocos o va
 passe o mouse para ver quantos blocos entraram na conta). Sem transmissão no período, MCS/SNR viram lacuna
 em vez de 0.
 
+### Quem é cada UE no rádio (RNTI → nome/IMSI/IP)
+
+O gNB só informa o **RNTI** (número temporário do rádio, muda a cada conexão). O painel cruza três fontes:
+
+```
+log do gNB   [RRC]  ue=62 c-rnti=0x4c22          (RNTI 19490 -> UE 62 do CU-CP)
+log do gNB   [NGAP] ue=62 ran_ue=53 amf_ue=55    (UE 62 -> AMF_UE_NGAP_ID 55)
+log do AMF   [suci-0-001-01-…-0000000040] … AMF_UE_NGAP_ID[55]   (-> IMSI 001010000000040)
+log do SMF   UE SUPI[imsi-001010000000040] DNN[internet] IPv4[10.45.0.5]
+```
+
+- Precisa do **log do gNB** ligado (`GNB_LOG_SSH`). Sem ele os cartões mostram só o RNTI e um aviso.
+- Quando o painel sobe, o agente procura os vínculos recentes nos últimos 300 MB do log (`IDENT_BYTES`, com
+  `nice`); depois, cada UE é identificado na próxima troca de mensagens com o core (registro, NAS, sessão).
+- O nome vem de `DASHBOARD_UE_NAMES`; o tipo (SIM real/UERANSIM) dos IMSIs gerados para o UERANSIM.
+- Só funciona com SUCI sem criptografia (esquema nulo, o caso dos SIMs de teste) ou quando o AMF já escreveu o
+  `[imsi-…]` logo depois do `AMF_UE_NGAP_ID`.
+
 ### Log do gNB real
 
 1. Chave SSH do usuário do install (na máquina do core) para o gNB, **sem senha**:
@@ -150,8 +168,16 @@ painel iniciou, gráficos e a tabela com todas as grandezas.
 - `ENERGY_METER_URL="http://IP/Data"` + `sudo ./install.sh --dashboard-only`.
 - O pod do painel (na máquina do core) precisa **alcançar o IP do medidor**. Teste na máquina do core:
   `curl -s http://IP/Data | head -c 200`.
-- Em 2026-10-21 o IP do exemplo (192.168.68.105) não era alcançável do desktop, do torre2 nem do innovaserver (rede
-  191.4.204.0/23): o medidor está em outra rede (roteador/Wi‑Fi próprio).
+- **Situação em 2026-10-21: desligado (`ENERGY_METER_URL=""`).** O medidor está no Wi‑Fi do laboratório
+  (roteador TP‑Link, rede 192.168.68.0/22), que faz **NAT**: os computadores do switch (rede 191.4.204.0/23)
+  não alcançam 192.168.68.105 (ping sem resposta; a porta 80 "conecta" com qualquer IP por causa do proxy
+  transparente do campus, mas o HTTP não responde). Caminhos, do mais simples ao mais trabalhoso:
+  1. **Redirecionamento de porta** no roteador Wi‑Fi (NAT Forwarding): porta externa (ex.: 8080) →
+     192.168.68.105:80, com IP fixo (reserva DHCP) para o medidor. Depois: `ENERGY_METER_URL="http://<IP WAN do
+     roteador>:8080/Data"`.
+  2. **Roteador em modo Access Point (bridge)**: o medidor passa a pegar IP da rede do switch.
+  3. Cabo de uma porta LAN do roteador numa porta livre do torre2 (`enp5s0f0`), com DHCP **sem rota padrão**
+     (`dhcp4-overrides: {use-routes: false}` no netplan) — senão a internet do core passaria pelo Wi‑Fi.
 
 ## Aba Configuração (editar o `config.env`)
 
@@ -202,6 +228,7 @@ Exemplo: `curl -s http://IP:30998/api/ran.csv?window=900 -o ran.csv`.
 |---|---|
 | "gNB sem dados" | gNB parado ou sem `remote_control`; teste `nc -vz 10.10.0.1 8001` na máquina do core |
 | Aba Rádio vazia com gNB no ar | nenhum UE conectado (UEs ociosos são liberados pelo AMF e somem da célula) |
+| Cartões do Rádio só com "RNTI …" / "não identificado" | log do gNB desligado (`GNB_LOG_SSH`) ou o UE ainda não trocou mensagens com o core desde que o painel subiu; aguarde ou force um registro (modo avião) |
 | "gNB (real)" sem linhas | `journalctl -u open5gs-k3s-gnb-log`: chave SSH, `GNB_LOG_FILE` errado, ou o filtro descartou tudo |
 | Página não abre de outro PC | UFW/firewalld: o install abre `DASHBOARD_NODEPORT`; confira `sudo ufw status` |
 | Pod `ImagePullBackOff` | sem acesso ao Docker Hub; troque `DASHBOARD_IMAGE` por uma imagem Python acessível |

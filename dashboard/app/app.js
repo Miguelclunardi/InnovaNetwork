@@ -670,7 +670,7 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     CONFIG = await api("api/config");
     $("#tabbtn-settings").classList.toggle("hidden", !CONFIG.config_edit);
     $("#netname").textContent = CONFIG.network_name ? "· " + CONFIG.network_name : "";
-    $("#footer").textContent = `namespace ${CONFIG.namespace} · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
+    $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · namespace ${CONFIG.namespace} · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
   } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
   const start = (location.hash || "").slice(1) || store.get("tab", "overview");
   showTab(["overview", "ran", "logs", "core", "hosts", "settings"].includes(start) ? start : "overview");

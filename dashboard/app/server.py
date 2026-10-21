@@ -59,6 +59,7 @@ CORE_METRICS = _env("CORE_METRICS", "false").lower() in ("1", "true", "yes", "si
 CORE_METRICS_PORT = int(_env("CORE_METRICS_PORT", "9090"))
 CORE_POLL_SECONDS = float(_env("CORE_POLL_SECONDS", "5"))
 OPEN5GS_RELEASE = _env("OPEN5GS_RELEASE", "open5gs")
+VERSION = "1.0"
 PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usuário: admin)
 INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
 # Aba Configuração (editar o config.env). Vazio = aba desligada.
@@ -1105,7 +1106,7 @@ def _q(qs, name, default=None, cast=str):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "open5gk3s-dashboard/1.0"
+    server_version = "open5gk3s-dashboard/" + VERSION
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):  # silencioso (só erros)
@@ -1175,7 +1176,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"namespace": NAMESPACE, "gnb_name": GNB_NAME, "network_name": NETWORK_NAME, "gnb_url": GNB_METRICS_URL,
                                         "history_seconds": HISTORY_SECONDS, "core_metrics": CORE_METRICS,
                                         "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE,
-                                        "config_edit": bool(CONFIG)})
+                                        "config_edit": bool(CONFIG), "version": VERSION})
             if path == "/api/settings":
                 if not self._admin():
                     return None
