@@ -40,8 +40,8 @@ Documentação do projeto: **português**.
      removido com `k3s-uninstall.sh` (autorizado pelo usuário) antes do `sudo ./install.sh`;
    - o assistente de IA fica no desktop e opera o servidor por SSH (`ssh torre2`); comandos com sudo no servidor
      são rodados pelo usuário (`ssh -t torre2 'sudo …'`).
-4. **Painel (Innova Center Dashboard) pronto, não instalado** (decisão 32): subir com
-   `sudo ./install.sh --dashboard-only` quando não houver usuários testando (não mexe no core). Depois: chave SSH
+4. **Painel (Innova Center Dashboard) no ar desde 2026-10-21 19:12 UTC** em http://191.4.205.17:30998 (decisão 32;
+   `sudo ./install.sh --dashboard-only`, core sem reinício). Próximos: chave SSH
    torre2 → innovaserver e `GNB_LOG_SSH` para o log do gNB; `OPEN5GS_METRICS=true` numa janela livre (reinicia o core).
 5. Fase RAN real: **OCUDU** (CU/DU) + **LiteOn** (O-RU) — validar `EXPOSE_RAN` com SCTP real ou migrar N2/N3 para
    Multus/macvlan/SR-IOV; alinhar PLMN/TAC/S-NSSAI; cadastrar SIMs em `SUBSCRIBERS`; preparar host do DU (PTP, fronthaul).
