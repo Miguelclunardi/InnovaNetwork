@@ -86,7 +86,11 @@ until kc -n "${NS}" logs "${GNB_DEP}" 2>/dev/null | grep -q "NG Setup procedure 
   (( SECONDS < deadline )) || break; sleep 3
 done
 if kc -n "${NS}" logs "${GNB_DEP}" 2>/dev/null | grep -q "NG Setup procedure is successful"; then
-  pass "gNB fez NG Setup com o AMF (${OPEN5GS_RELEASE}-amf-ngap:38412/SCTP)"
+  if is_true "${RAN_LINK_ENABLED}"; then
+    pass "gNB fez NG Setup com o AMF (${AMF_N2_IP}:38412/SCTP pelo link ${RAN_LINK_IFACE})"
+  else
+    pass "gNB fez NG Setup com o AMF (${OPEN5GS_RELEASE}-amf-ngap:38412/SCTP)"
+  fi
 else
   fail "gNB não completou NG Setup (verifique PLMN/TAC e SCTP)"
   finish

@@ -355,15 +355,42 @@ step_charts() {
 # ----------------------------------------------------------------------------
 #  8. Deploy
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+#  7b. Link com o gNB real (RAN_LINK_ENABLED): Multus + rede ran-link (macvlan)
+# ----------------------------------------------------------------------------
+step_ran_link() {
+  is_true "${RAN_LINK_ENABLED}" || return 0
+  step "Link com o gNB (Multus + macvlan em ${RAN_LINK_IFACE})"
+  ip link show "${RAN_LINK_IFACE}" &>/dev/null || die "RAN_LINK_IFACE '${RAN_LINK_IFACE}' não existe neste host"
+  local mtu; mtu=$(cat "/sys/class/net/${RAN_LINK_IFACE}/mtu")
+  (( mtu >= RAN_LINK_MTU )) || warn "${RAN_LINK_IFACE} está com MTU ${mtu} < RAN_LINK_MTU ${RAN_LINK_MTU}"
+  grep -q LOWER_UP < <(ip link show "${RAN_LINK_IFACE}") \
+    || warn "${RAN_LINK_IFACE} sem link físico: AMF/UPF/gNB simulado não se comunicam até o cabo ter sinal"
+  # O chart rke2-multus não traz o CRD NetworkAttachmentDefinition
+  kc apply -f "${PROJECT_DIR}/helm/multus/crd.yaml" >/dev/null
+  retry hm upgrade --install multus rke2-multus --repo https://rke2-charts.rancher.io \
+    --version "${MULTUS_CHART_VERSION}" --namespace kube-system \
+    -f "${PROJECT_DIR}/helm/multus/values.yaml" --wait --timeout 5m >/dev/null
+  kc -n kube-system rollout status ds/multus --timeout=180s >/dev/null
+  ok "Multus ${MULTUS_CHART_VERSION} pronto"
+  kc create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kc apply -f - >/dev/null
+  render_ran_link_nad
+  kc apply -f "${RAN_LINK_NAD}" >/dev/null
+  ok "rede ran-link: AMF ${AMF_N2_IP}, UPF ${UPF_N3_IP}, gNB simulado ${GNB_SIM_IP} (${RAN_LINK_CIDR}, MTU ${RAN_LINK_MTU})"
+}
+
 step_deploy_core() {
   step "Open5GS (release ${OPEN5GS_RELEASE}, namespace ${K8S_NAMESPACE})"
   render_open5gs_values
   info "values gerados: ${OPEN5GS_VALUES} (hash ${OPEN5GS_HASH})"
   info "helm upgrade --install (pode levar vários minutos na 1ª vez: download de imagens)"
+  local pr=()
+  if is_true "${RAN_LINK_ENABLED}"; then pr=(--post-renderer "${PROJECT_DIR}/helm/postrender/amf-ngap-net1.sh"); fi
   hm upgrade --install "${OPEN5GS_RELEASE}" "${CHARTS_DIR}/charts/open5gs" \
     --namespace "${K8S_NAMESPACE}" --create-namespace \
     -f "${CHARTS_DIR}/charts/open5gs/values-5g.yaml" \
     -f "${OPEN5GS_VALUES}" \
+    "${pr[@]}" \
     --wait --timeout "${HELM_TIMEOUT}" >/dev/null \
     || { kc -n "${K8S_NAMESPACE}" get pods; die "deploy do Open5GS falhou (veja os pods acima)"; }
   ok "Open5GS implantado"
@@ -522,6 +549,7 @@ main() {
     step_helm
   fi
   step_charts
+  step_ran_link
   step_deploy_core
   step_subscribers
   step_deploy_ueransim

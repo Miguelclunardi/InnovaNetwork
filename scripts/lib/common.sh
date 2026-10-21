@@ -84,6 +84,8 @@ load_config() {
   : "${MONGODB_PERSISTENCE:=true}" "${MONGODB_PERSISTENCE_SIZE:=2Gi}"
   : "${MONGODB_IMAGE_REGISTRY:=}" "${MONGODB_IMAGE_REPOSITORY:=}" "${MONGODB_IMAGE_TAG:=}"
   : "${DEPLOY_UERANSIM:=true}" "${EXPOSE_RAN:=false}"
+  : "${RAN_LINK_ENABLED:=false}" "${RAN_LINK_IFACE:=}" "${RAN_LINK_CIDR:=}" "${RAN_LINK_MTU:=1500}"
+  : "${AMF_N2_IP:=}" "${UPF_N3_IP:=}" "${GNB_SIM_IP:=}" "${MULTUS_CHART_VERSION:=v4.3.110}"
   : "${UE_COUNT:=1}" "${UE_MSIN_START:=0000000001}"
   : "${UE_KEY:?defina UE_KEY}" "${UE_OPC:?defina UE_OPC}"
   : "${TEST_PING_COUNT:=4}" "${TEST_INTERNET:=true}" "${TEST_PING_TARGET:=8.8.8.8}" "${TEST_TIMEOUT:=180}"
@@ -225,6 +227,25 @@ validate_config() {
     [[ "${STABLE_IFACE}" =~ ^[a-zA-Z0-9_-]{1,15}$ ]] || bad "STABLE_IFACE inválido (até 15 caracteres)"
   fi
 
+  if is_true "${RAN_LINK_ENABLED}"; then
+    is_true "${EXPOSE_RAN}" && bad "RAN_LINK_ENABLED e EXPOSE_RAN são alternativas: ligue só um"
+    [[ "${RAN_LINK_IFACE}" =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || bad "RAN_LINK_IFACE inválido"
+    [[ "${RAN_LINK_MTU}" =~ ^[0-9]+$ ]] && (( RAN_LINK_MTU >= 1280 && RAN_LINK_MTU <= 9216 )) || bad "RAN_LINK_MTU 1280..9216"
+    if valid_cidr "${RAN_LINK_CIDR}"; then
+      for e in "${K3S_CLUSTER_CIDR}" "${K3S_SERVICE_CIDR}"; do
+        if cidr_overlap "${RAN_LINK_CIDR}" "$e"; then bad "RAN_LINK_CIDR sobrepõe $e"; fi
+      done
+      for e in AMF_N2_IP UPF_N3_IP GNB_SIM_IP; do
+        if ! valid_ipv4 "${!e}"; then bad "$e inválido ('${!e}')"
+        elif ! cidr_overlap "${!e}/32" "${RAN_LINK_CIDR}"; then bad "$e (${!e}) fora de RAN_LINK_CIDR"; fi
+      done
+      [[ "${AMF_N2_IP}" != "${UPF_N3_IP}" && "${AMF_N2_IP}" != "${GNB_SIM_IP}" && "${UPF_N3_IP}" != "${GNB_SIM_IP}" ]] \
+        || bad "AMF_N2_IP, UPF_N3_IP e GNB_SIM_IP devem ser diferentes"
+    else
+      bad "RAN_LINK_CIDR inválido ('${RAN_LINK_CIDR}')"
+    fi
+  fi
+
   (( errors == 0 )) || die "${errors} erro(s) no ${CONFIG}"
   unset -f bad
 }
@@ -329,7 +350,12 @@ populate_deploy() {
 # ----------------------------------------------------------------------------
 _q() { printf '"%s"' "$1"; }   # string YAML entre aspas
 
-_nf_common() {  # $1 = chave do NF no chart umbrella
+# Anotação do Multus: 2ª interface (net1) na rede ran-link com IP fixo
+ran_link_annotation() {  # $1 = IP
+  printf "k8s.v1.cni.cncf.io/networks: '[{\"name\":\"ran-link\",\"ips\":[\"%s/%s\"]}]'" "$1" "${RAN_LINK_CIDR#*/}"
+}
+
+_nf_common() {  # $1 = chave do NF no chart umbrella; $2 (opcional) = IP no ran-link
   echo "$1:"
   # Recreate: em RollingUpdate pods novos descobrem NFs antigos (via NRF antigo) e
   # guardam esse cache por 24h => falhas como "No route to host" no SCP.
@@ -337,6 +363,7 @@ _nf_common() {  # $1 = chave do NF no chart umbrella
   echo "    type: Recreate"
   echo "  podAnnotations:"
   echo "    ${HASH_ANNOTATION}: __CONFIG_HASH__"
+  if [[ -n "${2:-}" ]]; then echo "    $(ran_link_annotation "$2")"; fi
   if [[ -n "${OPEN5GS_IMAGE_TAG}" ]]; then
     echo "  image:"
     echo "    tag: $(_q "${OPEN5GS_IMAGE_TAG}")"
@@ -377,7 +404,8 @@ render_open5gs_values() {
     for nf in scp ausf udm udr pcf bsf; do _nf_common "$nf"; done
 
     # --- AMF: GUAMI, TAI, PLMN + S-NSSAI suportados
-    _nf_common amf
+    #     Com RAN_LINK: net1 no link; o N2 passa a ouvir em net1 (post-renderer amf-ngap-net1.sh)
+    if is_true "${RAN_LINK_ENABLED}"; then _nf_common amf "${AMF_N2_IP}"; else _nf_common amf; fi
     echo "  config:"
     echo "    networkName: $(_q "${NETWORK_NAME}")"
     echo "    guamiList:"
@@ -420,8 +448,13 @@ render_open5gs_values() {
     done
 
     # --- UPF: uma TUN + NAT por DNN
-    _nf_common upf
+    if is_true "${RAN_LINK_ENABLED}"; then _nf_common upf "${UPF_N3_IP}"; else _nf_common upf; fi
     echo "  config:"
+    if is_true "${RAN_LINK_ENABLED}"; then
+      echo "    upf:"
+      echo "      gtpu:"
+      echo "        dev: net1            # N3 no link com o gNB (${UPF_N3_IP})"
+    fi
     if is_true "${EXPOSE_RAN}"; then
       echo "    upf:"
       echo "      gtpu:"
@@ -464,6 +497,34 @@ render_open5gs_values() {
   OPEN5GS_VALUES="${out}"
 }
 
+# Rede ran-link (NetworkAttachmentDefinition do Multus): macvlan sobre RAN_LINK_IFACE.
+# O IP de cada pod vem da anotação dele (IPAM static). No macvlan o próprio host
+# não enxerga os pods pela RAN_LINK_IFACE; o gNB do outro lado do cabo, sim.
+render_ran_link_nad() {
+  local out="${GENERATED_DIR}/ran-link-nad.yaml"
+  mkdir -p "${GENERATED_DIR}"
+  cat >"${out}" <<EOF
+# GERADO automaticamente a partir de config.env — não edite à mão.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ran-link
+  namespace: ${K8S_NAMESPACE}
+spec:
+  config: |-
+    {
+      "cniVersion": "0.3.1",
+      "type": "macvlan",
+      "master": "${RAN_LINK_IFACE}",
+      "mode": "bridge",
+      "mtu": ${RAN_LINK_MTU},
+      "ipam": { "type": "static" },
+      "capabilities": { "ips": true }
+    }
+EOF
+  RAN_LINK_NAD="${out}"
+}
+
 render_ueransim_values() {
   local out="${GENERATED_DIR}/ueransim-values.yaml" body
   mkdir -p "${GENERATED_DIR}"
@@ -481,8 +542,19 @@ render_ueransim_values() {
     fi
     echo "podAnnotations:"
     echo "  ${HASH_ANNOTATION}: __CONFIG_HASH__"
-    echo "amf:"
-    echo "  hostname: $(_q "${OPEN5GS_RELEASE}-amf-ngap")"
+    if is_true "${RAN_LINK_ENABLED}"; then
+      # gNB simulado no mesmo link do gNB real: N2 e N3 por net1; rádio (UEs) segue no eth0
+      echo "  $(ran_link_annotation "${GNB_SIM_IP}")"
+      echo "amf:"
+      echo "  ip: $(_q "${AMF_N2_IP}")"
+      echo "interfaces:"
+      echo "  n2: {dev: net1}"
+      echo "  n3: {dev: net1}"
+      echo "  radio: {dev: eth0}"
+    else
+      echo "amf:"
+      echo "  hostname: $(_q "${OPEN5GS_RELEASE}-amf-ngap")"
+    fi
     echo "mcc: $(_q "${MCC}")"
     echo "mnc: $(_q "${MNC}")"
     echo "tac: $(_q "$((10#${TAC}))")"

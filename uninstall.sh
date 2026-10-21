@@ -53,6 +53,10 @@ if k3s_ready; then
     kc -n "${K8S_NAMESPACE}" delete pvc --all --wait=true >/dev/null 2>&1 || true
     kc delete ns "${K8S_NAMESPACE}" --wait=true --timeout=180s >/dev/null && ok "namespace ${K8S_NAMESPACE} removido"
   fi
+  if [[ -n "${HELM_BIN}" ]] && hm -n kube-system status multus &>/dev/null; then
+    hm -n kube-system uninstall multus --wait --timeout 5m >/dev/null && ok "release multus removido"
+    kc delete crd network-attachment-definitions.k8s.cni.cncf.io --ignore-not-found >/dev/null
+  fi
 else
   info "k3s não está no ar; pulando remoção de releases"
 fi

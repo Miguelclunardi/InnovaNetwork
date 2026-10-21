@@ -91,6 +91,13 @@ Documentação do projeto: **português**.
 27. **Nó do k3s independente da rede física** (`NODE_IP_MODE=stable`, padrão). O `node-ip` ficava preso ao IP do cabo (191.4.204.79/`enp0s31f6`). Ao desligar o cabo e usar o Wi‑Fi, o k3s não subia (`node IP not found`). Agora uma interface dummy `k3s0` com 10.254.254.1/32, criada pela unit `open5gs-k3s-netif.service` e exigida pelo k3s via drop-in, é o node-ip e o flannel-iface. O host continua em DHCP, sem IP fixo; o N6 sai pela rota default do momento; NodePort e ServiceLB respondem em qualquer IP do host. `iface` mantém o comportamento antigo. Com `EXPOSE_RAN`, o IP físico anunciado ainda precisa ser estável. `uninstall --k3s` remove a unit e a interface.
 28. **Recuperação do plano de usuário** (`AUTO_HEAL=true`). Depois de um reboot ou restart do k3s, o UPF passou a rejeitar o SMF (`Cannot find PFCP-Node`): o UE registrava e recebia IP, mas não pingava. `ensure_user_plane` (common.sh) escalona: espera, depois reinicia os UEs, depois UPF → SMF → gNB → UEs. É usado pelo install e por `scripts/heal.sh`. A unit `open5gs-k3s-heal` (`Type=exec`, para não atrasar o boot) roda no boot uma **cópia root** em `/opt/open5gs-k3s/heal`: uma unit root não executa arquivos que o usuário pode editar. `uninstall --k3s` remove a unit.
 29. **Rede instável no servidor** (torre2: DNS e downloads falharam por alguns segundos durante o install): `retry` em `common.sh` (5 tentativas, 5–20 s) no instalador do k3s, clone/fetch dos charts, `helm repo add` e `helm dependency build`; `curl --retry` nos downloads.
+30. **Setor 2 — link direto com o gNB real (`RAN_LINK_ENABLED`)**. Multus (chart `rke2-multus`, pastas do k3s em
+    `helm/multus/values.yaml`; o chart não traz o CRD ⇒ `helm/multus/crd.yaml`) + rede `ran-link` (macvlan sobre
+    `RAN_LINK_IFACE`, MTU do link, IP fixo por anotação). AMF (N2), UPF (N3) **e o gNB simulado** ganham `net1` no link,
+    como na arquitetura de referência (towards5gs-helm): o `test.sh` passa pelo mesmo caminho do gNB real. O chart do
+    AMF fixa `ngap: dev eth0` ⇒ post-renderer `helm/postrender/amf-ngap-net1.sh`. Alternativa `EXPOSE_RAN` (NAT pelo
+    IP do host) fica para quem não tem link dedicado. Limitação: sem sinal no cabo o macvlan fica sem carrier e o gNB
+    simulado também não conecta.
 
 ## Ruído conhecido
 
