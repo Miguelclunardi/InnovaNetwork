@@ -28,6 +28,26 @@ function nfInfo(p) {
   return NF_INFO[k] || [p.label || p.component || p.name, ""];
 }
 
+// Identificação do UE no rádio: nome / IMSI / IP (o gNB só conhece o RNTI)
+function ueTitle(u) {
+  const id = u.ident || {};
+  return id.name || (id.imsi ? "IMSI " + id.imsi : "RNTI " + u.rnti);
+}
+function ueShort(u) {
+  const id = u.ident || {};
+  return id.name || (id.imsi ? "…" + id.imsi.slice(-4) : "RNTI " + u.rnti);
+}
+function ueIps(u) {
+  const s = (u.ident && u.ident.sessions) || [];
+  return s.filter((x) => x.ipv4).map((x) => x.ipv4 + (s.length > 1 ? " (" + x.dnn + ")" : "")).join(", ");
+}
+function ueKindTag(u) {
+  const id = u.ident || {};
+  if (!id.imsi) return '<span class="tag" title="ainda sem o vínculo RNTI → IMSI (precisa do log do gNB; aparece quando o UE troca mensagens com o core)">não identificado</span>';
+  return id.kind === "ueransim" ? '<span class="tag">UERANSIM</span>' : '<span class="tag real">SIM real</span>';
+}
+const UE_STALE_SECONDS = 120;   // RNTIs parados há mais que isso ficam escondidos por padrão
+
 function fmtRate(bps) {
   if (bps == null || isNaN(bps)) return "–";
   if (bps >= 1e9) return (bps / 1e9).toFixed(2) + " Gbit/s";
@@ -251,15 +271,17 @@ const Overview = {
       <div class="value">${esc(x.v)}</div><div class="sub">${esc(x.s)}</div></div>`).join("");
   },
   ranUes(ov) {
-    const ues = ov.gnb.ues;
+    const now = Date.now() / 1000;
+    const ues = ov.gnb.ues.filter((u) => u.active || now - u.last_seen <= UE_STALE_SECONDS);
     $("#ov-ran-sub").textContent = ov.gnb.status.enabled ? `(${CONFIG.gnb_name || "gNB"} · só UEs reais; o UERANSIM não passa pelo rádio)` : "(métricas do gNB desligadas)";
     if (!ues.length) { $("#ov-ran-ues").innerHTML = `<tr><td class="empty">Nenhum UE visto pelo gNB na última janela.</td></tr>`; return; }
-    $("#ov-ran-ues").innerHTML = `<tr><th>RNTI</th><th class="num">DL</th><th class="num">UL</th><th class="num">MCS DL/UL</th>
+    $("#ov-ran-ues").innerHTML = `<tr><th>UE</th><th>IP</th><th class="num">DL</th><th class="num">UL</th><th class="num">MCS DL/UL</th>
       <th class="num">CQI</th><th class="num">RI</th><th class="num">BLER DL/UL (10 s)</th><th class="num">SNR</th><th>Visto</th></tr>` +
       ues.map((u) => {
         const l = u.last || {};
         const bl = (v) => (v == null ? "–" : `<span class="tag ${v > 10 ? "err" : v > 3 ? "warn" : "ok"}">${fmt(v)}%</span>`);
-        return `<tr class="${u.active ? "" : "dim"}"><td><b>${esc(u.rnti)}</b> <span class="muted">pci ${esc(u.pci)}</span></td>
+        return `<tr class="${u.active ? "" : "dim"}"><td><b>${esc(ueTitle(u))}</b> ${ueKindTag(u)}<br><span class="muted">RNTI ${esc(u.rnti)} · pci ${esc(u.pci)}</span></td>
+          <td>${esc(ueIps(u)) || '<span class="muted">–</span>'}</td>
           <td class="num">${fmtRate(l.dl_brate)}</td><td class="num">${fmtRate(l.ul_brate)}</td>
           <td class="num">${fmt(l.dl_mcs, 0)} / ${fmt(l.ul_mcs, 0)}</td><td class="num">${fmt(l.cqi, 0)}</td>
           <td class="num">${fmt(l.dl_ri, 1)}</td><td class="num" title="últimos 10 s: ${l.dl_tbs_win || 0} blocos DL, ${l.ul_tbs_win || 0} UL">${bl(l.dl_bler_win)} ${bl(l.ul_bler_win)}</td>
@@ -309,18 +331,28 @@ const Ran = {
     $("#ran-status").textContent = !st.enabled ? "métricas do gNB desligadas (GNB_METRICS_URL vazio)"
       : st.connected ? `conectado a ${st.url} · ${st.messages} mensagens · última há ${ago(st.last_msg)}`
         : `sem conexão com ${st.url}: ${st.error || "aguardando"}`;
-    const ues = d.ues;
+    const all = d.ues;
+    const now = Date.now() / 1000;
+    const stale = all.filter((u) => !u.active && now - u.last_seen > UE_STALE_SECONDS);
+    const ues = this.showOld ? all : all.filter((u) => !stale.includes(u) || u.id === this.selected);
+    ues.sort((a, b) => (b.active - a.active) || (b.last_seen - a.last_seen));
+    const ob = $("#ran-old");
+    ob.classList.toggle("hidden", !stale.length);
+    ob.textContent = this.showOld ? `Esconder ${stale.length} antigos` : `Mostrar ${stale.length} antigos`;
+    $("#ran-ident-note").classList.toggle("hidden", d.ident_source || !all.length);
     // seletor de UE
     const sel = $("#ran-ue");
     const ids = ues.map((u) => u.id);
     if (!ids.includes(this.selected)) this.selected = (ues.find((u) => u.active) || ues[0] || {}).id || null;
-    const optsHtml = ues.map((u) => `<option value="${esc(u.id)}" ${u.id === this.selected ? "selected" : ""}>RNTI ${esc(u.rnti)}${u.active ? "" : " (inativo)"}</option>`).join("");
+    const optsHtml = ues.map((u) => `<option value="${esc(u.id)}" ${u.id === this.selected ? "selected" : ""}>${esc(ueTitle(u))} · RNTI ${esc(u.rnti)}${u.active ? "" : " (inativo)"}</option>`).join("");
     if (sel.innerHTML !== optsHtml) sel.innerHTML = optsHtml || "<option>sem UEs</option>";
     // cartões dos UEs
     $("#ran-uecards").innerHTML = ues.map((u) => {
       const l = u.last || {};
       return `<div class="uecard ${u.id === this.selected ? "sel" : ""} ${u.active ? "" : "inactive"}" data-id="${esc(u.id)}">
-        <div class="h"><span>RNTI ${esc(u.rnti)}</span><span class="muted">${u.active ? "ativo" : "há " + ago(u.last_seen)}</span></div>
+        <div class="h"><span class="t" title="${esc((u.ident && u.ident.imsi) || "")}">${esc(ueTitle(u))}</span><span class="muted">${u.active ? "ativo" : "há " + ago(u.last_seen)}</span></div>
+        <div class="id">${ueKindTag(u)} ${ueIps(u) ? `<span class="ip">${esc(ueIps(u))}</span>` : ""}
+          <span class="muted">RNTI ${esc(u.rnti)}${u.ident && u.ident.name && u.ident.imsi ? " · …" + esc(u.ident.imsi.slice(-6)) : ""}</span></div>
         <div class="m"><div><span>DL</span> ${fmtRate(l.dl_brate)}</div><div><span>UL</span> ${fmtRate(l.ul_brate)}</div><div><span>CQI</span> ${fmt(l.cqi, 0)}</div>
         <div><span>MCS</span> ${fmt(l.dl_mcs, 0)}/${fmt(l.ul_mcs, 0)}</div><div title="últimos 10 s"><span>BLER</span> ${fmt(l.dl_bler_win)}/${fmt(l.ul_bler_win)}%</div><div><span>SNR</span> ${fmt(l.pusch_snr_db)}</div></div></div>`;
     }).join("") || `<div class="empty">Nenhum UE visto pelo gNB nesta janela.</div>`;
@@ -334,14 +366,14 @@ const Ran = {
     Charts.make("c-cell-prb", [{ label: "PDSCH (DL)", dec: 0 }, { label: "PUSCH (UL)", color: "#6b7280", dec: 0 }]);
     Charts.set("c-cell-prb", cell ? cols(cell.series, ["pdsch_prbs", "pusch_prbs"]) : [[], [], []]);
     // por UE
-    const ueSeries = ues.map((u, i) => ({ label: "RNTI " + u.rnti, color: colorFor(i), fmt: mbps }));
+    const ueSeries = ues.map((u, i) => ({ label: ueShort(u), color: colorFor(i), fmt: mbps }));
     Charts.make("c-ue-dl", ueSeries);
     Charts.set("c-ue-dl", align(ues.map((u) => u.series), "dl_brate", 1e-6));
     Charts.make("c-ue-ul", ueSeries);
     Charts.set("c-ue-ul", align(ues.map((u) => u.series), "ul_brate", 1e-6));
     // UE selecionado
     const u = ues.find((x) => x.id === this.selected);
-    $("#ran-sel").textContent = u ? `RNTI ${u.rnti} · visto desde ${new Date(u.first_seen * 1000).toLocaleTimeString("pt-BR")}` : "";
+    $("#ran-sel").textContent = u ? `${ueTitle(u)}${ueIps(u) ? " · " + ueIps(u) : ""} · RNTI ${u.rnti} · visto desde ${new Date(u.first_seen * 1000).toLocaleTimeString("pt-BR")}` : "";
     const s = u ? u.series : { t: [] };
     Charts.make("c-bler", [{ label: "BLER DL" }, { label: "BLER UL", color: "#6b7280" }], { spanGaps: true, scales: { y: { range: [0, 100] } } });
     Charts.set("c-bler", cols(s, ["dl_bler", "ul_bler"]));
@@ -368,6 +400,7 @@ const Ran = {
       { label: "UCI falho", color: "#ef4444", dec: 0 }]);
     Charts.set("c-fail", cell ? cols(cell.series, ["late_dl_harqs", "late_ul_harqs", "failed_dl_pdcch", "failed_ul_pdcch", "failed_uci_allocs"]) : [[], [], [], [], [], []]);
   },
+  showOld: false,
   select(id) {
     this.selected = id;
     store.set("ran.ue", id);
@@ -644,3 +677,4 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
   setInterval(refreshNow, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();
+$("#ran-old").addEventListener("click", () => { Ran.showOld = !Ran.showOld; Ran.refresh(); });

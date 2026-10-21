@@ -67,7 +67,12 @@
         <option value="900">15 min</option></select></label>
       <button id="ran-pause" class="btn">Pausar</button>
       <a class="btn" id="ran-csv" href="api/ran.csv" download>Exportar CSV</a>
+      <button id="ran-old" class="btn hidden"></button>
       <span class="muted" id="ran-status"></span>
+    </div>
+    <div class="note hidden" id="ran-ident-note">O gNB só informa o <b>RNTI</b>. Para mostrar nome, IMSI e IP, o painel
+      cruza o log do gNB (RNTI → AMF_UE_NGAP_ID) com o log do AMF (→ IMSI) e do SMF (→ IP). Ligue o log do gNB
+      (<code>GNB_LOG_SSH</code> no config.env + <code>sudo ./install.sh --dashboard-only</code>).
     </div>
     <div class="ue-strip" id="ran-uecards"></div>
     <h3 class="sect">Célula</h3>

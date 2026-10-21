@@ -438,6 +438,9 @@ RE_DEREG = re.compile(r"\[imsi-(\d+)\].*(De-register|Deregistration|De-registere
 RE_DNN_NOK = re.compile(r"\[imsi-(\d+)\] DNN Not Supported OR Not Subscribed")
 RE_REJECT = re.compile(r"\[imsi-(\d+)\].*[Rr]eject")
 RE_SESS_ADD = re.compile(r"UE SUPI\[imsi-(\d+)\] DNN\[([^\]]+)\] IPv4\[([^\]]*)\] IPv6\[([^\]]*)\]")
+# Identificação do UE: AMF_UE_NGAP_ID -> IMSI (log do AMF). O SUCI em claro (esquema 0) já traz o MSIN.
+RE_NGAP_IDS = re.compile(r"RAN_UE_NGAP_ID\[(\d+)\] AMF_UE_NGAP_ID\[(\d+)\]")
+RE_IDENT = re.compile(r"\[(?:imsi-(\d{15})|suci-0-(\d{3})-(\d{2,3})-[^-\]]+-0-[^-\]]+-(\d+))[\]:]")
 RE_SESS_DEL = re.compile(r"Removed Session: UE IMSI:\[imsi-(\d+)\] DNN:\[([^:\]]+)")
 
 
@@ -499,10 +502,47 @@ class CoreState:
         self.sessions = {}     # (imsi, dnn) -> {"ipv4": ..., "ipv6": ..., "ts": ...}
         self.events = collections.OrderedDict()   # chave normalizada -> evento (agrupa repetidos)
         self.counters = collections.Counter()
+        self.amf_ids = collections.OrderedDict()   # AMF_UE_NGAP_ID -> IMSI
+        self._n = 0
+        self._ident = (None, -99)    # (imsi, nº da linha) da última identidade vista no log do AMF
+        self._pend = (None, -99)     # (AMF_UE_NGAP_ID, nº da linha) ainda sem identidade
+
+    def _map_amf(self, amf_id, imsi):
+        self.amf_ids[amf_id] = imsi
+        self.amf_ids.move_to_end(amf_id)
+        while len(self.amf_ids) > 5000:
+            self.amf_ids.popitem(last=False)
+
+    def _ngap_ident(self, line):
+        self._n += 1
+        m = RE_IDENT.search(line)
+        imsi = None
+        if m:
+            imsi = m.group(1) or (m.group(2) + m.group(3) + m.group(4))
+            if len(imsi) != 15:
+                imsi = None
+        m2 = RE_NGAP_IDS.search(line)
+        if m2:
+            amf_id = int(m2.group(2))
+            if self._ident[0] and self._n - self._ident[1] <= 3:
+                self._map_amf(amf_id, self._ident[0])
+                self._pend = (None, -99)
+            else:
+                self._pend = (amf_id, self._n)
+        elif imsi:
+            if self._pend[0] is not None and self._n - self._pend[1] <= 20:
+                self._map_amf(self._pend[0], imsi)
+                self._pend = (None, -99)
+            self._ident = (imsi, self._n)
+
+    def imsi_of(self, amf_id):
+        with self.lock:
+            return self.amf_ids.get(amf_id)
 
     def reset(self, component):
         with self.lock:
             if component == "amf":
+                self.amf_ids.clear()
                 self.gnbs.clear()
                 self.nof_gnbs = None
                 self.ues.clear()
@@ -525,6 +565,7 @@ class CoreState:
             elif "] WARNING:" in line:
                 lvl = "warning"
             if comp == "amf":
+                self._ngap_ident(line)
                 m = RE_GNB_ACC.search(line)
                 if m:
                     self.gnbs[m.group(1)] = {"accepted": ts}
@@ -887,6 +928,29 @@ def local_host_loop(hosts):
 # ----------------------------------------------------------------------------
 #  Log do gNB real (recebido de um agente no host do gNB)
 # ----------------------------------------------------------------------------
+# Só linhas do CU (RRC/CU-CP/NGAP): nelas "ue=" é o índice do UE no CU-CP. No [SCHED]/[MAC] "ue=" é do DU.
+RE_LOG_CRNTI = re.compile(r"\[(?:RRC|CU-CP) *\] \[\w\] ue=(\d+) c-rnti=0x([0-9a-fA-F]+)")
+RE_LOG_AMFUE = re.compile(r"\[NGAP *\] \[\w\] (?:[TR]x PDU )?ue=(\d+) ran_ue=\d+ amf_ue=(\d+)")
+
+
+def ue_identity(rnti):
+    """RNTI do gNB -> IMSI, nome, tipo e IPs (log do gNB + log do AMF + sessões do SMF)."""
+    try:
+        rnti = int(rnti)
+    except (TypeError, ValueError):
+        return {}
+    amf_id = GNBLOG.amf_id_of(rnti)
+    if amf_id is None:
+        return {}
+    imsi = CORE.state.imsi_of(amf_id)
+    if not imsi:
+        return {"amf_ue_id": amf_id}
+    with CORE.state.lock:
+        ips = [{"dnn": d, "ipv4": s.get("ipv4")} for (i, d), s in sorted(CORE.state.sessions.items()) if i == imsi]
+    return {"amf_ue_id": amf_id, "imsi": imsi, "name": UE_NAMES.get(imsi, ""),
+            "kind": "ueransim" if imsi in SIM_IMSIS else "real", "sessions": ips}
+
+
 class GnbLog:
     def __init__(self, maxlen=20000):
         self.lines = collections.deque(maxlen=maxlen)
@@ -894,12 +958,38 @@ class GnbLog:
         self.cond = threading.Condition()
         self.last_push = None
         self.source = None
+        self.rnti_cu = {}     # RNTI (int) -> índice do UE no CU-CP
+        self.cu_amf = {}      # índice do UE no CU-CP -> AMF_UE_NGAP_ID
+
+    def _ident(self, ln):
+        m = RE_LOG_CRNTI.search(ln)
+        if m:
+            self.rnti_cu[int(m.group(2), 16)] = int(m.group(1))
+        m = RE_LOG_AMFUE.search(ln)
+        if m:
+            self.cu_amf[int(m.group(1))] = int(m.group(2))
+        if len(self.rnti_cu) > 5000:
+            self.rnti_cu = dict(list(self.rnti_cu.items())[-2000:])
+            self.cu_amf = dict(list(self.cu_amf.items())[-2000:])
+
+    def amf_id_of(self, rnti):
+        with self.cond:
+            cu = self.rnti_cu.get(rnti)
+            return self.cu_amf.get(cu) if cu is not None else None
+
+    def ident_only(self, lines):
+        """Linhas antigas só para montar o vínculo RNTI -> UE (não entram na tela de log)."""
+        with self.cond:
+            for ln in lines:
+                self._ident(ln)
 
     def push(self, lines, source):
         with self.cond:
             for ln in lines:
                 self.seq += 1
                 self.lines.append((self.seq, ln))
+                if "c-rnti=" in ln or "amf_ue=" in ln:
+                    self._ident(ln)
             self.last_push = time.time()
             self.source = source
             self.cond.notify_all()
@@ -1098,7 +1188,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/overview":
                 return self._send(200, self._overview())
             if path == "/api/ran":
-                return self._send(200, GNB.snapshot(min(_q(qs, "window", 300, int), HISTORY_SECONDS)))
+                snap = GNB.snapshot(min(_q(qs, "window", 300, int), HISTORY_SECONDS))
+                for u in snap["ues"]:
+                    u["ident"] = ue_identity(u["rnti"])
+                snap["ident_source"] = bool(GNBLOG.last_push)
+                snap["ident_stats"] = {"rnti": len(GNBLOG.rnti_cu), "cu_amf": len(GNBLOG.cu_amf),
+                                       "amf_imsi": len(CORE.state.amf_ids)}
+                return self._send(200, snap)
             if path == "/api/ran.csv":
                 return self._ran_csv(min(_q(qs, "window", HISTORY_SECONDS, int), HISTORY_SECONDS))
             if path == "/api/core":
@@ -1221,8 +1317,11 @@ class Handler(BaseHTTPRequestHandler):
             HOSTS_STATE.push(name, str(d.get("role") or "")[:80], "agente", d.get("sample"), d.get("error"))
             return self._send(200, {"ok": True})
         lines = [ANSI.sub("", l) for l in body.splitlines() if l.strip()]
+        if self.headers.get("X-Ident-Only") == "1":
+            GNBLOG.ident_only(lines)
+            return self._send(200, {"ok": True, "lines": len(lines)})
         GNBLOG.push(lines, self.headers.get("X-Source", self.client_address[0]))
-        return self._send(200, {"ok": True, "lines": len(lines)})
+        return self._send(200, {"ok": True, "lines": len(lines), "ident": len(GNBLOG.rnti_cu)})
 
     def _static(self, name):
         p = os.path.join(STATIC_DIR, name)
@@ -1246,8 +1345,8 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "now": time.time(),
             "gnb": {"status": ran["status"], "cell": cell_last,
-                    "ues": [{k: u[k] for k in ("id", "pci", "rnti", "active", "last", "first_seen", "last_seen")}
-                            for u in ran["ues"]]},
+                    "ues": [dict({k: u[k] for k in ("id", "pci", "rnti", "active", "last", "first_seen", "last_seen")},
+                                 ident=ue_identity(u["rnti"])) for u in ran["ues"]]},
             "core": {"pods_total": len(pods), "pods_ready": sum(1 for p in pods if p["all_ready"]),
                      "restarts": sum(p["restarts"] for p in pods), "pods_error": core["pods_error"],
                      "nof_gnbs": core["nof_gnbs"], "gnbs": core["gnbs"],
