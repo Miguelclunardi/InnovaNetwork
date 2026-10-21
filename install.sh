@@ -452,6 +452,27 @@ dashboard_firewall() {
   fi
 }
 
+# Aba Configuração: senha de administrador (gerada uma vez, só root lê) e permissões
+dashboard_config_edit() {
+  DASHBOARD_ADMIN_PASSWORD="" DASHBOARD_CONFIG_GID=""
+  is_true "${DASHBOARD_CONFIG_EDIT}" || return 0
+  local cfg="${PROJECT_DIR}/config.env" pwf="${INSTALL_DIR}/state/dashboard-admin-password" gid
+  if [[ "$(readlink -f "${CONFIG}")" != "$(readlink -f "${cfg}")" ]]; then
+    warn "aba Configuração desligada: só edita ${cfg} (CONFIG aponta para ${CONFIG})"; return 0
+  fi
+  if [[ ! -s "${pwf}" ]]; then
+    install -m 0600 -o root -g root /dev/null "${pwf}"
+    head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-20 >"${pwf}"
+  fi
+  DASHBOARD_ADMIN_PASSWORD=$(<"${pwf}")
+  gid=$(stat -c %g "${cfg}")
+  if (( gid == 0 )); then warn "aba Configuração desligada: ${cfg} pertence ao grupo root"; DASHBOARD_ADMIN_PASSWORD=""; return 0; fi
+  # O pod (usuário 65534) grava pelo grupo do dono do arquivo: precisa de g+w
+  [[ $(( 0$(stat -c %a "${cfg}") & 020 )) -ne 0 ]] || { chmod g+w "${cfg}"; info "config.env: permissão de escrita para o grupo (aba Configuração)"; }
+  install -d -m 2770 -o root -g "${gid}" "${INSTALL_DIR}/state/config-backups"
+  DASHBOARD_CONFIG_GID="${gid}"
+}
+
 step_dashboard() {
   if ! is_true "${DASHBOARD_ENABLED}"; then
     if kc -n "${K8S_NAMESPACE}" get deploy dashboard &>/dev/null; then
@@ -471,6 +492,7 @@ step_dashboard() {
     head -c 32 /dev/urandom | sha256sum | cut -c1-48 >"${tokf}"
   fi
   DASHBOARD_INGEST_TOKEN=$(<"${tokf}")
+  dashboard_config_edit
   kc create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kc apply -f - >/dev/null
   render_dashboard
   kc apply -f "${DASHBOARD_MANIFEST}" >/dev/null
@@ -685,6 +707,9 @@ final_summary() {
   fi
   if is_true "${DASHBOARD_ENABLED}"; then
     info "Painel:           http://${NODE_IP:-localhost}:${DASHBOARD_NODEPORT}$( [[ -n "${DASHBOARD_PASSWORD}" ]] && echo "  (admin / DASHBOARD_PASSWORD)" || true)"
+    if [[ -n "${DASHBOARD_ADMIN_PASSWORD:-}" ]]; then
+      info "  aba Configuração: senha de administrador em: sudo cat ${INSTALL_DIR}/state/dashboard-admin-password"
+    fi
   fi
   info "kubectl:          kubectl -n ${K8S_NAMESPACE} get pods   (como ${TARGET_USER}, sem sudo)"
   if is_true "${EXPOSE_RAN}"; then

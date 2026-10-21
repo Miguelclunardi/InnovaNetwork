@@ -8,6 +8,7 @@ Página web que roda **no próprio cluster do core** (máquina do core) e junta 
 | **Rádio (gNB)** | vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
 | **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
+| **Configuração** | edita o `config.env` (senha de administrador): campos por seção com a explicação do próprio arquivo, diff antes de salvar, validação do install, backup e restauração, e o comando para aplicar | `config.env` da máquina do core |
 | **Core** | métricas Prometheus do AMF/SMF/UPF/PCF: gNBs, UEs, sessões, tráfego N3 do UPF, tabela com todas as métricas | `:9090/metrics` dos NFs (precisa `OPEN5GS_METRICS=true`) |
 
 Endereço: `http://<IP-do-core>:30998` (`DASHBOARD_NODEPORT`). Sem senha por padrão; com
@@ -151,6 +152,30 @@ painel iniciou, gráficos e a tabela com todas as grandezas.
   `curl -s http://IP/Data | head -c 200`.
 - Em 2026-10-21 o IP do exemplo (192.168.68.105) não era alcançável do desktop, do torre2 nem do innovaserver (rede
   191.4.204.0/23): o medidor está em outra rede (roteador/Wi‑Fi próprio).
+
+## Aba Configuração (editar o `config.env`)
+
+Liga com `DASHBOARD_CONFIG_EDIT=true` (padrão no config deste repositório) + `sudo ./install.sh --dashboard-only`.
+
+- **Senha própria de administrador**, gerada uma vez pelo install e guardada só para root:
+  `sudo cat /opt/open5gs-k3s/state/dashboard-admin-password`. Sessão de 8 h no navegador (aba fechada = sai).
+  O resto do painel continua sem senha (ou com `DASHBOARD_PASSWORD`).
+- **Só altera o valor** de variáveis que já existem no arquivo (não cria linhas). Recusa quebra de linha, `$`,
+  `` ` ``, `\` e `"` nos valores — o `config.env` é lido com `source` pelo install como root.
+- Antes de salvar mostra o **diff** e roda a **mesma validação do install** (`validate_config`); com erro, não grava.
+- Cada gravação guarda o arquivo anterior em `/opt/open5gs-k3s/state/config-backups/` (últimos 50); a lista de
+  backups mostra o diff e permite restaurar.
+- Segredos (`UE_KEY`, `UE_OPC`, `SUBSCRIBERS`, `DASHBOARD_PASSWORD`) aparecem mascarados até clicar em
+  "Mostrar segredos".
+- Se alguém mudou o arquivo no servidor depois que a página abriu, a gravação é recusada (recarregue).
+- **Salvar não aplica.** O painel diz o comando necessário:
+  `--dashboard-only` (só variáveis do painel), `--deploy-only` (core/UERANSIM: reinicia NFs) ou install completo
+  (k3s/host). Rodar continua sendo com você, na máquina do core — o painel não tem acesso de root.
+- Como funciona: o pod monta o projeto **só leitura** e apenas o `config.env` com escrita, pelo grupo do dono
+  do arquivo (`supplementalGroups`); o install garante `g+w` no `config.env`.
+- Depois de salvar pela interface, o arquivo fica modificado no git do servidor: faça o commit como de costume.
+- Se o arquivo for **substituído** no servidor (ex.: `git checkout`, editor que recria o arquivo), o painel
+  passa a recusar a gravação até um novo `sudo ./install.sh --dashboard-only`.
 
 ## API (para scripts)
 

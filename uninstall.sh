@@ -71,7 +71,8 @@ if [[ -f "${HOSTS_UNIT_FILE}" ]]; then
   rm -f "${HOSTS_UNIT_FILE}"; rm -rf "${INSTALL_DIR}/dashboard-agent"; systemctl daemon-reload
   ok "unit open5gs-k3s-hosts removida"
 fi
-rm -f "${INSTALL_DIR}/state/dashboard-ingest-token"
+rm -f "${INSTALL_DIR}/state/dashboard-ingest-token" "${INSTALL_DIR}/state/dashboard-admin-password"
+rm -rf "${INSTALL_DIR}/state/config-backups"
 
 # 2) k3s --------------------------------------------------------------------------
 if ${REMOVE_K3S}; then

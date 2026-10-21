@@ -21,6 +21,7 @@
     <button role="tab" data-tab="logs">Logs</button>
     <button role="tab" data-tab="core">Core</button>
     <button role="tab" data-tab="hosts">Máquinas</button>
+    <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Configuração</button>
   </nav>
   <div class="topright">
     <span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span>
@@ -181,11 +182,53 @@
       </div>
     </div>
   </section>
+  <!-- ======================= CONFIGURAÇÃO ======================= -->
+  <section id="tab-settings" class="tab">
+    <div id="cfg-msg" class="cfgmsg hidden"></div>
+    <div id="cfg-login" class="card cfglogin">
+      <h2>Configuração (config.env)</h2>
+      <p class="muted">Edita o <code>config.env</code> da máquina do core. Precisa da senha de administrador
+        (mostrada no fim do <code>sudo ./install.sh</code>; também em <code>sudo cat /opt/open5gs-k3s/state/dashboard-admin-password</code>).</p>
+      <form id="cfg-login-form" class="toolbar">
+        <input type="password" id="cfg-pass" placeholder="senha de administrador" autocomplete="current-password">
+        <button class="btn on" type="submit">Entrar</button>
+      </form>
+    </div>
+    <div id="cfg-main" class="hidden">
+      <div class="toolbar cfgbar">
+        <input type="search" id="cfg-filter" placeholder="filtrar variável ou descrição">
+        <span class="muted" id="cfg-count"></span>
+        <button class="btn on" id="cfg-preview" disabled>Revisar e salvar…</button>
+        <button class="btn" id="cfg-discard" disabled>Descartar</button>
+        <span class="spacer"></span>
+        <span id="cfg-sub"></span>
+        <button class="btn" id="cfg-reveal">Mostrar segredos</button>
+        <button class="btn" id="cfg-reload">Recarregar</button>
+        <button class="btn" id="cfg-logout">Sair</button>
+      </div>
+      <div class="card cfgnote muted">Salvar só grava o arquivo (com backup e a mesma validação do install). <b>Aplicar</b>
+        continua sendo o comando <code>sudo ./install.sh …</code> na máquina do core — o painel mostra qual.</div>
+      <div id="cfg-review" class="card hidden">
+        <h2 id="cfg-review-title">Revisar alterações</h2>
+        <pre class="cfgdiff" id="cfg-diff"></pre>
+        <div id="cfg-valid" style="margin:8px 0"></div>
+        <div id="cfg-impact"></div>
+        <div class="toolbar" style="margin-top:10px">
+          <button class="btn on" id="cfg-save">Salvar no config.env</button>
+          <button class="btn" id="cfg-cancel">Voltar</button>
+        </div>
+      </div>
+      <div id="cfg-sections"></div>
+      <details class="card"><summary><b>Backups</b> <span class="muted">— clique para ver a diferença e restaurar</span></summary>
+        <ul id="cfg-backups" class="cfgbk"></ul></details>
+    </div>
+  </section>
 </main>
 
 <footer class="muted" id="footer"></footer>
 <script src="uPlot.iife.min.js"></script>
 <script src="app.js"></script>
 <script src="hosts.js"></script>
+<script src="settings.js"></script>
 </body>
 </html>

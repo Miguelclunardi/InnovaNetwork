@@ -25,7 +25,10 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import configedit
 
 # ----------------------------------------------------------------------------
 #  Configuração (variáveis de ambiente)
@@ -58,6 +61,11 @@ CORE_POLL_SECONDS = float(_env("CORE_POLL_SECONDS", "5"))
 OPEN5GS_RELEASE = _env("OPEN5GS_RELEASE", "open5gs")
 PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usuário: admin)
 INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
+# Aba Configuração (editar o config.env). Vazio = aba desligada.
+ADMIN_PASSWORD = _env("ADMIN_PASSWORD")
+CONFIG_PATH = _env("CONFIG_PATH")                      # config.env montado para escrita
+PROJECT_DIR = _env("PROJECT_DIR")                      # projeto montado só leitura (validação)
+CONFIG_BACKUP_DIR = _env("CONFIG_BACKUP_DIR")
 K8S_API = _env("K8S_API")                              # só para desenvolvimento (ex.: kubectl proxy)
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 # IMSIs dos UEs simulados (UERANSIM), separados por espaço — o resto é SIM real
@@ -920,7 +928,80 @@ STARTED = time.time()
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
                  ".ico": "image/x-icon"}
-STATIC_FILES = {"index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
+# ----------------------------------------------------------------------------- aba Configuração
+class Admin:
+    """Sessões do administrador (senha própria, token em memória, 8 h)."""
+    TTL = 8 * 3600
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.sessions = {}
+        self.fail_until = 0.0
+
+    def login(self, password):
+        with self.lock:
+            if time.time() < self.fail_until:
+                return None
+            if not ADMIN_PASSWORD or not hmac.compare_digest(str(password), ADMIN_PASSWORD):
+                self.fail_until = time.time() + 2   # freia tentativa de adivinhar a senha
+                return None
+            tok = secrets.token_urlsafe(32)
+            self.sessions[tok] = time.time() + self.TTL
+            return tok
+
+    def check(self, tok):
+        with self.lock:
+            now = time.time()
+            for k in [k for k, v in self.sessions.items() if v < now]:
+                del self.sessions[k]
+            return bool(tok) and any(hmac.compare_digest(tok, k) for k in self.sessions)
+
+    def logout(self, tok):
+        with self.lock:
+            self.sessions.pop(tok, None)
+
+
+ADMIN = Admin()
+CONFIG = (configedit.ConfigStore(CONFIG_PATH, os.path.join(PROJECT_DIR, "config.env"), PROJECT_DIR, CONFIG_BACKUP_DIR)
+          if ADMIN_PASSWORD and CONFIG_PATH and PROJECT_DIR and CONFIG_BACKUP_DIR else None)
+CONFIG_LOCK = threading.Lock()
+MASK = "••••••••"
+
+
+def settings_view(reveal):
+    text, h = CONFIG.read()
+    secs = configedit.parse(text)
+    for s in secs:
+        for v in s["vars"]:
+            v.pop("line", None), v.pop("end", None)
+            if v["secret"] and not reveal:
+                if "value" in v:
+                    v["value"] = MASK if v["value"] else ""
+                if "items" in v:
+                    v["items"] = [x.split(":")[0] + ":" + MASK if ":" in x else MASK for x in v["items"]]
+                v["notes_in_array"] = []
+    return {"sections": secs, "hash": h, "revealed": bool(reveal), "backups": CONFIG.backups(),
+            "writable": os.access(CONFIG_PATH, os.W_OK)}
+
+
+def settings_plan(body):
+    """Texto novo + diff + impacto + validação para um pedido de alteração."""
+    text, h = CONFIG.read()
+    if body.get("restore"):
+        new = CONFIG.backup_text(body["restore"])
+    else:
+        changes = body.get("changes")
+        if isinstance(changes, dict) and any(
+                (isinstance(v, str) and MASK in v) or (isinstance(v, list) and any(MASK in str(x) for x in v))
+                for v in changes.values()):
+            raise configedit.ConfigError("há campos secretos ainda mascarados: clique em 'mostrar segredos' antes de editá-los")
+        new = configedit.apply_changes(text, changes)
+    names = configedit.changed_vars(text, new)
+    return text, h, new, {"diff": configedit.diff(text, new), "changed": names, "impact": configedit.impact(names),
+                          "validation": configedit.validate(PROJECT_DIR, new) if names else {"ok": True, "output": ""}}
+
+
+STATIC_FILES = {"settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -1003,7 +1084,17 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/config":
                 return self._send(200, {"namespace": NAMESPACE, "gnb_name": GNB_NAME, "network_name": NETWORK_NAME, "gnb_url": GNB_METRICS_URL,
                                         "history_seconds": HISTORY_SECONDS, "core_metrics": CORE_METRICS,
-                                        "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE})
+                                        "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE,
+                                        "config_edit": bool(CONFIG)})
+            if path == "/api/settings":
+                if not self._admin():
+                    return None
+                return self._send(200, settings_view(_q(qs, "reveal", "") == "1"))
+            if path == "/api/settings/backup":
+                if not self._admin():
+                    return None
+                text, _ = CONFIG.read()
+                return self._send(200, {"diff": configedit.diff(text, CONFIG.backup_text(_q(qs, "name", "")))})
             if path == "/api/overview":
                 return self._send(200, self._overview())
             if path == "/api/ran":
@@ -1047,8 +1138,69 @@ class Handler(BaseHTTPRequestHandler):
             log("erro", path, repr(e))
             return self._send(500, {"error": str(e)})
 
+    def _admin(self):
+        """Exige a sessão de administrador (cabeçalho X-Admin-Token). Responde 401/404 se faltar."""
+        if not CONFIG:
+            self._send(404, {"error": "edição do config.env desligada (sem senha de administrador)"})
+            return False
+        if not ADMIN.check(self.headers.get("X-Admin-Token", "")):
+            self._send(401, {"error": "entre com a senha de administrador", "admin": True})
+            return False
+        return True
+
+    def _json_body(self, limit=1024 * 1024):
+        n = int(self.headers.get("Content-Length", "0") or 0)
+        if n > limit:
+            raise configedit.ConfigError("pedido grande demais")
+        d = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+        if not isinstance(d, dict):
+            raise configedit.ConfigError("JSON inválido")
+        return d
+
+    def _settings_post(self, path):
+        if not self._auth_ok():
+            return self._send(401, {"error": "autenticação necessária"},
+                              extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
+        try:
+            body = self._json_body()
+        except (ValueError, configedit.ConfigError) as e:
+            return self._send(400, {"error": str(e)})
+        if path == "/api/admin/login":
+            if not CONFIG:
+                return self._send(404, {"error": "edição do config.env desligada"})
+            tok = ADMIN.login(body.get("password", ""))
+            if not tok:
+                log("config: senha de administrador errada de", self.client_address[0])
+                return self._send(403, {"error": "senha incorreta (aguarde 2 s para tentar de novo)"})
+            log("config: login de administrador de", self.client_address[0])
+            return self._send(200, {"token": tok, "ttl": Admin.TTL})
+        if path == "/api/admin/logout":
+            ADMIN.logout(self.headers.get("X-Admin-Token", ""))
+            return self._send(200, {"ok": True})
+        if not self._admin():
+            return None
+        try:
+            with CONFIG_LOCK:
+                text, h, new, plan = settings_plan(body)
+                if path == "/api/settings/preview":
+                    return self._send(200, plan)
+                if not plan["changed"]:
+                    return self._send(400, {"error": "nada mudou", **plan})
+                if plan["validation"]["ok"] is False:
+                    return self._send(422, {"error": "a validação do install recusou o arquivo novo", **plan})
+                backup = CONFIG.write(new, body.get("hash", ""))
+            log("config: %s gravado por %s: %s (backup %s)" % (
+                CONFIG_PATH, self.client_address[0], ", ".join(plan["changed"]), backup))
+            return self._send(200, {"ok": True, "backup": backup, **plan})
+        except configedit.ConfigError as e:
+            return self._send(409 if "mudou" in str(e) or "substituído" in str(e) else 400, {"error": str(e)})
+        except OSError as e:
+            return self._send(500, {"error": "não foi possível gravar o config.env: %s" % e})
+
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path in ("/api/admin/login", "/api/admin/logout", "/api/settings/preview", "/api/settings/save"):
+            return self._settings_post(u.path)
         if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host"):
             return self._send(404, {"error": "não encontrado"})
         if not INGEST_TOKEN:

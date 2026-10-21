@@ -174,3 +174,36 @@ input[type=search] { min-width: 220px; }
   .charts, .grid2 { grid-template-columns: 1fr; }
   input[type=search] { min-width: 0; width: 100%; }
 }
+
+/* ---- Configuração */
+.cfglogin { max-width: 560px; }
+.cfglogin input[type=password] { font: inherit; font-size: 13px; color: var(--text); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; min-width: 240px; }
+.cfgbar { flex-wrap: wrap; gap: 8px; position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0; }
+.cfgbar .spacer { flex: 1; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.small { font-size: 12px; padding: 1px 8px; }
+.cfgnote { margin-bottom: 12px; font-size: 13px; }
+.cfgsec { margin-bottom: 12px; }
+.cfgrow { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 4px 16px; padding: 8px 6px;
+  border-top: 1px solid var(--border); border-left: 3px solid transparent; }
+.cfgrow:first-of-type { border-top: 0; }
+.cfgrow.mod { border-left-color: var(--warn); background: var(--warn-soft); }
+.cfgname code { font-size: 12.5px; font-weight: 600; word-break: break-all; }
+.cfgval input[type=text], .cfgval textarea, .cfgval select { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  width: 100%; box-sizing: border-box; }
+.cfgval select { width: auto; }
+.cfgval textarea { resize: vertical; }
+.cfgval :disabled { opacity: .6; }
+.cfghelp { font-size: 12px; color: var(--muted); white-space: pre-line; margin-top: 3px; }
+.cfgdiff, .cfgout { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel2);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow: auto; max-height: 360px; white-space: pre; margin: 0; }
+.cfgout { white-space: pre-wrap; margin-top: 6px; }
+.cfgdiff .add { color: var(--ok); } .cfgdiff .del { color: var(--err); } .cfgdiff .h { color: var(--muted); }
+code.cmd { font-size: 13px; padding: 2px 6px; background: var(--panel2); border-radius: 4px; }
+.cfgmsg { border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border); background: var(--panel); }
+.cfgmsg.ok { border-color: var(--ok); } .cfgmsg.err { border-color: var(--err); color: var(--err); }
+.cfgbk { margin: 8px 0 0; padding-left: 18px; }
+button.link { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; padding: 2px 0; }
+@media (max-width: 700px) { .cfgrow { grid-template-columns: 1fr; } }

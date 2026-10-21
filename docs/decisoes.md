@@ -126,6 +126,9 @@ Documentação do projeto: **português**.
     - aba **Máquinas**: a do core lida pelo pod (`/proc`, `/sys` e `/` do host montados só leitura); as outras
       (`DASHBOARD_HOSTS`) por SSH a partir da máquina do core, enviando o coletor pela entrada padrão — nada instalado
       no host do gNB; unit `open5gs-k3s-hosts`. Pods com nome curto (AMF…) e assinantes "SIM real" × "UERANSIM";
+    - **aba Configuração**: edita o `config.env` pela web com senha de administrador própria, diff, validação do
+      install, backup/restauração. Salvar não aplica: o painel mostra o `sudo ./install.sh ...` necessário (o
+      pod não ganha root). Pod com o projeto só leitura e só o `config.env` gravável (grupo do dono);
     - **energia** do innovaserver pelo medidor MiEnergy: o painel lê `http://IP/Data` direto (sem InfluxDB/Grafana do
       projeto original). Pendente: o medidor ficar alcançável a partir do torre2 (`ENERGY_METER_URL`).
 

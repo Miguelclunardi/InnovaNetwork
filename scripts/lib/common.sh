@@ -100,6 +100,7 @@ load_config() {
   declare -p K3S_EXTRA_ARGS &>/dev/null || K3S_EXTRA_ARGS=()
   declare -p DASHBOARD_UE_NAMES &>/dev/null || DASHBOARD_UE_NAMES=()
   declare -p DASHBOARD_HOSTS &>/dev/null || DASHBOARD_HOSTS=()
+  : "${DASHBOARD_CONFIG_EDIT:=false}" "${DASHBOARD_ADMIN_PASSWORD:=}" "${DASHBOARD_CONFIG_GID:=}"
   : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}" "${ENERGY_METER_URL:=}" "${ENERGY_METER_HOST:=}"
 
   CHARTS_DIR="${INSTALL_DIR}/5g-charts"
@@ -580,14 +581,34 @@ render_dashboard() {
   local hosts="" hn
   for e in "${DASHBOARD_HOSTS[@]}"; do IFS='|' read -r hn _ e <<<"$e"; hosts+="${hosts:+;}${hn}|${e}"; done
   mkdir -p "${GENERATED_DIR}"
-  for f in server.py hoststats.py index.html app.js hosts.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
+  # Aba Configuração: config.env gravável (pelo grupo do dono), projeto só leitura, backups
+  local cfg_env="" cfg_mounts="" cfg_vols="" cfg_groups=""
+  if [[ -n "${DASHBOARD_ADMIN_PASSWORD}" && -n "${DASHBOARD_CONFIG_GID}" ]]; then
+    cfg_groups="
+        supplementalGroups: [${DASHBOARD_CONFIG_GID}]"
+    cfg_env="
+            - {name: ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: admin-password}}}
+            - {name: CONFIG_PATH, value: /config/config.env}
+            - {name: PROJECT_DIR, value: /project}
+            - {name: CONFIG_BACKUP_DIR, value: /backups}"
+    cfg_mounts="
+            # Aba Configuração: só o config.env é gravável; o resto do projeto é só leitura
+            - {name: project, mountPath: /project, readOnly: true}
+            - {name: config-env, mountPath: /config/config.env}
+            - {name: config-backups, mountPath: /backups}"
+    cfg_vols="
+        - {name: project, hostPath: {path: $(_q "${PROJECT_DIR}"), type: Directory}}
+        - {name: config-env, hostPath: {path: $(_q "${PROJECT_DIR}/config.env"), type: File}}
+        - {name: config-backups, hostPath: {path: $(_q "${INSTALL_DIR}/state/config-backups"), type: Directory}}"
+  fi
+  for f in server.py configedit.py settings.js hoststats.py index.html app.js hosts.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -602,6 +623,7 @@ type: Opaque
 stringData:
   password: $(_q "${DASHBOARD_PASSWORD}")
   ingest-token: $(_q "${DASHBOARD_INGEST_TOKEN}")
+  admin-password: $(_q "${DASHBOARD_ADMIN_PASSWORD}")
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -654,7 +676,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
-        runAsGroup: 65534
+        runAsGroup: 65534${cfg_groups}
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: dashboard
@@ -682,7 +704,7 @@ spec:
             - {name: ENERGY_METER_HOST, value: $(_q "${ENERGY_METER_HOST}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
             - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
-            - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}
+            - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}${cfg_env}
           readinessProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 10
@@ -703,12 +725,14 @@ spec:
             - {name: host-proc, mountPath: /host/proc, readOnly: true}
             - {name: host-sys, mountPath: /host/sys, readOnly: true}
             - {name: host-root, mountPath: /host/root, readOnly: true}
+            - {name: tmp, mountPath: /tmp}${cfg_mounts}
       volumes:
         - name: app
           configMap: {name: dashboard-app}
         - {name: host-proc, hostPath: {path: /proc, type: Directory}}
         - {name: host-sys, hostPath: {path: /sys, type: Directory}}
         - {name: host-root, hostPath: {path: /, type: Directory}}
+        - {name: tmp, emptyDir: {sizeLimit: 16Mi}}${cfg_vols}
 ---
 apiVersion: v1
 kind: Service
