@@ -7,6 +7,7 @@
 #  Uso:
 #    sudo ./install.sh                 # instalação completa
 #    sudo ./install.sh --deploy-only   # só (re)gera values e faz helm upgrade
+#    sudo ./install.sh --dashboard-only  # só o painel (não toca no core nem no gNB)
 #    CONFIG=outro.env sudo -E ./install.sh
 #
 #  O log vai automaticamente para logs/install.log (não precisa de "| tee").
@@ -16,10 +17,12 @@ source "$(dirname "$(readlink -f "$0")")/scripts/lib/common.sh"
 trap 'err "falhou na linha ${LINENO}: ${BASH_COMMAND}"' ERR
 
 DEPLOY_ONLY=false
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+DASHBOARD_ONLY=false
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 for a in "$@"; do
   case "$a" in
     --deploy-only) DEPLOY_ONLY=true ;;
+    --dashboard-only) DASHBOARD_ONLY=true ;;
     -h|--help) usage ;;
     *) die "opção desconhecida: $a" ;;
   esac
@@ -116,6 +119,7 @@ step_host_profile() {
       ufw route allow from "${K3S_CLUSTER_CIDR}" comment 'open5gs-k3s pods' >/dev/null
       ufw route allow to "${K3S_CLUSTER_CIDR}" comment 'open5gs-k3s pods' >/dev/null
       if is_true "${WEBUI_ENABLED}"; then ufw allow "${WEBUI_NODEPORT}/tcp" comment 'open5gs-k3s webui' >/dev/null; fi
+      if is_true "${DASHBOARD_ENABLED}"; then ufw allow "${DASHBOARD_NODEPORT}/tcp" comment 'open5gs-k3s dashboard' >/dev/null; fi
       if is_true "${EXPOSE_RAN}"; then ufw allow 2152/udp comment 'open5gs-k3s N3' >/dev/null; fi
       ok "regras UFW aplicadas (CIDRs do cluster, WebUI$(is_true "${EXPOSE_RAN}" && echo ', N3' || true))"
       if is_true "${EXPOSE_RAN}"; then warn "UFW não filtra SCTP por porta: garanta que SCTP/38412 não esteja bloqueado"; fi
@@ -130,6 +134,7 @@ step_host_profile() {
       local fw=(--zone=trusted --add-source="${K3S_CLUSTER_CIDR}" --add-source="${K3S_SERVICE_CIDR}")
       firewall-cmd -q --permanent "${fw[@]}" 2>/dev/null || true
       if is_true "${WEBUI_ENABLED}"; then firewall-cmd -q --permanent --add-port="${WEBUI_NODEPORT}/tcp" 2>/dev/null || true; fi
+      if is_true "${DASHBOARD_ENABLED}"; then firewall-cmd -q --permanent --add-port="${DASHBOARD_NODEPORT}/tcp" 2>/dev/null || true; fi
       if is_true "${EXPOSE_RAN}"; then
         firewall-cmd -q --permanent --add-port=38412/sctp --add-port=2152/udp 2>/dev/null || true
       fi
@@ -433,6 +438,109 @@ step_deploy_ueransim() {
 }
 
 # ----------------------------------------------------------------------------
+#  8a. Painel (Innova Center Dashboard) — docs/dashboard.md
+#  Pod só leitura no namespace do core + (opcional) agente do log do gNB, que
+#  roda NESTA máquina como o usuário do install e lê o log por SSH (tail -F).
+# ----------------------------------------------------------------------------
+dashboard_firewall() {
+  is_true "${DASHBOARD_ENABLED}" || return 0
+  if ${UFW_ACTIVE} && is_true "${CONFIGURE_UFW}"; then
+    ufw allow "${DASHBOARD_NODEPORT}/tcp" comment 'open5gs-k3s dashboard' >/dev/null
+  fi
+  if ${HAS_FIREWALLD} && is_true "${CONFIGURE_FIREWALLD}"; then
+    firewall-cmd -q --permanent --add-port="${DASHBOARD_NODEPORT}/tcp" 2>/dev/null && firewall-cmd -q --reload || true
+  fi
+}
+
+step_dashboard() {
+  if ! is_true "${DASHBOARD_ENABLED}"; then
+    if kc -n "${K8S_NAMESPACE}" get deploy dashboard &>/dev/null; then
+      kc -n "${K8S_NAMESPACE}" delete deploy,svc,configmap/dashboard-app,secret,sa dashboard --ignore-not-found >/dev/null 2>&1 || true
+      kc -n "${K8S_NAMESPACE}" delete role,rolebinding dashboard-read --ignore-not-found >/dev/null 2>&1 || true
+      ok "painel removido (DASHBOARD_ENABLED=false)"
+    fi
+    remove_gnb_log_agent
+    return 0
+  fi
+  step "Painel Innova Center Dashboard (NodePort ${DASHBOARD_NODEPORT})"
+  # Token do agente do log do gNB: gerado uma vez e guardado só para root
+  local tokf="${INSTALL_DIR}/state/dashboard-ingest-token"
+  if [[ ! -s "${tokf}" ]]; then
+    install -m 0600 -o root -g root /dev/null "${tokf}"
+    head -c 32 /dev/urandom | sha256sum | cut -c1-48 >"${tokf}"
+  fi
+  DASHBOARD_INGEST_TOKEN=$(<"${tokf}")
+  kc create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kc apply -f - >/dev/null
+  render_dashboard
+  kc apply -f "${DASHBOARD_MANIFEST}" >/dev/null
+  kc -n "${K8S_NAMESPACE}" rollout status deploy/dashboard --timeout=300s >/dev/null \
+    || { kc -n "${K8S_NAMESPACE}" get pods -l app.kubernetes.io/name=dashboard; die "painel não ficou pronto"; }
+  dashboard_firewall
+  ok "painel no ar: http://${NODE_IP:-localhost}:${DASHBOARD_NODEPORT}"
+  if [[ -n "${GNB_METRICS_URL}" ]]; then info "métricas do gNB: ${GNB_METRICS_URL}"; fi
+  setup_gnb_log_agent
+}
+
+remove_gnb_log_agent() {
+  [[ -f "${GNBLOG_UNIT_FILE}" ]] || return 0
+  systemctl disable --now open5gs-k3s-gnb-log.service >/dev/null 2>&1 || true
+  rm -f "${GNBLOG_UNIT_FILE}"; rm -rf "${INSTALL_DIR}/dashboard-agent"; systemctl daemon-reload
+  ok "unit open5gs-k3s-gnb-log removida"
+}
+
+setup_gnb_log_agent() {
+  if [[ -z "${GNB_LOG_SSH}" ]]; then
+    remove_gnb_log_agent
+    info "log do gNB real desligado (GNB_LOG_SSH vazio)"
+    return 0
+  fi
+  [[ "${TARGET_USER}" != root ]] || { warn "agente do log do gNB precisa de um usuário comum (KUBECONFIG_USER/SUDO_USER)"; return 0; }
+  local dst="${INSTALL_DIR}/dashboard-agent" unit
+  install -d -m 0755 -o root -g root "${dst}"
+  install -m 0755 -o root -g root "${PROJECT_DIR}/dashboard/agent/gnb-log-agent.py" "${dst}/gnb-log-agent.py"
+  # Token legível só por root e pelo grupo do usuário que roda o agente
+  install -m 0640 -o root -g "${TARGET_GROUP}" /dev/null "${dst}/agent.env"
+  {
+    echo "DASHBOARD_URL=http://${NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"
+    echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
+    echo "GNB_LOG_SSH=${GNB_LOG_SSH}"
+    echo "GNB_LOG_DROP=${GNB_LOG_DROP}"
+  } >"${dst}/agent.env"
+  unit=$(cat <<EOU
+# Gerado por open5GK3S/install.sh
+[Unit]
+Description=open5GK3S: envia o log do gNB (${GNB_LOG_SSH}:${GNB_LOG_FILE}) ao painel
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${TARGET_USER}
+EnvironmentFile=${dst}/agent.env
+ExecStart=/usr/bin/python3 -u ${dst}/gnb-log-agent.py ${GNB_LOG_FILE}
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOU
+)
+  if [[ "$(cat "${GNBLOG_UNIT_FILE}" 2>/dev/null)" != "${unit}" ]]; then
+    printf '%s\n' "${unit}" >"${GNBLOG_UNIT_FILE}"; systemctl daemon-reload
+  fi
+  systemctl enable open5gs-k3s-gnb-log.service >/dev/null 2>&1
+  systemctl restart open5gs-k3s-gnb-log.service
+  # O agente usa a chave SSH do usuário: avisa se ainda não há acesso sem senha
+  if su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${GNB_LOG_SSH} test -r ${GNB_LOG_FILE}" &>/dev/null; then
+    ok "agente do log do gNB ativo (${GNB_LOG_SSH}:${GNB_LOG_FILE}; journalctl -u open5gs-k3s-gnb-log)"
+  else
+    warn "agente instalado, mas ${TARGET_USER} ainda não acessa ${GNB_LOG_SSH} por SSH sem senha (ou o arquivo não existe)"
+    warn "  configure a chave (docs/dashboard.md) — o agente tenta de novo sozinho"
+  fi
+}
+
+# ----------------------------------------------------------------------------
 #  8b. Recuperação automática no boot (AUTO_HEAL)
 #  Depois de um reboot os pods voltam em ordem qualquer e o plano de usuário
 #  pode ficar sem sincronia (UPF/SMF/UE). A unit roda scripts/heal.sh a cada boot.
@@ -515,6 +623,9 @@ final_summary() {
   if is_true "${WEBUI_ENABLED}"; then
     info "WebUI:            http://${NODE_IP:-localhost}:${WEBUI_NODEPORT}  (admin / 1423; vale qualquer IP do host)"
   fi
+  if is_true "${DASHBOARD_ENABLED}"; then
+    info "Painel:           http://${NODE_IP:-localhost}:${DASHBOARD_NODEPORT}$( [[ -n "${DASHBOARD_PASSWORD}" ]] && echo "  (admin / DASHBOARD_PASSWORD)" || true)"
+  fi
   info "kubectl:          kubectl -n ${K8S_NAMESPACE} get pods   (como ${TARGET_USER}, sem sudo)"
   if is_true "${EXPOSE_RAN}"; then
     info "gNB externo:      AMF N2 = ${NODE_IP}:38412/SCTP   UPF N3 = ${NODE_IP}:2152/UDP"
@@ -543,6 +654,12 @@ main() {
   print_env_summary
   mkdir -p "${INSTALL_DIR}/state"
 
+  if ${DASHBOARD_ONLY}; then
+    k3s_ready || die "--dashboard-only requer k3s já instalado e no ar"
+    step_dashboard
+    return 0
+  fi
+
   if ${DEPLOY_ONLY}; then
     k3s_ready || die "--deploy-only requer k3s já instalado e no ar"
     find_helm; [[ -n "${HELM_BIN}" ]] || die "helm não encontrado"
@@ -560,6 +677,7 @@ main() {
   step_deploy_core
   step_subscribers
   step_deploy_ueransim
+  step_dashboard
   step_boot_heal
   step_user_kubeconfig
   final_summary

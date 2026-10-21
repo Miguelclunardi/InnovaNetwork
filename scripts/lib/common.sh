@@ -20,7 +20,8 @@ MODULES_FILE="/etc/modules-load.d/open5gs-k3s.conf"
 NM_CONF_FILE="/etc/NetworkManager/conf.d/90-open5gs-k3s-unmanaged.conf"
 NETIF_UNIT_FILE="/etc/systemd/system/open5gs-k3s-netif.service"   # interface estável do nó
 K3S_DROPIN_FILE="/etc/systemd/system/k3s.service.d/10-open5gs-k3s-netif.conf"
-HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"      # recuperação no boot
+HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"
+GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # log do gNB -> painel      # recuperação no boot
 HASH_ANNOTATION="open5gs-k3s/config-hash"
 
 # ----------------------------------------------------------------------------
@@ -81,6 +82,10 @@ load_config() {
   : "${AMF_REGION_ID:=2}" "${AMF_SET_ID:=1}" "${NETWORK_NAME:=Open5GS}"
   : "${DNS_SERVERS:=8.8.8.8 8.8.4.4}" "${UE_MTU:=1400}"
   : "${WEBUI_ENABLED:=true}" "${WEBUI_NODEPORT:=30999}"
+  : "${DASHBOARD_ENABLED:=false}" "${DASHBOARD_NODEPORT:=30998}" "${DASHBOARD_IMAGE:=python:3.12-slim}"
+  : "${DASHBOARD_PASSWORD:=}" "${DASHBOARD_HISTORY_SECONDS:=900}" "${OPEN5GS_METRICS:=false}"
+  : "${GNB_METRICS_URL:=}" "${GNB_NAME:=gNB}" "${GNB_LOG_SSH:=}" "${GNB_LOG_FILE:=/tmp/gnb.log}"
+  GNB_LOG_DROP="${GNB_LOG_DROP-}"
   : "${MONGODB_PERSISTENCE:=true}" "${MONGODB_PERSISTENCE_SIZE:=2Gi}"
   : "${MONGODB_IMAGE_REGISTRY:=}" "${MONGODB_IMAGE_REPOSITORY:=}" "${MONGODB_IMAGE_TAG:=}"
   : "${DEPLOY_UERANSIM:=true}" "${EXPOSE_RAN:=false}"
@@ -216,6 +221,19 @@ validate_config() {
   [[ "${UERANSIM_RELEASE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || bad "UERANSIM_RELEASE inválido"
   [[ "${WEBUI_NODEPORT}" =~ ^[0-9]+$ ]] && (( WEBUI_NODEPORT >= 30000 && WEBUI_NODEPORT <= 32767 )) \
     || bad "WEBUI_NODEPORT deve estar em 30000..32767"
+  if is_true "${DASHBOARD_ENABLED}"; then
+    [[ "${DASHBOARD_NODEPORT}" =~ ^[0-9]+$ ]] && (( DASHBOARD_NODEPORT >= 30000 && DASHBOARD_NODEPORT <= 32767 )) \
+      || bad "DASHBOARD_NODEPORT deve estar em 30000..32767"
+    [[ "${DASHBOARD_NODEPORT}" != "${WEBUI_NODEPORT}" ]] || bad "DASHBOARD_NODEPORT igual a WEBUI_NODEPORT"
+    [[ "${DASHBOARD_HISTORY_SECONDS}" =~ ^[0-9]+$ ]] && (( DASHBOARD_HISTORY_SECONDS >= 60 && DASHBOARD_HISTORY_SECONDS <= 21600 )) \
+      || bad "DASHBOARD_HISTORY_SECONDS deve estar em 60..21600"
+    [[ -z "${GNB_METRICS_URL}" || "${GNB_METRICS_URL}" =~ ^wss?://[^[:space:]]+$ ]] || bad "GNB_METRICS_URL deve ser ws://host:porta"
+    [[ -z "${GNB_LOG_SSH}" || "${GNB_LOG_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_LOG_SSH deve ser usuario@host"
+    [[ "${GNB_LOG_FILE}" =~ ^/[^[:space:]\'\"]+$ ]] || bad "GNB_LOG_FILE deve ser um caminho absoluto sem espaços"
+    if [[ -n "${GNB_LOG_DROP}" ]] && ! python3 -c 'import re,sys; re.compile(sys.argv[1])' "${GNB_LOG_DROP}" 2>/dev/null; then
+      bad "GNB_LOG_DROP não é uma regex válida"
+    fi
+  fi
   if [[ -n "${MONGODB_IMAGE_REPOSITORY}${MONGODB_IMAGE_TAG}" ]] && \
      [[ -z "${MONGODB_IMAGE_REPOSITORY}" || -z "${MONGODB_IMAGE_TAG}" ]]; then
     bad "MONGODB_IMAGE_REPOSITORY e MONGODB_IMAGE_TAG devem ser definidos juntos"
@@ -367,6 +385,11 @@ _nf_common() {  # $1 = chave do NF no chart umbrella; $2 (opcional) = IP no ran-
   if [[ -n "${OPEN5GS_IMAGE_TAG}" ]]; then
     echo "  image:"
     echo "    tag: $(_q "${OPEN5GS_IMAGE_TAG}")"
+  fi
+  # Prometheus (:9090/metrics) para a aba Core do painel
+  if is_true "${OPEN5GS_METRICS}" && [[ " amf smf upf pcf " == *" $1 "* ]]; then
+    echo "  metrics:"
+    echo "    enabled: true"
   fi
 }
 
@@ -528,6 +551,140 @@ spec:
     }
 EOF
   RAN_LINK_NAD="${out}"
+}
+
+# Painel (dashboard/): ServiceAccount só leitura, ConfigMap com os arquivos da
+# página, Secret (senha/token), Deployment e Service NodePort.
+render_dashboard() {
+  local out="${GENERATED_DIR}/dashboard.yaml" app="${PROJECT_DIR}/dashboard/app" files=() f hash cm
+  mkdir -p "${GENERATED_DIR}"
+  for f in server.py index.html app.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
+    [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
+    files+=(--from-file="${f}=${app}/${f}")
+  done
+  cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
+  # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
+  hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
+  {
+    echo "# GERADO automaticamente a partir de config.env — não edite à mão."
+    printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
+    cat <<EOF
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dashboard
+  namespace: ${K8S_NAMESPACE}
+type: Opaque
+stringData:
+  password: $(_q "${DASHBOARD_PASSWORD}")
+  ingest-token: $(_q "${DASHBOARD_INGEST_TOKEN}")
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard
+  namespace: ${K8S_NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dashboard-read
+  namespace: ${K8S_NAMESPACE}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dashboard-read
+  namespace: ${K8S_NAMESPACE}
+subjects:
+  - kind: ServiceAccount
+    name: dashboard
+    namespace: ${K8S_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dashboard-read
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: ${K8S_NAMESPACE}
+  labels: {app.kubernetes.io/name: dashboard, app.kubernetes.io/part-of: open5gk3s}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: dashboard}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: dashboard, app.kubernetes.io/part-of: open5gk3s}
+      annotations:
+        ${HASH_ANNOTATION}: $(_q "${hash}")
+    spec:
+      serviceAccountName: dashboard
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: dashboard
+          image: $(_q "${DASHBOARD_IMAGE}")
+          command: ["python3", "-u", "/app/server.py"]
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - {name: PORT, value: "8080"}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+            - {name: OPEN5GS_RELEASE, value: $(_q "${OPEN5GS_RELEASE}")}
+            - {name: GNB_METRICS_URL, value: $(_q "${GNB_METRICS_URL}")}
+            - {name: GNB_NAME, value: $(_q "${GNB_NAME}")}
+            - {name: NETWORK_NAME, value: $(_q "${NETWORK_NAME}")}
+            - {name: HISTORY_SECONDS, value: $(_q "${DASHBOARD_HISTORY_SECONDS}")}
+            - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
+            - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
+            - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+      volumes:
+        - name: app
+          configMap: {name: dashboard-app}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: ${K8S_NAMESPACE}
+spec:
+  type: NodePort
+  selector: {app.kubernetes.io/name: dashboard}
+  ports:
+    - {name: http, port: 80, targetPort: http, nodePort: ${DASHBOARD_NODEPORT}}
+EOF
+  } >"${out}"
+  DASHBOARD_MANIFEST="${out}"
 }
 
 render_ueransim_values() {

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Innova Center Dashboard</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="uPlot.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v8.27a2 2 0 1 1-2 0V4a1 1 0 0 1 1-1Zm-6.36 2.64a1 1 0 0 1 1.42 1.42 7 7 0 0 0 0 9.9 1 1 0 1 1-1.42 1.41 9 9 0 0 1 0-12.73Zm12.72 0a9 9 0 0 1 0 12.73 1 1 0 0 1-1.42-1.41 7 7 0 0 0 0-9.9 1 1 0 0 1 1.42-1.42ZM8.46 8.46a1 1 0 0 1 1.42 1.42 3 3 0 0 0 0 4.24 1 1 0 1 1-1.42 1.42 5 5 0 0 1 0-7.08Zm7.08 0a5 5 0 0 1 0 7.08 1 1 0 0 1-1.42-1.42 3 3 0 0 0 0-4.24 1 1 0 0 1 1.42-1.42Z"/></svg>
+    <span>Innova Center Dashboard</span>
+    <span class="muted" id="netname"></span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="overview" class="active">Visão geral</button>
+    <button role="tab" data-tab="ran">Rádio (gNB)</button>
+    <button role="tab" data-tab="logs">Logs</button>
+    <button role="tab" data-tab="core">Core</button>
+  </nav>
+  <div class="topright">
+    <span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span>
+    <span class="pill" id="pill-core" title="Pods do core">core …</span>
+    <button class="icon" id="theme" title="Tema claro/escuro" aria-label="Alternar tema">◐</button>
+  </div>
+</header>
+
+<div id="banner" class="banner hidden"></div>
+
+<main>
+  <!-- ======================= VISÃO GERAL ======================= -->
+  <section id="tab-overview" class="tab active">
+    <div class="kpis" id="kpis"></div>
+    <div class="grid2">
+      <div class="card">
+        <h2>UEs no rádio <span class="muted" id="ov-ran-sub"></span></h2>
+        <div class="tablewrap"><table id="ov-ran-ues"></table></div>
+      </div>
+      <div class="card">
+        <h2>Assinantes vistos pelo core</h2>
+        <div class="tablewrap"><table id="ov-core-ues"></table></div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Pods do core</h2>
+        <div class="tablewrap"><table id="ov-pods"></table></div>
+      </div>
+      <div class="card">
+        <h2>Eventos do core <span class="muted">(avisos e erros iguais são agrupados)</span></h2>
+        <div class="events" id="ov-events"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= RÁDIO ======================= -->
+  <section id="tab-ran" class="tab">
+    <div class="toolbar">
+      <label>UE <select id="ran-ue"></select></label>
+      <label>Janela <select id="ran-window">
+        <option value="60">1 min</option><option value="300" selected>5 min</option>
+        <option value="900">15 min</option></select></label>
+      <button id="ran-pause" class="btn">Pausar</button>
+      <a class="btn" id="ran-csv" href="api/ran.csv" download>Exportar CSV</a>
+      <span class="muted" id="ran-status"></span>
+    </div>
+    <div class="ue-strip" id="ran-uecards"></div>
+    <h3 class="sect">Célula</h3>
+    <div class="charts two">
+      <div class="chart card"><h4>Vazão total da célula <span class="unit">Mbit/s</span></h4><div id="c-cell-tput"></div></div>
+      <div class="chart card"><h4>PRBs usados <span class="unit">soma por slot TDD</span></h4><div id="c-cell-prb"></div></div>
+      <div class="chart card"><h4>Vazão de downlink por UE <span class="unit">Mbit/s</span></h4><div id="c-ue-dl"></div></div>
+      <div class="chart card"><h4>Vazão de uplink por UE <span class="unit">Mbit/s</span></h4><div id="c-ue-ul"></div></div>
+    </div>
+    <h3 class="sect">UE selecionado <span class="muted" id="ran-sel"></span></h3>
+    <div class="charts">
+      <div class="chart card"><h4>BLER <span class="unit">%</span></h4><div id="c-bler"></div></div>
+      <div class="chart card"><h4>MCS</h4><div id="c-mcs"></div></div>
+      <div class="chart card"><h4>CQI e rank</h4><div id="c-cqi"></div></div>
+      <div class="chart card"><h4>SNR e RSRP do PUSCH <span class="unit">dB</span></h4><div id="c-snr"></div></div>
+      <div class="chart card"><h4>Buffer <span class="unit">bytes</span></h4><div id="c-bs"></div></div>
+      <div class="chart card"><h4>Timing advance <span class="unit">ns</span> e PHR <span class="unit">dB</span></h4><div id="c-ta"></div></div>
+    </div>
+    <h3 class="sect">Saúde do escalonador</h3>
+    <div class="charts">
+      <div class="chart card"><h4>Latência do escalonador <span class="unit">µs</span></h4><div id="c-lat"></div></div>
+      <div class="chart card"><h4>Falhas por período <span class="unit">contagem</span></h4><div id="c-fail"></div></div>
+    </div>
+  </section>
+
+  <!-- ======================= LOGS ======================= -->
+  <section id="tab-logs" class="tab">
+    <div class="logs-layout">
+      <aside class="card sources">
+        <h2>Fontes</h2>
+        <div id="log-sources"></div>
+      </aside>
+      <div class="card logpane">
+        <div class="toolbar">
+          <strong id="log-title">Escolha uma fonte</strong>
+          <label>Linhas <select id="log-tail"><option>200</option><option selected>1000</option><option>5000</option><option>20000</option></select></label>
+          <label>Nível <select id="log-level"><option value="">todos</option><option value="warn">avisos e erros</option><option value="error">só erros</option></select></label>
+          <input id="log-filter" type="search" placeholder="Filtrar (texto ou /regex/)" spellcheck="false">
+          <label class="chk"><input type="checkbox" id="log-follow" checked> Ao vivo</label>
+          <label class="chk"><input type="checkbox" id="log-wrap"> Quebrar linhas</label>
+          <button class="btn" id="log-reload">Recarregar</button>
+          <button class="btn" id="log-download">Baixar</button>
+          <span class="muted" id="log-count"></span>
+        </div>
+        <pre id="log-view" class="logview" tabindex="0"></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CORE ======================= -->
+  <section id="tab-core" class="tab">
+    <div id="core-disabled" class="card hidden">
+      <h2>Métricas do Open5GS desligadas</h2>
+      <p>Para ligar, defina <code>OPEN5GS_METRICS=true</code> no <code>config.env</code> e rode
+        <code>sudo ./install.sh --deploy-only</code>. Isso reinicia o core uma vez (os UEs reconectam).</p>
+      <p>Enquanto isso, a aba <b>Visão geral</b> mostra gNBs, UEs e sessões tirados dos logs.</p>
+    </div>
+    <div id="core-enabled" class="hidden">
+      <div class="toolbar">
+        <label>Janela <select id="core-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
+        <span class="muted" id="core-status"></span>
+      </div>
+      <div class="kpis" id="core-kpis"></div>
+      <div class="charts">
+        <div class="chart card"><h4>Tráfego no UPF (N3) <span class="unit">Mbit/s</span></h4><div id="c-upf"></div></div>
+        <div class="chart card"><h4>UEs e sessões</h4><div id="c-core-counts"></div></div>
+      </div>
+      <div class="card">
+        <div class="toolbar"><h2>Todas as métricas</h2>
+          <input id="core-filter" type="search" placeholder="Filtrar métricas" spellcheck="false"></div>
+        <div class="tablewrap"><table id="core-table"></table></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="muted" id="footer"></footer>
+<script src="uPlot.iife.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

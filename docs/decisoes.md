@@ -40,7 +40,9 @@ Documentação do projeto: **português**.
      removido com `k3s-uninstall.sh` (autorizado pelo usuário) antes do `sudo ./install.sh`;
    - o assistente de IA fica no desktop e opera o servidor por SSH (`ssh torre2`); comandos com sudo no servidor
      são rodados pelo usuário (`ssh -t torre2 'sudo …'`).
-4. Dashboard de acompanhamento (pedido do usuário, adiado): pods/NFs, UEs registrados, sessões, tráfego.
+4. **Painel (Innova Center Dashboard) pronto, não instalado** (decisão 32): subir com
+   `sudo ./install.sh --dashboard-only` quando não houver usuários testando (não mexe no core). Depois: chave SSH
+   torre2 → innovaserver e `GNB_LOG_SSH` para o log do gNB; `OPEN5GS_METRICS=true` numa janela livre (reinicia o core).
 5. Fase RAN real: **OCUDU** (CU/DU) + **LiteOn** (O-RU) — validar `EXPOSE_RAN` com SCTP real ou migrar N2/N3 para
    Multus/macvlan/SR-IOV; alinhar PLMN/TAC/S-NSSAI; cadastrar SIMs em `SUBSCRIBERS`; preparar host do DU (PTP, fronthaul).
 
@@ -105,6 +107,23 @@ Documentação do projeto: **português**.
     gNB real (2026-10-21). Limitação: o SMF resolve o nome só ao iniciar; se o UPF reiniciar sozinho (IP novo), é preciso
     reiniciar o SMF depois (o `heal.sh` já faz UPF → SMF). O install apaga o Service antigo (clusterIP é imutável).
 
+32. **Painel de logs e métricas: Innova Center Dashboard** (`dashboard/`, `docs/dashboard.md`). Pedido do usuário:
+    analisar logs e métricas (gNB, core, tráfego, BLER) num site local, parte do core. Escolhas:
+    - **roda na máquina do core**, como pod no namespace do core (o OCUDU precisa da CPU; nada é instalado no host do gNB):
+      as métricas do gNB são *puxadas* do WebSocket `remote_control` (`GNB_METRICS_URL`) e o log do gNB é lido por SSH
+      (`tail -F`, só leitura) por uma unit na máquina do core (`open5gs-k3s-gnb-log`, usuário do install), que descarta
+      `[PHY] [I]` por padrão (`GNB_LOG_DROP`; ~100 kB/s de log com o gNB parado);
+    - **sem dependências**: backend só com a biblioteca padrão do Python (imagem `python:3.12-slim`, arquivos num
+      ConfigMap), gráficos com uPlot 1.6.31 guardado no repositório (funciona offline);
+    - **só leitura**: ServiceAccount com `get/list/watch` em `pods` e `pods/log`; usuário 65534, raiz só leitura; senha
+      opcional (`DASHBOARD_PASSWORD`); o agente usa token gerado pelo install (só root lê);
+    - estado do core (gNBs N2, registros, sessões DNN→IP, erros) **tirado dos logs** do AMF/SMF/UPF; métricas Prometheus
+      (`OPEN5GS_METRICS`) são opcionais porque ligá-las reinicia o core;
+    - histórico só em memória (15 min); BLER nos cartões em janela de 10 s; MCS/SNR sem transmissão viram lacuna;
+    - `install.sh --dashboard-only` sobe só o painel; com `OPEN5GS_METRICS=false` os values do core ficam idênticos
+      (verificado), então o install completo também não reinicia o core por causa do painel;
+    - visual: branco/azul/cinza (pedido do usuário) com o verde do Centro Innova (#91cf50) só como detalhe.
+
 ## Ruído conhecido
 
 - `journalctl -u k3s`: `127.0.0.1:10250 … use of closed network connection` = conexões locais do kubelet fechando ao fim de `kubectl logs/exec`. Inofensivo.
@@ -124,3 +143,6 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
 - 2026-10-19: publicado em https://github.com/Miguelclunardi/open5GK3S (privado).
 - 2026-10-19: cabo desligado ⇒ k3s não subia (node-ip preso ao IP físico). Criado `NODE_IP_MODE=stable` com interface
   dummy `k3s0` (27); o host continua em DHCP. Reboot revelou dessincronia PFCP ⇒ `heal.sh` + unit de boot (28).
+- 2026-10-21: Setor 2 no torre2: Multus + link direto com o OCUDU (30), PFCP headless (31), rede InnovaSplit, UEs reais
+  conectados. Painel Innova Center Dashboard (32) escrito e testado fora do cluster (só leitura); instalação adiada
+  porque havia pessoas testando a rede.

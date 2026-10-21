@@ -127,8 +127,12 @@ open5GK3S/
 │   ├── postrender/
 │   │   └── drop-gnb-hpa.sh  # remove HPA bugado do chart ueransim-gnb
 │   └── generated/           # values gerados do config.env (ignorado no git)
+├── dashboard/               # painel de logs e métricas (docs/dashboard.md)
+│   ├── app/                 # server.py (stdlib) + página (uPlot)
+│   └── agent/               # gnb-log-agent.py: log do gNB real via SSH
 ├── docs/
 │   ├── arquitetura.md
+│   ├── dashboard.md         # painel: abas, config, log do gNB, API
 │   ├── decisoes.md          # decisões técnicas, estado e próximos passos
 │   └── troubleshooting.md
 └── logs/                    # install.log (ignorado no git)
@@ -224,6 +228,12 @@ gNB: `kubectl -n open5gs exec deploy/ueransim -- sh -c 'nr-cli $(nr-cli -d) --ex
 
 `http://<NODE_IP>:30999` (`admin` / `1423`; troque a senha no primeiro acesso). Permite criar/editar
 assinantes, AMBR, QoS (5QI/ARP), IP fixo e múltiplas slices por assinante.
+
+### 7.4b Painel (Innova Center Dashboard)
+
+`http://<NODE_IP>:30998` — logs de todos os pods e do gNB real, métricas de rádio (vazão DL/UL, BLER, MCS,
+CQI, SNR por UE), UEs, sessões e eventos do core. Só o painel: `sudo ./install.sh --dashboard-only` (não
+toca no core). Detalhes em **[docs/dashboard.md](docs/dashboard.md)**.
 
 ### 7.5 Assinantes
 
@@ -326,6 +336,7 @@ recriados (estratégia `Recreate`, todos juntos) e o gNB/UEs também; os assinan
 | `SLICES` | `("1:111111:internet:10.45.0.0/16")` | slices/DNN/pools (ver §8.3) |
 | `DNS_SERVERS`, `UE_MTU` | `8.8.8.8 8.8.4.4`, `1400` | entregues ao UE |
 | `WEBUI_ENABLED`, `WEBUI_NODEPORT` | `true`, `30999` | WebUI |
+| `DASHBOARD_*`, `GNB_METRICS_URL`, `GNB_LOG_*`, `OPEN5GS_METRICS` | ver docs/dashboard.md | painel de logs e métricas |
 | `MONGODB_PERSISTENCE`, `MONGODB_PERSISTENCE_SIZE` | `true`, `2Gi` | volume do banco |
 | `MONGODB_IMAGE_REGISTRY/REPOSITORY/TAG` | vazio (Bitnami latest) | imagem alternativa (ex.: CPU sem AVX) |
 | `DEPLOY_UERANSIM` | `true` | `false` remove gNB/UEs simulados (para RAN real) |

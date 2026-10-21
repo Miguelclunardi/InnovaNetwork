@@ -60,6 +60,13 @@ if k3s_ready; then
 else
   info "k3s não está no ar; pulando remoção de releases"
 fi
+# Painel: os objetos saem com o namespace; o agente do log do gNB é uma unit no host
+if [[ -f "${GNBLOG_UNIT_FILE}" ]]; then
+  systemctl disable --now open5gs-k3s-gnb-log.service >/dev/null 2>&1 || true
+  rm -f "${GNBLOG_UNIT_FILE}"; rm -rf "${INSTALL_DIR}/dashboard-agent"; systemctl daemon-reload
+  ok "unit open5gs-k3s-gnb-log removida"
+fi
+rm -f "${INSTALL_DIR}/state/dashboard-ingest-token"
 
 # 2) k3s --------------------------------------------------------------------------
 if ${REMOVE_K3S}; then
