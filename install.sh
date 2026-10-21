@@ -384,6 +384,13 @@ step_deploy_core() {
   render_open5gs_values
   info "values gerados: ${OPEN5GS_VALUES} (hash ${OPEN5GS_HASH})"
   info "helm upgrade --install (pode levar vários minutos na 1ª vez: download de imagens)"
+  # clusterIP é imutável: o Service PFCP antigo (ClusterIP) precisa sair para virar headless
+  local cip
+  cip=$(kc -n "${K8S_NAMESPACE}" get svc "${OPEN5GS_RELEASE}-upf-pfcp" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+  if [[ -n "${cip}" && "${cip}" != None ]]; then
+    kc -n "${K8S_NAMESPACE}" delete svc "${OPEN5GS_RELEASE}-upf-pfcp" >/dev/null
+    info "Service ${OPEN5GS_RELEASE}-upf-pfcp (ClusterIP ${cip}) removido: será recriado headless"
+  fi
   local pr=()
   if is_true "${RAN_LINK_ENABLED}"; then pr=(--post-renderer "${PROJECT_DIR}/helm/postrender/amf-ngap-net1.sh"); fi
   hm upgrade --install "${OPEN5GS_RELEASE}" "${CHARTS_DIR}/charts/open5gs" \

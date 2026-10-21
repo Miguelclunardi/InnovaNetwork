@@ -470,8 +470,13 @@ render_open5gs_values() {
       echo "        createDev: true"
       echo "        enableNAT: true"
     done
+    echo "  services:"
+    # PFCP (N4) sem DNAT: Service headless => o SMF fala direto com o IP do pod do UPF.
+    # Com ClusterIP, o tráfego SMF->Service e UPF->SMF (ambos UDP 8805<->8805) colidia no
+    # conntrack, a porta de origem do SMF era reescrita e o UPF respondia "Cannot find PFCP-Node".
+    echo "    pfcp:"
+    echo "      clusterIP: None"
     if is_true "${EXPOSE_RAN}"; then
-      echo "  services:"
       echo "    gtpu:"
       echo "      type: LoadBalancer      # ServiceLB do k3s => UDP ${NODE_IP}:2152"
     fi

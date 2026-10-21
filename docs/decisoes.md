@@ -98,6 +98,12 @@ Documentação do projeto: **português**.
     AMF fixa `ngap: dev eth0` ⇒ post-renderer `helm/postrender/amf-ngap-net1.sh`. Alternativa `EXPOSE_RAN` (NAT pelo
     IP do host) fica para quem não tem link dedicado. Limitação: sem sinal no cabo o macvlan fica sem carrier e o gNB
     simulado também não conecta.
+31. **PFCP (N4) sem NAT: Service `upf-pfcp` headless** (`clusterIP: None`). Com ClusterIP, o SMF falava com o UPF via
+    DNAT e o UPF respondia direto ao pod do SMF; os dois fluxos UDP 8805↔8805 colidiam no conntrack, a porta de origem
+    do SMF era reescrita (ex.: 16098, 1155) e o UPF rejeitava tudo com `Cannot find PFCP-Node` (heartbeats e
+    modificações de sessão). É a causa provável da "dessincronia PFCP" da decisão 28. Apareceu de forma constante com o
+    gNB real (2026-10-21). Limitação: o SMF resolve o nome só ao iniciar; se o UPF reiniciar sozinho (IP novo), é preciso
+    reiniciar o SMF depois (o `heal.sh` já faz UPF → SMF). O install apaga o Service antigo (clusterIP é imutável).
 
 ## Ruído conhecido
 
