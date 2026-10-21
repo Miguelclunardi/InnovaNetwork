@@ -80,6 +80,8 @@ HOST_FSROOT = _env("HOST_FSROOT")
 LOCAL_HOST_NAME = _env("LOCAL_HOST_NAME")
 LOCAL_HOST_ROLE = _env("LOCAL_HOST_ROLE", "Core 5G (k3s)")
 HOSTS = [h.split("|", 1) for h in _env("HOSTS").split(";") if "|" in h]
+# Interfaces de túnel do UPF -> DNN ("ogstun=internet;ogstun2=internet2")
+UPF_DEVS = dict(kv.split("=", 1) for kv in _env("UPF_DEVS").split(";") if "=" in kv)
 HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
 # Medidor de energia MiEnergy (página /Data com "chave": número). Mede a máquina ENERGY_METER_HOST.
 ENERGY_METER_URL = _env("ENERGY_METER_URL")          # ex.: http://192.168.68.105/Data (vazio = desligado)
@@ -930,6 +932,126 @@ def local_host_loop(hosts):
 #  Log do gNB real (recebido de um agente no host do gNB)
 # ----------------------------------------------------------------------------
 # Só linhas do CU (RRC/CU-CP/NGAP): nelas "ue=" é o índice do UE no CU-CP. No [SCHED]/[MAC] "ue=" é do DU.
+# ----------------------------------------------------------------------------
+#  Core sem Prometheus: CPU/memória de cada NF e tráfego do UPF lidos do /proc do host
+#  (o pod monta /proc do host só leitura). Não exige reiniciar nada do core.
+# ----------------------------------------------------------------------------
+NF_PROCS = {"mongod": "mongodb"}   # demais: open5gs-<nf>d -> <nf>
+
+
+class CoreProcs:
+    def __init__(self, root):
+        self.proc = root.rstrip("/") + "/proc"
+        self.lock = threading.Lock()
+        self.cpu = Series()        # {nf: %CPU}
+        self.traffic = Series()    # {iface_rx/iface_tx: bit/s} do UPF
+        self.nfs = {}
+        self.ifaces = {}
+        self.prev = None
+        self.error = None
+        self.hz = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+
+    @staticmethod
+    def _nf(comm):
+        if comm in NF_PROCS:
+            return NF_PROCS[comm]
+        if comm.startswith("open5gs-") and comm.endswith("d"):
+            return comm[8:-1]
+        return None
+
+    def _read(self, path):
+        with open(path) as f:
+            return f.read()
+
+    def sample(self):
+        now = time.time()
+        procs = {}
+        for pid in os.listdir(self.proc):
+            if not pid.isdigit():
+                continue
+            try:
+                st = self._read("%s/%s/stat" % (self.proc, pid))
+            except OSError:
+                continue
+            r = st.rfind(")")
+            nf = self._nf(st[st.find("(") + 1:r])
+            if not nf:
+                continue
+            f = st[r + 2:].split()
+            try:
+                procs[pid] = (nf, int(f[11]) + int(f[12]), int(f[21]) * 4096, int(f[17]), int(f[19]))
+            except (IndexError, ValueError):
+                continue
+        net = {}
+        upf = [pid for pid, p in procs.items() if p[0] == "upf"]
+        if upf:
+            try:
+                for line in self._read("%s/%s/net/dev" % (self.proc, upf[0])).splitlines()[2:]:
+                    name, _, rest = line.partition(":")
+                    name, v = name.strip(), rest.split()
+                    if name and name != "lo":
+                        net[name] = (int(v[0]), int(v[8]))
+            except (OSError, IndexError, ValueError):
+                pass
+        with self.lock:
+            prev, self.prev = self.prev, (now, procs, net)
+            if not prev:
+                return
+            t0, procs0, net0 = prev
+            dt = max(now - t0, 1e-3)
+            nfs = {}
+            for pid, (nf, ticks, rss, threads, _) in procs.items():
+                e = nfs.setdefault(nf, {"nf": nf, "pids": [], "cpu": 0.0, "rss": 0, "threads": 0})
+                e["pids"].append(int(pid))
+                e["rss"] += rss
+                e["threads"] += threads
+                p0 = procs0.get(pid)
+                if p0 and p0[0] == nf:
+                    e["cpu"] += 100.0 * (ticks - p0[1]) / self.hz / dt
+            for e in nfs.values():
+                e["cpu"] = round(e["cpu"], 1)
+            self.nfs = nfs
+            self.cpu.add(now, {nf: e["cpu"] for nf, e in nfs.items()})
+            tr, ifs = {}, {}
+            for name, (rx, tx) in net.items():
+                a = net0.get(name)
+                if a and rx >= a[0] and tx >= a[1]:
+                    tr[name + "_rx"] = (rx - a[0]) * 8 / dt
+                    tr[name + "_tx"] = (tx - a[1]) * 8 / dt
+                ifs[name] = {"iface": name, "rx_bytes": rx, "tx_bytes": tx, "role": self.role(name),
+                             "rx_bps": tr.get(name + "_rx"), "tx_bps": tr.get(name + "_tx")}
+            self.ifaces = ifs
+            self.traffic.add(now, tr)
+
+    @staticmethod
+    def role(name):
+        if name in UPF_DEVS:
+            return "N6 · DNN %s (rx = uplink, tx = downlink)" % UPF_DEVS[name]
+        if name.startswith("ogstun"):
+            return "N6 · túnel dos UEs (rx = uplink, tx = downlink)"
+        if name == "net1":
+            return "N3 · link com o gNB, GTP-U (rx = uplink, tx = downlink)"
+        if name == "eth0":
+            return "rede do pod (N4/PFCP e saída N6 com NAT)"
+        return ""
+
+    def run(self):
+        while True:
+            try:
+                self.sample()
+                self.error = None
+            except Exception as e:  # noqa: BLE001
+                self.error = str(e)
+            time.sleep(2)
+
+    def snapshot(self, window):
+        since = time.time() - window
+        with self.lock:
+            return {"enabled": True, "error": self.error, "nfs": sorted(self.nfs.values(), key=lambda e: e["nf"]),
+                    "ifaces": sorted(self.ifaces.values(), key=lambda e: e["iface"]),
+                    "cpu": self.cpu.window(since), "traffic": self.traffic.window(since), "devs": UPF_DEVS}
+
+
 RE_LOG_CRNTI = re.compile(r"\[(?:RRC|CU-CP) *\] \[\w\] ue=(\d+) c-rnti=0x([0-9a-fA-F]+)")
 RE_LOG_AMFUE = re.compile(r"\[NGAP *\] \[\w\] (?:[TR]x PDU )?ue=(\d+) ran_ue=\d+ amf_ue=(\d+)")
 
@@ -1013,6 +1135,7 @@ GNB = GnbCollector(GNB_METRICS_URL)
 CORE = CoreCollector()
 GNBLOG = GnbLog()
 ENERGY = EnergyMeter(ENERGY_METER_URL) if ENERGY_METER_URL else None
+COREPROCS = CoreProcs(HOST_ROOT) if HOST_ROOT else None
 HOSTS_STATE = Hosts()
 STARTED = time.time()
 
@@ -1200,6 +1323,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._ran_csv(min(_q(qs, "window", HISTORY_SECONDS, int), HISTORY_SECONDS))
             if path == "/api/core":
                 return self._send(200, CORE.snapshot())
+            if path == "/api/core/live":
+                win = min(_q(qs, "window", 300, int), HISTORY_SECONDS)
+                d = COREPROCS.snapshot(win) if COREPROCS else {"enabled": False}
+                core = CORE.snapshot()
+                d["log"] = {"nof_gnbs": core["nof_gnbs"], "gnbs": core["gnbs"], "counters": core["counters"],
+                            "ues_registered": sum(1 for u in core["ues"] if u.get("registered")),
+                            "ues_total": len(core["ues"]), "sessions": len(core["sessions"])}
+                d["prometheus"] = CORE_METRICS
+                return self._send(200, d)
             if path == "/api/core/metrics":
                 return self._send(200, CORE.metrics_snapshot(min(_q(qs, "window", 300, int), HISTORY_SECONDS)))
             if path == "/api/logs":
@@ -1436,6 +1568,8 @@ def main():
         if ENERGY_METER_HOST and ENERGY_METER_HOST not in HOSTS_STATE.h:
             HOSTS_STATE._entry(ENERGY_METER_HOST, "", "medidor")
         ENERGY.start()
+    if COREPROCS:
+        threading.Thread(target=COREPROCS.run, daemon=True, name="coreprocs").start()
     if HOST_ROOT:
         threading.Thread(target=local_host_loop, args=(HOSTS_STATE,), daemon=True, name="host").start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)

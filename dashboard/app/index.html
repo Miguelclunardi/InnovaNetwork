@@ -124,17 +124,28 @@
 
   <!-- ======================= CORE ======================= -->
   <section id="tab-core" class="tab">
-    <div id="core-disabled" class="card hidden">
-      <h2>Métricas do Open5GS desligadas</h2>
-      <p>Para ligar, defina <code>OPEN5GS_METRICS=true</code> no <code>config.env</code> e rode
-        <code>sudo ./install.sh --deploy-only</code>. Isso reinicia o core uma vez (os UEs reconectam).</p>
-      <p>Enquanto isso, a aba <b>Visão geral</b> mostra gNBs, UEs e sessões tirados dos logs.</p>
+    <div class="toolbar">
+      <label>Janela <select id="core-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
+      <span class="muted" id="core-live-status"></span>
+    </div>
+    <div class="kpis" id="core-live-kpis"></div>
+    <div class="charts" style="margin-top:12px">
+      <div class="chart card"><h4>Tráfego dos UEs no UPF (N6, por DNN) <span class="unit">Mbit/s</span></h4><div id="c-upf-n6"></div></div>
+      <div class="chart card"><h4>Link com o gNB (N3, GTP-U) <span class="unit">Mbit/s</span></h4><div id="c-upf-n3"></div></div>
+      <div class="chart card"><h4>CPU por função do core <span class="unit">% de 1 núcleo</span></h4><div id="c-nf-cpu"></div></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h2>Funções do core <span class="muted">(processos no host)</span></h2><div class="tablewrap"><table id="core-nfs"></table></div></div>
+      <div class="card"><h2>Interfaces do UPF</h2><div class="tablewrap"><table id="core-ifaces"></table></div></div>
+    </div>
+    <div id="core-disabled" class="card hidden note-card">
+      <h2>Métricas Prometheus do Open5GS <span class="muted">(opcional)</span></h2>
+      <p class="muted">Tudo acima vem do <code>/proc</code> do host e dos logs, sem mexer no core. Para ter também os
+        contadores internos dos NFs (sessões N4, volumes por QoS, etc.), defina <code>OPEN5GS_METRICS=true</code> e rode
+        <code>sudo ./install.sh --deploy-only</code> numa janela sem usuários (reinicia AMF/SMF/UPF/PCF uma vez).</p>
     </div>
     <div id="core-enabled" class="hidden">
-      <div class="toolbar">
-        <label>Janela <select id="core-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
-        <span class="muted" id="core-status"></span>
-      </div>
+      <h3 class="sect">Métricas Prometheus <span class="muted" id="core-status"></span></h3>
       <div class="kpis" id="core-kpis"></div>
       <div class="charts">
         <div class="chart card"><h4>Tráfego no UPF (N3) <span class="unit">Mbit/s</span></h4><div id="c-upf"></div></div>

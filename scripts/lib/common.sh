@@ -580,6 +580,9 @@ render_dashboard() {
   # Máquinas remotas para listar no painel: "nome|papel;..."
   local hosts="" hn
   for e in "${DASHBOARD_HOSTS[@]}"; do IFS='|' read -r hn _ e <<<"$e"; hosts+="${hosts:+;}${hn}|${e}"; done
+  # Túneis do UPF -> DNN (aba Core: tráfego N6 por DNN)
+  local upfdevs=""
+  for i in "${!SLICES[@]}"; do parse_slice "${SLICES[$i]}"; upfdevs+="${upfdevs:+;}$(tun_name "$i")=${S_DNN}"; done
   mkdir -p "${GENERATED_DIR}"
   # Aba Configuração: config.env gravável (pelo grupo do dono), projeto só leitura, backups
   local cfg_env="" cfg_mounts="" cfg_vols="" cfg_groups=""
@@ -608,7 +611,7 @@ render_dashboard() {
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -700,6 +703,7 @@ spec:
             - {name: LOCAL_HOST_NAME, value: $(_q "$(hostname -s)")}
             - {name: LOCAL_HOST_ROLE, value: $(_q "${DASHBOARD_LOCAL_ROLE}")}
             - {name: HOSTS, value: $(_q "${hosts}")}
+            - {name: UPF_DEVS, value: $(_q "${upfdevs}")}
             - {name: ENERGY_METER_URL, value: $(_q "${ENERGY_METER_URL}")}
             - {name: ENERGY_METER_HOST, value: $(_q "${ENERGY_METER_HOST}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}

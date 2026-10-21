@@ -9,7 +9,7 @@ Página web que roda **no próprio cluster do core** (máquina do core) e junta 
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
 | **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
 | **Configuração** | edita o `config.env` (senha de administrador): campos por seção com a explicação do próprio arquivo, diff antes de salvar, validação do install, backup e restauração, e o comando para aplicar | `config.env` da máquina do core |
-| **Core** | métricas Prometheus do AMF/SMF/UPF/PCF: gNBs, UEs, sessões, tráfego N3 do UPF, tabela com todas as métricas | `:9090/metrics` dos NFs (precisa `OPEN5GS_METRICS=true`) |
+| **Core** | sempre: gNBs, UEs registrados, sessões, tráfego dos UEs no UPF por DNN (N6) e no link com o gNB (N3), CPU/memória/threads de cada NF, erros/avisos por NF, interfaces do UPF. Opcional: métricas Prometheus dos NFs | `/proc` do host (processos `open5gs-*d` e interfaces do UPF) + logs; Prometheus só com `OPEN5GS_METRICS=true` |
 
 Endereço: `http://<IP-do-core>:30998` (`DASHBOARD_NODEPORT`). Sem senha por padrão; com
 `DASHBOARD_PASSWORD`, o navegador pede usuário `admin` e a senha.
@@ -140,6 +140,13 @@ painel guarda as últimas 20 000 linhas do gNB.
 > painel — vale rotacionar ou reduzir `all_level`.
 
 ### Métricas do core (aba Core)
+
+Sem reiniciar nada: o pod do painel já monta o `/proc` do host (só leitura). Ele acha os processos `open5gs-<nf>d`
+e o `mongod` (CPU, memória, threads) e lê as interfaces **dentro do namespace de rede do UPF**
+(`/proc/<pid-do-upf>/net/dev`): `ogstun*` = N6 por DNN (rx = uplink, tx = downlink), `net1` = N3 (GTP-U com o
+gNB), `eth0` = rede do pod. Erros/avisos por NF vêm dos logs do AMF/SMF/UPF.
+
+**Prometheus (opcional):**
 
 `OPEN5GS_METRICS=true` + `sudo ./install.sh --deploy-only` liga `metrics.enabled` nos charts do AMF, SMF,
 UPF e PCF (porta 9090, `/metrics`). **Reinicia esses NFs uma vez** — fazer numa janela sem usuários.

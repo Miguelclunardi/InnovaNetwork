@@ -609,7 +609,68 @@ $("#log-download").addEventListener("click", () => Logs.download());
 //  Core (métricas Prometheus do Open5GS)
 // ---------------------------------------------------------------------------
 const Core = {
+  async live() {
+    const d = await api("api/core/live?window=" + $("#core-window").value);
+    const lg = d.log || {};
+    const c = lg.counters || {};
+    const mb = (v) => fmt(v, 1);
+    const ifs = d.ifaces || [];
+    const sum = (pred, k) => ifs.filter(pred).reduce((a, x) => a + (x[k] || 0), 0);
+    const n6 = (x) => x.iface.startsWith("ogstun");
+    const nfs = d.nfs || [];
+    const cpuTot = nfs.reduce((a, x) => a + x.cpu, 0);
+    const memTot = nfs.reduce((a, x) => a + x.rss, 0);
+    const errs = (c.amf_error || 0) + (c.smf_error || 0) + (c.upf_error || 0);
+    const k = [
+      { l: "gNBs conectados (N2)", v: lg.nof_gnbs ?? lg.gnbs?.length ?? "–", s: (lg.gnbs || []).map((g) => g.addr).join(", ") },
+      { l: "UEs registrados", v: lg.ues_registered ?? "–", s: `${lg.ues_total ?? 0} assinantes vistos` },
+      { l: "Sessões PDU", v: lg.sessions ?? "–", s: "abertas no SMF" },
+      { l: "Downlink agora", v: fmtRate(sum(n6, "tx_bps")), s: "saindo do UPF para os UEs" },
+      { l: "Uplink agora", v: fmtRate(sum(n6, "rx_bps")), s: "vindo dos UEs" },
+      { l: "CPU do core", v: fmt(cpuTot, 0) + "%", s: `${nfs.length} processos · ${fmtBytes(memTot)} de RAM` },
+      { l: "Erros nos logs", v: errs, s: "AMF/SMF/UPF desde que iniciaram", cls: errs ? "warn" : "ok" },
+    ];
+    $("#core-live-kpis").innerHTML = k.map((x) => `<div class="kpi ${x.cls || ""}"><div class="label">${esc(x.l)}</div>
+      <div class="value">${esc(x.v)}</div><div class="sub">${esc(x.s || "")}</div></div>`).join("");
+    $("#core-live-status").textContent = d.enabled === false ? "leitura do host desligada" : d.error ? "erro: " + d.error : "atualiza a cada 2 s · sem Prometheus, sem reiniciar o core";
+    // N6 por DNN
+    const tr = d.traffic || { t: [] };
+    const tuns = Object.keys(tr).filter((x) => x.startsWith("ogstun") && x.endsWith("_tx")).map((x) => x.slice(0, -3)).sort();
+    const dnn = (t) => (d.devs || {})[t] || t;
+    const n6s = [];
+    const n6cols = [tr.t];
+    tuns.forEach((t, i) => {
+      n6s.push({ label: `DL ${dnn(t)}`, color: colorFor(i * 2), fmt: mb });
+      n6s.push({ label: `UL ${dnn(t)}`, color: colorFor(i * 2 + 1), fmt: mb });
+      n6cols.push((tr[t + "_tx"] || []).map((v) => (v == null ? null : v / 1e6)));
+      n6cols.push((tr[t + "_rx"] || []).map((v) => (v == null ? null : v / 1e6)));
+    });
+    Charts.make("c-upf-n6", n6s.length ? n6s : [{ label: "sem túneis" }]);
+    Charts.set("c-upf-n6", n6s.length ? n6cols : [tr.t, tr.t.map(() => null)]);
+    Charts.make("c-upf-n3", [{ label: "DL para o gNB", fill: true, fmt: mb }, { label: "UL do gNB", color: "#6b7280", fill: true, fmt: mb }]);
+    Charts.set("c-upf-n3", [tr.t, (tr.net1_tx || []).map((v) => (v == null ? null : v / 1e6)), (tr.net1_rx || []).map((v) => (v == null ? null : v / 1e6))]);
+    const cpu = d.cpu || { t: [] };
+    const names = Object.keys(cpu).filter((x) => x !== "t").sort();
+    Charts.make("c-nf-cpu", names.map((n, i) => ({ label: n.toUpperCase(), color: colorFor(i), dec: 1 })));
+    Charts.set("c-nf-cpu", [cpu.t, ...names.map((n) => cpu[n])]);
+    // tabelas
+    const ce = (nf, l) => c[nf + "_" + l];
+    $("#core-nfs").innerHTML = `<tr><th>Função</th><th class="num">CPU</th><th class="num">Memória</th><th class="num">Threads</th>
+      <th class="num">PID</th><th class="num">Erros / avisos</th></tr>` + nfs.map((x) => {
+        const info = NF_INFO[x.nf] || [x.nf.toUpperCase(), ""];
+        const e = ce(x.nf, "error"), w = ce(x.nf, "warning");
+        return `<tr><td><b>${esc(info[0])}</b> <span class="muted">${esc(info[1])}</span></td><td class="num">${fmt(x.cpu, 1)}%</td>
+          <td class="num">${fmtBytes(x.rss)}</td><td class="num">${esc(x.threads)}</td><td class="num muted">${esc(x.pids.join(", "))}</td>
+          <td class="num">${e == null && w == null ? '<span class="muted">–</span>'
+            : `<span class="tag ${e ? "err" : "ok"}">${e || 0}</span> <span class="tag ${w ? "warn" : "ok"}">${w || 0}</span>`}</td></tr>`;
+      }).join("");
+    $("#core-ifaces").innerHTML = `<tr><th>Interface</th><th>Papel</th><th class="num">rx</th><th class="num">tx</th><th class="num">Total rx / tx</th></tr>` +
+      ifs.map((x) => `<tr><td><code>${esc(x.iface)}</code></td><td class="muted">${esc(x.role)}</td>
+        <td class="num">${fmtRate(x.rx_bps)}</td><td class="num">${fmtRate(x.tx_bps)}</td>
+        <td class="num">${fmtBytes(x.rx_bytes)} / ${fmtBytes(x.tx_bytes)}</td></tr>`).join("");
+  },
   async refresh() {
+    await this.live();
     const d = await api("api/core/metrics?window=" + $("#core-window").value);
     $("#core-disabled").classList.toggle("hidden", d.enabled);
     $("#core-enabled").classList.toggle("hidden", !d.enabled);
