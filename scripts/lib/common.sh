@@ -100,7 +100,7 @@ load_config() {
   declare -p K3S_EXTRA_ARGS &>/dev/null || K3S_EXTRA_ARGS=()
   declare -p DASHBOARD_UE_NAMES &>/dev/null || DASHBOARD_UE_NAMES=()
   declare -p DASHBOARD_HOSTS &>/dev/null || DASHBOARD_HOSTS=()
-  : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}"
+  : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}" "${ENERGY_METER_URL:=}" "${ENERGY_METER_HOST:=}"
 
   CHARTS_DIR="${INSTALL_DIR}/5g-charts"
   export HELM_CACHE_HOME="${INSTALL_DIR}/helm/cache"
@@ -241,6 +241,8 @@ validate_config() {
       [[ "$e" =~ ^[A-Za-z0-9._-]+\|[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+\|[^\;\"]*$ ]] \
         || bad "DASHBOARD_HOSTS: use 'nome|usuario@host|papel' (atual: $e)"
     done
+    [[ -z "${ENERGY_METER_URL}" || "${ENERGY_METER_URL}" =~ ^https?://[^[:space:]]+$ ]] \
+      || bad "ENERGY_METER_URL deve ser http://IP/Data"
     if [[ -n "${GNB_LOG_DROP}" ]] && ! python3 -c 'import re,sys; re.compile(sys.argv[1])' "${GNB_LOG_DROP}" 2>/dev/null; then
       bad "GNB_LOG_DROP não é uma regex válida"
     fi
@@ -585,7 +587,7 @@ render_dashboard() {
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${DASHBOARD_LOCAL_ROLE}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -676,6 +678,8 @@ spec:
             - {name: LOCAL_HOST_NAME, value: $(_q "$(hostname -s)")}
             - {name: LOCAL_HOST_ROLE, value: $(_q "${DASHBOARD_LOCAL_ROLE}")}
             - {name: HOSTS, value: $(_q "${hosts}")}
+            - {name: ENERGY_METER_URL, value: $(_q "${ENERGY_METER_URL}")}
+            - {name: ENERGY_METER_HOST, value: $(_q "${ENERGY_METER_HOST}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
             - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
             - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}

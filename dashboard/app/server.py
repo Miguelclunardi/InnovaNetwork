@@ -72,6 +72,10 @@ LOCAL_HOST_NAME = _env("LOCAL_HOST_NAME")
 LOCAL_HOST_ROLE = _env("LOCAL_HOST_ROLE", "Core 5G (k3s)")
 HOSTS = [h.split("|", 1) for h in _env("HOSTS").split(";") if "|" in h]
 HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
+# Medidor de energia MiEnergy (página /Data com "chave": número). Mede a máquina ENERGY_METER_HOST.
+ENERGY_METER_URL = _env("ENERGY_METER_URL")          # ex.: http://192.168.68.105/Data (vazio = desligado)
+ENERGY_METER_HOST = _env("ENERGY_METER_HOST")        # nome da máquina na aba Máquinas
+ENERGY_INTERVAL = float(_env("ENERGY_INTERVAL", "2"))
 UE_INACTIVE_SECONDS = 30
 BLER_WINDOW = 10   # s: BLER "agora" dos cartões/tabelas (1 s com poucos blocos oscila demais)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -795,6 +799,69 @@ class Hosts:
                     "series": e["series"].window(time.time() - window)}
 
 
+# Campos do MiEnergy (monofásico) mostrados com nome; os demais aparecem na tabela crua
+ENERGY_FIELDS = {"p_a": "power", "v_a": "voltage", "i_a": "current", "fp_a": "pf", "freq": "freq",
+                 "frequencia": "freq", "energia_ativa_total": "energy_kwh"}
+RE_ENERGY = re.compile(r'([a-zA-Z0-9_]+)["\':\s]+([-\d\.]+)')   # mesmo filtro do collector.py do MiEnergy
+
+
+class EnergyMeter(threading.Thread):
+    def __init__(self, url):
+        super().__init__(daemon=True, name="energia")
+        self.url = url
+        self.lock = threading.Lock()
+        self.series = Series()
+        self.last = {}
+        self.ts = None
+        self.error = None
+        self.first_energy = None
+
+    def run(self):
+        while True:
+            t0 = time.time()
+            try:
+                with urllib.request.urlopen(self.url, timeout=5) as r:
+                    text = r.read(256 * 1024).decode("utf-8", "replace")
+                vals = {}
+                for k, v in RE_ENERGY.findall(text):
+                    try:
+                        vals[k] = float(v)
+                    except ValueError:
+                        pass
+                if not vals:
+                    raise ValueError("resposta sem números: %r" % text[:120])
+                now = time.time()
+                main = {ENERGY_FIELDS[k]: v for k, v in vals.items() if k in ENERGY_FIELDS}
+                with self.lock:
+                    self.last, self.ts, self.error = vals, now, None
+                    if self.first_energy is None and "energy_kwh" in main:
+                        self.first_energy = (now, main["energy_kwh"])
+                    self.series.add(now, main)
+            except Exception as e:  # noqa: BLE001
+                with self.lock:
+                    self.error = str(e)
+            time.sleep(max(0.2, ENERGY_INTERVAL - (time.time() - t0)))
+
+    def summary(self):
+        with self.lock:
+            return self.summary_unlocked()
+
+    def detail(self, window):
+        with self.lock:
+            out = self.summary_unlocked()
+            out["fields"] = dict(sorted(self.last.items()))
+            out["series"] = self.series.window(time.time() - window)
+            if self.first_energy and "energy_kwh" in out:
+                out["energy_since"] = self.first_energy[0]
+                out["energy_delta_kwh"] = out["energy_kwh"] - self.first_energy[1]
+            return out
+
+    def summary_unlocked(self):
+        main = {ENERGY_FIELDS[k]: v for k, v in self.last.items() if k in ENERGY_FIELDS}
+        return {"online": bool(self.ts and time.time() - self.ts < 15), "error": self.error, "ts": self.ts,
+                "url": self.url, **main}
+
+
 def local_host_loop(hosts):
     import hoststats
     c = hoststats.Collector(HOST_ROOT, HOST_FSROOT or None)
@@ -846,6 +913,7 @@ class GnbLog:
 GNB = GnbCollector(GNB_METRICS_URL)
 CORE = CoreCollector()
 GNBLOG = GnbLog()
+ENERGY = EnergyMeter(ENERGY_METER_URL) if ENERGY_METER_URL else None
 HOSTS_STATE = Hosts()
 STARTED = time.time()
 
@@ -958,10 +1026,17 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/gnb-log/stream":
                 return self._gnblog_stream(qs)
             if path == "/api/hosts":
-                return self._send(200, {"hosts": HOSTS_STATE.summary()})
+                hs = HOSTS_STATE.summary()
+                if ENERGY:
+                    for h in hs:
+                        if h["name"] == ENERGY_METER_HOST:
+                            h["energy"] = ENERGY.summary()
+                return self._send(200, {"hosts": hs})
             if path.startswith("/api/hosts/"):
-                d = HOSTS_STATE.detail(urllib.parse.unquote(path[len("/api/hosts/"):]),
-                                       min(_q(qs, "window", 300, int), HISTORY_SECONDS))
+                win = min(_q(qs, "window", 300, int), HISTORY_SECONDS)
+                d = HOSTS_STATE.detail(urllib.parse.unquote(path[len("/api/hosts/"):]), win)
+                if d and ENERGY and d["name"] == ENERGY_METER_HOST:
+                    d["energy"] = ENERGY.detail(win)
                 return self._send(200, d) if d else self._send(404, {"error": "máquina desconhecida"})
             return self._send(404, {"error": "não encontrado"})
         except (BrokenPipeError, ConnectionResetError):
@@ -1105,6 +1180,10 @@ def main():
     if GNB_METRICS_URL:
         GNB.start()
     CORE.start()
+    if ENERGY:
+        if ENERGY_METER_HOST and ENERGY_METER_HOST not in HOSTS_STATE.h:
+            HOSTS_STATE._entry(ENERGY_METER_HOST, "", "medidor")
+        ENERGY.start()
     if HOST_ROOT:
         threading.Thread(target=local_host_loop, args=(HOSTS_STATE,), daemon=True, name="host").start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)

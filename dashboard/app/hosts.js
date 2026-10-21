@@ -43,6 +43,8 @@ const Machines = {
           <span>Memória</span>${bar(h.mem_used_pct, 80, 92)}<span>${fmt(h.mem_used_pct)}%</span>
           <span>Temp.</span>${bar(h.temp_cpu, 75, 88)}<span>${h.temp_cpu != null ? fmt(h.temp_cpu, 0) + " °C" : "–"}</span>
         </div>` : ""}
+        ${h.energy ? `<div class="pw">⚡ Potência (medidor): ${h.energy.online && h.energy.power != null
+          ? `<b>${fmt(h.energy.power, 0)} W</b>` : '<span class="tag err">medidor sem dados</span>'}</div>` : ""}
         ${!h.online && h.error ? `<div class="err">${esc(h.error)}</div>` : ""}
       </button>`;
     }).join("") || `<div class="empty">Nenhuma máquina configurada.</div>`;
@@ -59,6 +61,7 @@ const Machines = {
     const l = d.last;
     $("#host-detail").classList.remove("hidden");
     $("#hd-title").textContent = d.name;
+    this.energy(d.energy);
     if (!l) {
       $("#hd-sub").textContent = d.error || "aguardando dados";
       ["#hd-kpis", "#hd-cores", "#hd-procs", "#hd-temps", "#hd-disks", "#hd-net"].forEach((s) => ($(s).innerHTML = ""));
@@ -117,5 +120,31 @@ const Machines = {
       (l.net || []).map((n) => `<tr><td><b>${esc(n.iface)}</b></td><td class="num">${fmtRate(n.rx_bps)}</td>
         <td class="num">${fmtRate(n.tx_bps)}</td><td class="num">${n.errs ? `<span class="tag warn">${n.errs}</span>` : 0}</td></tr>`).join("");
   },
+};
+Machines.energy = function (e) {
+  const box = $("#hd-energy");
+  box.classList.toggle("hidden", !e);
+  if (!e) return;
+  $("#hd-energy-sub").textContent = `medidor MiEnergy · ${e.url}` +
+    (e.online ? ` · atualizado há ${ago(e.ts)}` : ` · sem dados${e.error ? ": " + e.error : ""}`);
+  const k = [
+    { l: "Potência ativa", v: e.power != null ? fmt(e.power, 0) + " W" : "–", s: "agora" },
+    { l: "Tensão", v: e.voltage != null ? fmt(e.voltage, 1) + " V" : "–", s: "fase A" },
+    { l: "Corrente", v: e.current != null ? fmt(e.current, 2) + " A" : "–", s: "fase A" },
+    { l: "Fator de potência", v: e.pf != null ? fmt(e.pf, 2) : "–", s: "" },
+    { l: "Energia acumulada", v: e.energy_kwh != null ? fmt(e.energy_kwh, 3) + " kWh" : "–", s: "contador do medidor" },
+    { l: "Consumo desde o início do painel", v: e.energy_delta_kwh != null ? fmt(e.energy_delta_kwh, 3) + " kWh" : "–",
+      s: e.energy_since ? "desde " + new Date(e.energy_since * 1000).toLocaleString("pt-BR") : "" },
+  ];
+  $("#hd-energy-kpis").innerHTML = k.map((x) => `<div class="kpi"><div class="label">${esc(x.l)}</div>
+    <div class="value">${esc(x.v)}</div><div class="sub">${esc(x.s)}</div></div>`).join("");
+  const s = e.series || { t: [] };
+  Charts.make("c-energy-p", [{ label: "Potência W", fill: true, dec: 0 }]);
+  Charts.set("c-energy-p", cols(s, ["power"]));
+  Charts.make("c-energy-vi", [{ label: "Tensão V" }, { label: "Corrente A", color: "#6b7280", scale: "y2", dec: 2 }], { y2: true });
+  Charts.set("c-energy-vi", cols(s, ["voltage", "current"]));
+  const f = e.fields || {};
+  $("#hd-energy-fields").innerHTML = `<tr><th>Grandeza</th><th class="num">Valor</th></tr>` +
+    Object.entries(f).map(([kk, v]) => `<tr><td>${esc(kk)}</td><td class="num">${esc(v)}</td></tr>`).join("");
 };
 $("#hd-window").addEventListener("change", () => Machines.detail());

@@ -125,7 +125,9 @@ Documentação do projeto: **português**.
     - visual: branco/azul/cinza (pedido do usuário) com o verde do Centro Innova (#91cf50) só como detalhe;
     - aba **Máquinas**: a do core lida pelo pod (`/proc`, `/sys` e `/` do host montados só leitura); as outras
       (`DASHBOARD_HOSTS`) por SSH a partir da máquina do core, enviando o coletor pela entrada padrão — nada instalado
-      no host do gNB; unit `open5gs-k3s-hosts`. Pods com nome curto (AMF…) e assinantes "SIM real" × "UERANSIM".
+      no host do gNB; unit `open5gs-k3s-hosts`. Pods com nome curto (AMF…) e assinantes "SIM real" × "UERANSIM";
+    - **energia** do innovaserver pelo medidor MiEnergy: o painel lê `http://IP/Data` direto (sem InfluxDB/Grafana do
+      projeto original). Pendente: o medidor ficar alcançável a partir do torre2 (`ENERGY_METER_URL`).
 
 ## Ruído conhecido
 

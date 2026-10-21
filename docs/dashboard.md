@@ -138,6 +138,20 @@ dos logs.
 - Núcleos isolados (`isolcpus`, ex.: 0–17 do gNB) aparecem com fundo azul; um núcleo do gNB em 100 % é normal
   (laço do DPDK).
 
+### Energia (medidor MiEnergy)
+
+O medidor MiEnergy (monofásico) tem uma página `http://<IP>/Data` com ~70 grandezas (`v_a`, `i_a`, `p_a`, `fp_a`,
+`energia_ativa_total`…). O painel lê essa página a cada 2 s, com o mesmo filtro do `collector.py` do projeto
+MiEnergy_Lab_Meter, **sem InfluxDB nem Grafana**, e mostra na aba Máquinas, na máquina `ENERGY_METER_HOST`:
+potência no cartão; ao clicar, potência, tensão, corrente, fator de potência, energia acumulada, consumo desde que o
+painel iniciou, gráficos e a tabela com todas as grandezas.
+
+- `ENERGY_METER_URL="http://IP/Data"` + `sudo ./install.sh --dashboard-only`.
+- O pod do painel (na máquina do core) precisa **alcançar o IP do medidor**. Teste na máquina do core:
+  `curl -s http://IP/Data | head -c 200`.
+- Em 2026-10-21 o IP do exemplo (192.168.68.105) não era alcançável do desktop, do torre2 nem do innovaserver (rede
+  191.4.204.0/23): o medidor está em outra rede (roteador/Wi‑Fi próprio).
+
 ## API (para scripts)
 
 | Rota | Retorna |

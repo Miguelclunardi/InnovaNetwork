@@ -151,6 +151,16 @@
         <label>Janela <select id="hd-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
       </div>
       <div class="kpis" id="hd-kpis"></div>
+      <div class="card energy hidden" id="hd-energy" style="margin-top:12px">
+        <h2>Energia <span class="muted" id="hd-energy-sub"></span></h2>
+        <div class="kpis" id="hd-energy-kpis"></div>
+        <div class="charts" style="margin-top:12px">
+          <div class="chart"><h4>Potência ativa <span class="unit">W</span></h4><div id="c-energy-p"></div></div>
+          <div class="chart"><h4>Tensão e corrente <span class="unit">V · A</span></h4><div id="c-energy-vi"></div></div>
+        </div>
+        <details style="margin-top:8px"><summary class="muted">Todas as grandezas do medidor</summary>
+          <div class="tablewrap"><table id="hd-energy-fields"></table></div></details>
+      </div>
       <div class="card" style="margin-top:12px">
         <h2>Núcleos <span class="muted" id="hd-cores-sub"></span></h2>
         <div class="coregrid" id="hd-cores"></div>
