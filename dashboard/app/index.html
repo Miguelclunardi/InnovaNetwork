@@ -20,6 +20,7 @@
     <button role="tab" data-tab="ran">Rádio (gNB)</button>
     <button role="tab" data-tab="logs">Logs</button>
     <button role="tab" data-tab="core">Core</button>
+    <button role="tab" data-tab="hosts">Máquinas</button>
   </nav>
   <div class="topright">
     <span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span>
@@ -140,10 +141,41 @@
       </div>
     </div>
   </section>
+  <!-- ======================= MÁQUINAS ======================= -->
+  <section id="tab-hosts" class="tab">
+    <div class="hostlist" id="host-list"></div>
+    <div id="host-detail" class="hidden">
+      <div class="toolbar">
+        <h2 id="hd-title" class="hd-title"></h2>
+        <span class="muted" id="hd-sub"></span>
+        <label>Janela <select id="hd-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
+      </div>
+      <div class="kpis" id="hd-kpis"></div>
+      <div class="card" style="margin-top:12px">
+        <h2>Núcleos <span class="muted" id="hd-cores-sub"></span></h2>
+        <div class="coregrid" id="hd-cores"></div>
+      </div>
+      <div class="charts" style="margin-top:12px">
+        <div class="chart card"><h4>CPU e temperatura <span class="unit">% · °C</span></h4><div id="c-host-cpu"></div></div>
+        <div class="chart card"><h4>Memória e carga <span class="unit">% · load 1 min</span></h4><div id="c-host-mem"></div></div>
+        <div class="chart card"><h4>Rede: recebido <span class="unit">Mbit/s</span></h4><div id="c-host-rx"></div></div>
+        <div class="chart card"><h4>Rede: enviado <span class="unit">Mbit/s</span></h4><div id="c-host-tx"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h2>Processos que mais usam CPU <span class="muted">(100% = 1 núcleo)</span></h2><div class="tablewrap"><table id="hd-procs"></table></div></div>
+        <div class="card"><h2>Temperaturas</h2><div class="tablewrap"><table id="hd-temps"></table></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h2>Discos</h2><div class="tablewrap"><table id="hd-disks"></table></div></div>
+        <div class="card"><h2>Interfaces de rede</h2><div class="tablewrap"><table id="hd-net"></table></div></div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <footer class="muted" id="footer"></footer>
 <script src="uPlot.iife.min.js"></script>
 <script src="app.js"></script>
+<script src="hosts.js"></script>
 </body>
 </html>

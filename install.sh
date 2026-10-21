@@ -460,6 +460,7 @@ step_dashboard() {
       ok "painel removido (DASHBOARD_ENABLED=false)"
     fi
     remove_gnb_log_agent
+    remove_hosts_agent
     return 0
   fi
   step "Painel Innova Center Dashboard (NodePort ${DASHBOARD_NODEPORT})"
@@ -479,6 +480,65 @@ step_dashboard() {
   ok "painel no ar: http://${NODE_IP:-localhost}:${DASHBOARD_NODEPORT}"
   if [[ -n "${GNB_METRICS_URL}" ]]; then info "métricas do gNB: ${GNB_METRICS_URL}"; fi
   setup_gnb_log_agent
+  setup_hosts_agent
+}
+
+remove_hosts_agent() {
+  [[ -f "${HOSTS_UNIT_FILE}" ]] || return 0
+  systemctl disable --now open5gs-k3s-hosts.service >/dev/null 2>&1 || true
+  rm -f "${HOSTS_UNIT_FILE}"; systemctl daemon-reload
+  ok "unit open5gs-k3s-hosts removida"
+}
+
+# Outras máquinas (aba Máquinas): uma sessão SSH por máquina, a partir desta.
+setup_hosts_agent() {
+  if (( ${#DASHBOARD_HOSTS[@]} == 0 )); then remove_hosts_agent; return 0; fi
+  [[ "${TARGET_USER}" != root ]] || { warn "agente das máquinas precisa de um usuário comum"; return 0; }
+  local dst="${INSTALL_DIR}/dashboard-agent" unit e hn tg rl hosts="" bad=()
+  install -d -m 0755 -o root -g root "${dst}"
+  install -m 0755 -o root -g root "${PROJECT_DIR}/dashboard/agent/host-agent.py" "${dst}/host-agent.py"
+  install -m 0644 -o root -g root "${PROJECT_DIR}/dashboard/app/hoststats.py" "${dst}/hoststats.py"
+  for e in "${DASHBOARD_HOSTS[@]}"; do hosts+="${hosts:+;}${e}"; done
+  install -m 0640 -o root -g "${TARGET_GROUP}" /dev/null "${dst}/hosts.env"
+  {
+    echo "DASHBOARD_URL=http://${NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"
+    echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
+    echo "HOSTS=${hosts}"
+  } >"${dst}/hosts.env"
+  unit=$(cat <<EOU
+# Gerado por open5GK3S/install.sh
+[Unit]
+Description=open5GK3S: CPU/memoria/temperatura das outras maquinas para o painel
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${TARGET_USER}
+EnvironmentFile=${dst}/hosts.env
+ExecStart=/usr/bin/python3 -u ${dst}/host-agent.py ${dst}/hoststats.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOU
+)
+  if [[ "$(cat "${HOSTS_UNIT_FILE}" 2>/dev/null)" != "${unit}" ]]; then
+    printf '%s\n' "${unit}" >"${HOSTS_UNIT_FILE}"; systemctl daemon-reload
+  fi
+  systemctl enable open5gs-k3s-hosts.service >/dev/null 2>&1
+  systemctl restart open5gs-k3s-hosts.service
+  for e in "${DASHBOARD_HOSTS[@]}"; do
+    IFS='|' read -r hn tg rl <<<"$e"
+    su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${tg} true" &>/dev/null || bad+=("${hn} (${tg})")
+  done
+  if (( ${#bad[@]} )); then
+    warn "aba Máquinas: ${TARGET_USER} ainda não acessa por SSH sem senha: ${bad[*]} (ver docs/dashboard.md)"
+  else
+    ok "aba Máquinas: ${#DASHBOARD_HOSTS[@]} máquina(s) remota(s) + esta (journalctl -u open5gs-k3s-hosts)"
+  fi
 }
 
 remove_gnb_log_agent() {

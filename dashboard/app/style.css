@@ -124,6 +124,27 @@ input[type=search] { min-width: 220px; }
   font-variant-numeric: tabular-nums; }
 .uecard .m span { color: var(--muted); }
 
+/* ---------- máquinas ---------- */
+.hostlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.hostcard { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer; text-align: left;
+  font: inherit; color: var(--text); }
+.hostcard:hover { border-color: var(--accent); }
+.hostcard.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.hostcard.off { opacity: .65; }
+.hostcard .h { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.hostcard .n { font-weight: 650; font-size: 15px; }
+.hostcard .r { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+.hostcard .bars { display: grid; grid-template-columns: 70px 1fr 52px; gap: 4px 8px; align-items: center; margin-top: 10px; font-size: 12px; }
+.bar { height: 7px; background: var(--panel2); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.bar > i.warn { background: var(--warn); } .bar > i.err { background: var(--err); }
+.hostcard .err { color: var(--err); font-size: 12px; margin-top: 8px; }
+.hd-title { font-size: 16px !important; }
+.coregrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr)); gap: 6px; }
+.core { border: 1px solid var(--border); border-radius: 6px; padding: 4px 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.core .bar { height: 5px; margin-top: 3px; }
+.core.iso { background: var(--accent-soft); border-color: transparent; }
+
 /* ---------- logs ---------- */
 .logs-layout { display: grid; grid-template-columns: 250px 1fr; gap: 12px; height: calc(100vh - 120px); min-height: 480px; }
 .sources { overflow-y: auto; }

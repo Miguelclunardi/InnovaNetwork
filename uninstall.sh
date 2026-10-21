@@ -66,6 +66,11 @@ if [[ -f "${GNBLOG_UNIT_FILE}" ]]; then
   rm -f "${GNBLOG_UNIT_FILE}"; rm -rf "${INSTALL_DIR}/dashboard-agent"; systemctl daemon-reload
   ok "unit open5gs-k3s-gnb-log removida"
 fi
+if [[ -f "${HOSTS_UNIT_FILE}" ]]; then
+  systemctl disable --now open5gs-k3s-hosts.service >/dev/null 2>&1 || true
+  rm -f "${HOSTS_UNIT_FILE}"; rm -rf "${INSTALL_DIR}/dashboard-agent"; systemctl daemon-reload
+  ok "unit open5gs-k3s-hosts removida"
+fi
 rm -f "${INSTALL_DIR}/state/dashboard-ingest-token"
 
 # 2) k3s --------------------------------------------------------------------------

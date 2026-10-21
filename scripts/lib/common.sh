@@ -21,7 +21,8 @@ NM_CONF_FILE="/etc/NetworkManager/conf.d/90-open5gs-k3s-unmanaged.conf"
 NETIF_UNIT_FILE="/etc/systemd/system/open5gs-k3s-netif.service"   # interface estável do nó
 K3S_DROPIN_FILE="/etc/systemd/system/k3s.service.d/10-open5gs-k3s-netif.conf"
 HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"
-GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # log do gNB -> painel      # recuperação no boot
+GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # log do gNB -> painel
+HOSTS_UNIT_FILE="/etc/systemd/system/open5gs-k3s-hosts.service"        # outras máquinas -> painel      # recuperação no boot
 HASH_ANNOTATION="open5gs-k3s/config-hash"
 
 # ----------------------------------------------------------------------------
@@ -98,6 +99,8 @@ load_config() {
   declare -p SUBSCRIBERS &>/dev/null || SUBSCRIBERS=()
   declare -p K3S_EXTRA_ARGS &>/dev/null || K3S_EXTRA_ARGS=()
   declare -p DASHBOARD_UE_NAMES &>/dev/null || DASHBOARD_UE_NAMES=()
+  declare -p DASHBOARD_HOSTS &>/dev/null || DASHBOARD_HOSTS=()
+  : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}"
 
   CHARTS_DIR="${INSTALL_DIR}/5g-charts"
   export HELM_CACHE_HOME="${INSTALL_DIR}/helm/cache"
@@ -233,6 +236,10 @@ validate_config() {
     [[ "${GNB_LOG_FILE}" =~ ^/[^[:space:]\'\"]+$ ]] || bad "GNB_LOG_FILE deve ser um caminho absoluto sem espaços"
     for e in "${DASHBOARD_UE_NAMES[@]}"; do
       [[ "$e" =~ ^[0-9]{15}:[^\;=\"]+$ ]] || bad "DASHBOARD_UE_NAMES: use 'IMSI:nome' sem ; = ou aspas (atual: $e)"
+    done
+    for e in "${DASHBOARD_HOSTS[@]}"; do
+      [[ "$e" =~ ^[A-Za-z0-9._-]+\|[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+\|[^\;\"]*$ ]] \
+        || bad "DASHBOARD_HOSTS: use 'nome|usuario@host|papel' (atual: $e)"
     done
     if [[ -n "${GNB_LOG_DROP}" ]] && ! python3 -c 'import re,sys; re.compile(sys.argv[1])' "${GNB_LOG_DROP}" 2>/dev/null; then
       bad "GNB_LOG_DROP não é uma regex válida"
@@ -567,15 +574,18 @@ render_dashboard() {
     for (( i = 0; i < UE_COUNT; i++ )); do sims+="${sims:+ }$(ue_imsi "$i")"; done
   fi
   for e in "${DASHBOARD_UE_NAMES[@]}"; do names+="${names:+;}${e%%:*}=${e#*:}"; done
+  # Máquinas remotas para listar no painel: "nome|papel;..."
+  local hosts="" hn
+  for e in "${DASHBOARD_HOSTS[@]}"; do IFS='|' read -r hn _ e <<<"$e"; hosts+="${hosts:+;}${hn}|${e}"; done
   mkdir -p "${GENERATED_DIR}"
-  for f in server.py index.html app.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
+  for f in server.py hoststats.py index.html app.js hosts.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${DASHBOARD_LOCAL_ROLE}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -661,6 +671,11 @@ spec:
             - {name: HISTORY_SECONDS, value: $(_q "${DASHBOARD_HISTORY_SECONDS}")}
             - {name: SIM_IMSIS, value: $(_q "${sims}")}
             - {name: UE_NAMES, value: $(_q "${names}")}
+            - {name: HOST_ROOT, value: /host}
+            - {name: HOST_FSROOT, value: /host/root}
+            - {name: LOCAL_HOST_NAME, value: $(_q "$(hostname -s)")}
+            - {name: LOCAL_HOST_ROLE, value: $(_q "${DASHBOARD_LOCAL_ROLE}")}
+            - {name: HOSTS, value: $(_q "${hosts}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
             - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
             - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}
@@ -680,9 +695,16 @@ spec:
             capabilities: {drop: ["ALL"]}
           volumeMounts:
             - {name: app, mountPath: /app, readOnly: true}
+            # Aba Máquinas: /proc, /sys e / do host, só leitura (CPU, memória, temperatura, discos)
+            - {name: host-proc, mountPath: /host/proc, readOnly: true}
+            - {name: host-sys, mountPath: /host/sys, readOnly: true}
+            - {name: host-root, mountPath: /host/root, readOnly: true}
       volumes:
         - name: app
           configMap: {name: dashboard-app}
+        - {name: host-proc, hostPath: {path: /proc, type: Directory}}
+        - {name: host-sys, hostPath: {path: /sys, type: Directory}}
+        - {name: host-root, hostPath: {path: /, type: Directory}}
 ---
 apiVersion: v1
 kind: Service

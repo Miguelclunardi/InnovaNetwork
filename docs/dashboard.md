@@ -7,6 +7,7 @@ Página web que roda **no próprio cluster do core** (máquina do core) e junta 
 | **Visão geral** | UEs no rádio (vazão, MCS, CQI, RI, BLER, SNR), assinantes vistos pelo core (registro, sessões DNN → IP), pods (estado, reinícios, IP, IP no link RAN), eventos do core (avisos/erros iguais agrupados com contador) | métricas do gNB + API do Kubernetes + logs do AMF/SMF/UPF |
 | **Rádio (gNB)** | vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
+| **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
 | **Core** | métricas Prometheus do AMF/SMF/UPF/PCF: gNBs, UEs, sessões, tráfego N3 do UPF, tabela com todas as métricas | `:9090/metrics` dos NFs (precisa `OPEN5GS_METRICS=true`) |
 
 Endereço: `http://<IP-do-core>:30998` (`DASHBOARD_NODEPORT`). Sem senha por padrão; com
@@ -72,6 +73,9 @@ pod, que reinicia sozinho.
 | `GNB_NAME` | `OCUDU + LiteOn` | nome mostrado |
 | `GNB_LOG_SSH` | vazio | `usuario@host` do gNB para o agente do log; vazio = sem log do gNB |
 | `GNB_LOG_FILE` | `/tmp/gnb.log` | arquivo `log: filename:` da config do gNB |
+| `DASHBOARD_LOCAL_ROLE` | `Core 5G (k3s)` | papel desta máquina na aba Máquinas |
+| `DASHBOARD_HOSTS` | `innovaserver\|innovaserver@10.10.0.1\|gNB OCUDU + LiteOn` | outras máquinas (lidas por SSH) |
+| `DASHBOARD_UE_NAMES` | `001010000000022:Modem Telit FN990` | apelidos dos SIMs; os do UERANSIM são marcados sozinhos |
 | `GNB_LOG_DROP` | `\[PHY *\] \[I\]` | regex de linhas descartadas; vazio = envia tudo |
 | `OPEN5GS_METRICS` | `false` | Prometheus nos NFs (aba Core). **Mudar reinicia o core** no próximo install |
 
@@ -123,6 +127,17 @@ UPF e PCF (porta 9090, `/metrics`). **Reinicia esses NFs uma vez** — fazer num
 Sem isso, a aba Core explica como ligar, e a Visão geral continua mostrando gNBs, UEs e sessões tirados
 dos logs.
 
+### Aba Máquinas
+
+- **Máquina do core**: o pod monta `/proc`, `/sys` e `/` do host **só leitura** e lê com `dashboard/app/hoststats.py`.
+- **Outras máquinas** (`DASHBOARD_HOSTS`, formato `nome|usuario@host|papel`): a unit `open5gs-k3s-hosts` (máquina do
+  core, usuário do install) abre uma sessão SSH por máquina e manda o `hoststats.py` pela entrada padrão
+  (`ssh host nice -n 19 python3 - --loop 2`). **Nada é instalado** na máquina remota; o processo lê `/proc` e `/sys`
+  a cada 2 s com prioridade mínima e some quando a sessão cai. Usa a mesma chave SSH do log do gNB.
+- Sem a chave, a máquina aparece como "sem dados" com o motivo. Estado: `journalctl -u open5gs-k3s-hosts -f`.
+- Núcleos isolados (`isolcpus`, ex.: 0–17 do gNB) aparecem com fundo azul; um núcleo do gNB em 100 % é normal
+  (laço do DPDK).
+
 ## API (para scripts)
 
 | Rota | Retorna |
@@ -136,6 +151,8 @@ dos logs.
 | `GET /api/logs?pod=&container=&tail=` | log de um pod |
 | `GET /api/logs/stream?pod=&container=` | log ao vivo (Server-Sent Events) |
 | `GET /api/gnb-log?tail=` · `/api/gnb-log/stream` | log do gNB |
+| `GET /api/hosts` · `GET /api/hosts/<nome>?window=` | máquinas: resumo · detalhes e séries |
+| `POST /api/ingest/host` | entrada do agente das máquinas (`X-Ingest-Token`) |
 | `POST /api/ingest/gnb-log` | entrada do agente (cabeçalho `X-Ingest-Token`) |
 
 Exemplo: `curl -s http://IP:30998/api/ran.csv?window=900 -o ran.csv`.

@@ -122,7 +122,10 @@ Documentação do projeto: **português**.
     - histórico só em memória (15 min); BLER nos cartões em janela de 10 s; MCS/SNR sem transmissão viram lacuna;
     - `install.sh --dashboard-only` sobe só o painel; com `OPEN5GS_METRICS=false` os values do core ficam idênticos
       (verificado), então o install completo também não reinicia o core por causa do painel;
-    - visual: branco/azul/cinza (pedido do usuário) com o verde do Centro Innova (#91cf50) só como detalhe.
+    - visual: branco/azul/cinza (pedido do usuário) com o verde do Centro Innova (#91cf50) só como detalhe;
+    - aba **Máquinas**: a do core lida pelo pod (`/proc`, `/sys` e `/` do host montados só leitura); as outras
+      (`DASHBOARD_HOSTS`) por SSH a partir da máquina do core, enviando o coletor pela entrada padrão — nada instalado
+      no host do gNB; unit `open5gs-k3s-hosts`. Pods com nome curto (AMF…) e assinantes "SIM real" × "UERANSIM".
 
 ## Ruído conhecido
 

@@ -64,6 +64,14 @@ STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 SIM_IMSIS = set(_env("SIM_IMSIS").split())
 # Apelidos: "IMSI=nome;IMSI=nome"
 UE_NAMES = dict(kv.split("=", 1) for kv in _env("UE_NAMES").split(";") if "=" in kv)
+# Máquinas: a do core é lida direto (HOST_ROOT = /proc e /sys do host montados); as outras chegam
+# por um agente (POST /api/ingest/host). HOSTS = "nome|papel;nome|papel" (para listar mesmo sem dados)
+HOST_ROOT = _env("HOST_ROOT")
+HOST_FSROOT = _env("HOST_FSROOT")
+LOCAL_HOST_NAME = _env("LOCAL_HOST_NAME")
+LOCAL_HOST_ROLE = _env("LOCAL_HOST_ROLE", "Core 5G (k3s)")
+HOSTS = [h.split("|", 1) for h in _env("HOSTS").split(";") if "|" in h]
+HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
 UE_INACTIVE_SECONDS = 30
 BLER_WINDOW = 10   # s: BLER "agora" dos cartões/tabelas (1 s com poucos blocos oscila demais)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -729,6 +737,79 @@ def _parse_rfc3339(s):
 
 
 # ----------------------------------------------------------------------------
+#  Máquinas (CPU, memória, temperaturas, rede, discos, processos)
+# ----------------------------------------------------------------------------
+class Hosts:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.h = {}   # nome -> {"role", "source", "last", "ts", "error", "series"}
+        for name, role in HOSTS:
+            self._entry(name, role, "agente")
+
+    def _entry(self, name, role, source):
+        e = self.h.get(name)
+        if e is None:
+            e = self.h[name] = {"name": name, "role": role, "source": source, "last": None, "ts": None,
+                                "error": None, "series": Series()}
+        if role:
+            e["role"] = role
+        return e
+
+    def push(self, name, role, source, sample=None, error=None):
+        with self.lock:
+            e = self._entry(name, role, source)
+            if error:
+                e["error"] = error
+                return
+            if not sample or "cpu" not in sample:
+                return
+            t = time.time()
+            e.update(last=sample, ts=t, error=None)
+            v = {"cpu": sample.get("cpu"), "mem": sample.get("mem_used_pct"), "temp": sample.get("temp_cpu"),
+                 "load1": (sample.get("load") or [None])[0]}
+            for n in sample.get("net") or []:
+                v["rx:" + n["iface"]] = n["rx_bps"] / 1e6
+                v["tx:" + n["iface"]] = n["tx_bps"] / 1e6
+            e["series"].add(t, v)
+
+    def summary(self):
+        now = time.time()
+        with self.lock:
+            out = []
+            for e in self.h.values():
+                l = e["last"] or {}
+                out.append({"name": e["name"], "role": e["role"], "source": e["source"], "error": e["error"],
+                            "age": now - e["ts"] if e["ts"] else None,
+                            "online": bool(e["ts"] and now - e["ts"] < 15),
+                            **{k: l.get(k) for k in ("hostname", "cpu_model", "ncpu", "cpu", "mem_used_pct", "mem_total",
+                                                      "temp_cpu", "load", "uptime", "isolated_cpus")}})
+            return out
+
+    def detail(self, name, window):
+        with self.lock:
+            e = self.h.get(name)
+            if not e:
+                return None
+            return {"name": e["name"], "role": e["role"], "source": e["source"], "error": e["error"],
+                    "age": time.time() - e["ts"] if e["ts"] else None, "last": e["last"],
+                    "series": e["series"].window(time.time() - window)}
+
+
+def local_host_loop(hosts):
+    import hoststats
+    c = hoststats.Collector(HOST_ROOT, HOST_FSROOT or None)
+    name = LOCAL_HOST_NAME or c.static.get("hostname") or "core"
+    c.sample()
+    while True:
+        time.sleep(HOST_INTERVAL)
+        try:
+            hosts.push(name, LOCAL_HOST_ROLE, "local", c.sample())
+        except Exception as e:  # noqa: BLE001
+            hosts.push(name, LOCAL_HOST_ROLE, "local", error=str(e))
+            log("máquina local:", e)
+
+
+# ----------------------------------------------------------------------------
 #  Log do gNB real (recebido de um agente no host do gNB)
 # ----------------------------------------------------------------------------
 class GnbLog:
@@ -765,12 +846,13 @@ class GnbLog:
 GNB = GnbCollector(GNB_METRICS_URL)
 CORE = CoreCollector()
 GNBLOG = GnbLog()
+HOSTS_STATE = Hosts()
 STARTED = time.time()
 
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
                  ".ico": "image/x-icon"}
-STATIC_FILES = {"index.html", "app.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
+STATIC_FILES = {"index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -875,6 +957,12 @@ class Handler(BaseHTTPRequestHandler):
                                         "seq": lines[-1][0] if lines else 0, "lines": [l for _, l in lines]})
             if path == "/api/gnb-log/stream":
                 return self._gnblog_stream(qs)
+            if path == "/api/hosts":
+                return self._send(200, {"hosts": HOSTS_STATE.summary()})
+            if path.startswith("/api/hosts/"):
+                d = HOSTS_STATE.detail(urllib.parse.unquote(path[len("/api/hosts/"):]),
+                                       min(_q(qs, "window", 300, int), HISTORY_SECONDS))
+                return self._send(200, d) if d else self._send(404, {"error": "máquina desconhecida"})
             return self._send(404, {"error": "não encontrado"})
         except (BrokenPipeError, ConnectionResetError):
             return None
@@ -886,7 +974,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
-        if u.path != "/api/ingest/gnb-log":
+        if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host"):
             return self._send(404, {"error": "não encontrado"})
         if not INGEST_TOKEN:
             return self._send(403, {"error": "ingestão desligada (INGEST_TOKEN vazio)"})
@@ -897,6 +985,14 @@ class Handler(BaseHTTPRequestHandler):
         if n > 8 * 1024 * 1024:
             return self._send(413, {"error": "lote grande demais"})
         body = self.rfile.read(n).decode("utf-8", "replace")
+        if u.path == "/api/ingest/host":
+            try:
+                d = json.loads(body)
+                name = str(d["name"])[:64]
+            except (ValueError, KeyError, TypeError):
+                return self._send(400, {"error": "JSON inválido"})
+            HOSTS_STATE.push(name, str(d.get("role") or "")[:80], "agente", d.get("sample"), d.get("error"))
+            return self._send(200, {"ok": True})
         lines = [ANSI.sub("", l) for l in body.splitlines() if l.strip()]
         GNBLOG.push(lines, self.headers.get("X-Source", self.client_address[0]))
         return self._send(200, {"ok": True, "lines": len(lines)})
@@ -1009,6 +1105,8 @@ def main():
     if GNB_METRICS_URL:
         GNB.start()
     CORE.start()
+    if HOST_ROOT:
+        threading.Thread(target=local_host_loop, args=(HOSTS_STATE,), daemon=True, name="host").start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
     srv.daemon_threads = True
     srv.serve_forever()
