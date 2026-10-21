@@ -159,3 +159,7 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
 - 2026-10-21 (noite): painel **v1.0** — aba Configuração (edita o `config.env` com senha de administrador, diff,
   validação e backup; aplicar continua sendo `sudo ./install.sh`), UEs do rádio identificados (RNTI → IMSI/IP pelos
   logs do gNB, AMF e SMF), log do gNB ligado. Medidor MiEnergy integrado mas desligado: está atrás do NAT do Wi‑Fi.
+- 2026-10-21 (fim do dia): painel com aba Core sem Prometheus (CPU/memória dos NFs e tráfego do UPF pelo /proc do
+  host), WebUI do Open5GS embutida na aba Core (Assinantes), install do painel com server-side apply. Pendentes:
+  pool para a DNN `ims` (SMF/UPF reiniciam: janela sem usuários), medidor de energia atrás do NAT do Wi-Fi,
+  temperatura do innovaserver (ver IPMI), rotação do `/tmp/gnb.log` (9 GB).
