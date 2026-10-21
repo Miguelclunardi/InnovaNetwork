@@ -60,6 +60,10 @@ PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usu�
 INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
 K8S_API = _env("K8S_API")                              # só para desenvolvimento (ex.: kubectl proxy)
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
+# IMSIs dos UEs simulados (UERANSIM), separados por espaço — o resto é SIM real
+SIM_IMSIS = set(_env("SIM_IMSIS").split())
+# Apelidos: "IMSI=nome;IMSI=nome"
+UE_NAMES = dict(kv.split("=", 1) for kv in _env("UE_NAMES").split(";") if "=" in kv)
 UE_INACTIVE_SECONDS = 30
 BLER_WINDOW = 10   # s: BLER "agora" dos cartões/tabelas (1 s com poucos blocos oscila demais)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -522,7 +526,8 @@ class CoreState:
                     self._event(ts, comp, "info", "UE %s desregistrou" % m.group(1))
                 m = RE_DNN_NOK.search(line)
                 if m:
-                    self._ue(m.group(1), "sessão recusada: DNN/slice fora da assinatura", ts)
+                    # Normalmente o UE pedindo uma DNN extra (ex.: ims) que não está na assinatura: inofensivo
+                    self._ue(m.group(1), "pediu DNN fora da assinatura (ex.: ims) — recusada", ts)
                     self.counters["dnn_not_subscribed"] += 1
                 elif lvl and RE_REJECT.search(line):
                     m = RE_REJECT.search(line)
@@ -563,8 +568,9 @@ class CoreState:
             return {
                 "nof_gnbs": self.nof_gnbs,
                 "gnbs": [{"addr": k, **v} for k, v in sorted(self.gnbs.items())],
-                "ues": [{"imsi": k, **v, "sessions": [{"dnn": d, **s} for (i, d), s in sorted(self.sessions.items()) if i == k]}
-                        for k, v in sorted(self.ues.items())],
+                "ues": [{"imsi": k, **v, "kind": "ueransim" if k in SIM_IMSIS else "real", "name": UE_NAMES.get(k, ""),
+                         "sessions": [{"dnn": d, **s} for (i, d), s in sorted(self.sessions.items()) if i == k]}
+                        for k, v in sorted(self.ues.items(), key=lambda kv: (kv[0] in SIM_IMSIS, kv[0]))],
                 "sessions": [{"imsi": i, "dnn": d, **s} for (i, d), s in sorted(self.sessions.items())],
                 "events": list(self.events.values())[-150:][::-1],
                 "counters": dict(self.counters),

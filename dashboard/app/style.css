@@ -82,6 +82,7 @@ tr.dim td { color: var(--muted); }
 .tag.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
 .tag.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
 .tag.err { color: var(--err); background: var(--err-soft); border-color: transparent; }
+.tag.real { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
 .empty { color: var(--muted); padding: 10px 0; }
 
 /* ---------- eventos ---------- */

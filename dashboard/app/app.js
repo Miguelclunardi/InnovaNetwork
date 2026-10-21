@@ -14,6 +14,19 @@ const store = {
 };
 const PALETTE = ["#1554c0", "#6b7280", "#0ea5e9", "#f59e0b", "#7c3aed", "#10b981", "#ef4444", "#94a3b8"];
 const colorFor = (i) => PALETTE[i % PALETTE.length];
+// Nome curto e função de cada pod (o nome completo do pod fica no tooltip)
+const NF_INFO = {
+  amf: ["AMF", "acesso e mobilidade (N2)"], smf: ["SMF", "sessões PDU"], upf: ["UPF", "plano de usuário (N3/N6)"],
+  nrf: ["NRF", "registro de funções"], scp: ["SCP", "roteamento de sinalização"], ausf: ["AUSF", "autenticação"],
+  udm: ["UDM", "dados de assinante"], udr: ["UDR", "repositório de dados"], pcf: ["PCF", "políticas"],
+  bsf: ["BSF", "vínculo de sessões"], nssf: ["NSSF", "seleção de slice"], mongodb: ["MongoDB", "banco de assinantes"],
+  webui: ["WebUI", "cadastro de assinantes"], populate: ["Populate", "cadastro inicial"],
+  gnb: ["gNB simulado", "UERANSIM"], ues: ["UEs simulados", "UERANSIM"], dashboard: ["Painel", "este site"],
+};
+function nfInfo(p) {
+  const k = (p.label || p.component || "").toLowerCase();
+  return NF_INFO[k] || [p.label || p.component || p.name, ""];
+}
 
 function fmtRate(bps) {
   if (bps == null || isNaN(bps)) return "–";
@@ -228,7 +241,7 @@ const Overview = {
       { l: "Downlink da célula", v: fmtRate(cell.dl_brate), s: "agora" },
       { l: "Uplink da célula", v: fmtRate(cell.ul_brate), s: "agora" },
       { l: "gNBs no AMF (N2)", v: c.nof_gnbs ?? "–", s: (c.gnbs || []).map((g) => g.addr).join(", ") || "–" },
-      { l: "UEs registrados", v: regs, s: `${c.sessions.length} sessão(ões) PDU` },
+      { l: "UEs registrados", v: regs, s: `${c.ues.filter((u) => u.registered && u.kind === "real").length} real(is) · ${c.ues.filter((u) => u.registered && u.kind === "ueransim").length} simulado(s) · ${c.sessions.length} sessões` },
       { l: "Pods do core", v: `${c.pods_ready}/${c.pods_total}`, s: `${c.restarts} reinício(s) no total`, c: c.pods_ready === c.pods_total ? "ok" : "warn" },
       { l: "Erros PFCP (UPF)", v: c.counters.pfcp_cannot_find || 0, s: "Cannot find PFCP-Node", c: c.counters.pfcp_cannot_find ? "err" : "ok" },
     ];
@@ -237,7 +250,7 @@ const Overview = {
   },
   ranUes(ov) {
     const ues = ov.gnb.ues;
-    $("#ov-ran-sub").textContent = ov.gnb.status.enabled ? `(${CONFIG.gnb_name || "gNB"})` : "(métricas do gNB desligadas)";
+    $("#ov-ran-sub").textContent = ov.gnb.status.enabled ? `(${CONFIG.gnb_name || "gNB"} · só UEs reais; o UERANSIM não passa pelo rádio)` : "(métricas do gNB desligadas)";
     if (!ues.length) { $("#ov-ran-ues").innerHTML = `<tr><td class="empty">Nenhum UE visto pelo gNB na última janela.</td></tr>`; return; }
     $("#ov-ran-ues").innerHTML = `<tr><th>RNTI</th><th class="num">DL</th><th class="num">UL</th><th class="num">MCS DL/UL</th>
       <th class="num">CQI</th><th class="num">RI</th><th class="num">BLER DL/UL (10 s)</th><th class="num">SNR</th><th>Visto</th></tr>` +
@@ -254,17 +267,19 @@ const Overview = {
   coreUes(ov) {
     const ues = ov.core.ues;
     if (!ues.length) { $("#ov-core-ues").innerHTML = `<tr><td class="empty">Nenhum assinante visto nos logs do AMF.</td></tr>`; return; }
-    $("#ov-core-ues").innerHTML = `<tr><th>IMSI</th><th>Estado</th><th>Sessões (DNN → IP)</th><th>Último evento</th></tr>` +
-      ues.map((u) => `<tr><td><b>${esc(u.imsi)}</b></td>
+    $("#ov-core-ues").innerHTML = `<tr><th>IMSI</th><th>Tipo</th><th>Estado</th><th>Sessões (DNN → IP)</th><th>Último evento</th></tr>` +
+      ues.map((u) => `<tr><td><b>${esc(u.imsi)}</b>${u.name ? `<br><span class="muted">${esc(u.name)}</span>` : ""}</td>
+        <td>${u.kind === "ueransim" ? '<span class="tag">UERANSIM (simulado)</span>' : '<span class="tag real">SIM real</span>'}</td>
         <td>${u.registered ? '<span class="tag ok">registrado</span>' : '<span class="tag">fora</span>'}</td>
         <td>${u.sessions.length ? u.sessions.map((s) => `${esc(s.dnn)} → <b>${esc(s.ipv4 || s.ipv6)}</b>`).join("<br>") : '<span class="muted">nenhuma</span>'}</td>
         <td>${esc(u.event || "")} <span class="muted">${hhmmss(u.ts)}</span></td></tr>`).join("");
   },
   pods(ov) {
-    $("#ov-pods").innerHTML = `<tr><th>Pod</th><th>Estado</th><th class="num">Prontos</th><th class="num">Reinícios</th><th>Idade</th><th>IP</th><th>Link RAN</th></tr>` +
+    $("#ov-pods").innerHTML = `<tr><th>Componente</th><th>Estado</th><th class="num">Prontos</th><th class="num">Reinícios</th><th>Idade</th><th>IP</th><th>Link RAN</th></tr>` +
       ov.pods.map((p) => {
         const st = p.phase === "Running" && p.all_ready ? "ok" : p.phase === "Running" ? "warn" : "err";
-        return `<tr><td>${esc(p.name)}</td><td><span class="tag ${st}">${esc(p.reason || p.phase)}</span></td>
+        const [nm, role] = nfInfo(p);
+        return `<tr><td title="pod: ${esc(p.name)}"><b>${esc(nm)}</b> <span class="muted">${esc(role)}</span></td><td><span class="tag ${st}">${esc(p.reason || p.phase)}</span></td>
           <td class="num">${esc(p.ready)}</td><td class="num">${p.restarts ? `<span class="tag warn">${p.restarts}</span>` : 0}</td>
           <td>${p.age != null ? ago(Date.now() / 1000 - p.age) : "–"}</td><td>${esc(p.ip)}</td><td>${esc(p.net1 || "")}</td></tr>`;
       }).join("");
@@ -385,11 +400,17 @@ const Logs = {
       const saved = store.get("logs.src", null);
       const pods = LAST_OVERVIEW.pods;
       if (saved && saved.kind === "pod") {
-        const p = pods.find((p) => p.component === saved.component) || pods.find((p) => p.name === saved.pod);
-        if (p) return this.open({ kind: "pod", pod: p.name, container: saved.container, component: p.component, label: saved.label });
+        // pod pode ter sido recriado (nome novo): procura pelo mesmo papel (label) e contêiner
+        const p = pods.find((p) => p.name === saved.pod) ||
+          pods.find((p) => p.label === saved.plabel && p.containers.includes(saved.container));
+        if (p) {
+          const nm = nfInfo(p)[0];
+          return this.open({ kind: "pod", pod: p.name, container: saved.container, component: p.component, plabel: p.label,
+            label: p.containers.length > 1 ? `${nm} · ${saved.container}` : nm });
+        }
       } else if (saved && saved.kind === "gnb") return this.open(saved);
       const amf = pods.find((p) => p.component === "amf");
-      if (amf) this.open({ kind: "pod", pod: amf.name, container: amf.containers[0], component: "amf", label: amf.label });
+      if (amf) this.open({ kind: "pod", pod: amf.name, container: amf.containers[0], component: "amf", plabel: amf.label, label: "AMF" });
     }
   },
   renderSources() {
@@ -398,10 +419,11 @@ const Logs = {
     const groups = {};
     pods.filter((p) => p.instance !== CONFIG.release).forEach((p) => (groups[p.instance || "outros"] ||= []).push(p));
     const item = (p, c) => {
-      const label = p.containers.length > 1 ? `${p.label} · ${c}` : p.label;
+      const nm = nfInfo(p)[0];
+      const label = p.containers.length > 1 ? `${nm} · ${c}` : nm;
       const dot = p.phase === "Running" && p.all_ready ? "ok" : p.phase === "Running" ? "warn" : "err";
       const act = this.src && this.src.kind === "pod" && this.src.pod === p.name && this.src.container === c ? "active" : "";
-      return `<button class="src ${act}" data-pod="${esc(p.name)}" data-c="${esc(c)}" data-comp="${esc(p.component)}" data-label="${esc(label)}" title="${esc(p.name)}">
+      return `<button class="src ${act}" data-pod="${esc(p.name)}" data-c="${esc(c)}" data-comp="${esc(p.component)}" data-plabel="${esc(p.label)}" data-label="${esc(label)}" title="${esc(nfInfo(p)[1] ? nfInfo(p)[1] + " — " : "")}pod ${esc(p.name)}">
         <span>${esc(label)}</span><span class="dot ${dot}"></span></button>`;
     };
     const gnbAct = this.src && this.src.kind === "gnb" ? "active" : "";
@@ -409,11 +431,11 @@ const Logs = {
     const gdot = g && g.last_push && Date.now() / 1000 - g.last_push < 30 ? "ok" : "";
     $("#log-sources").innerHTML =
       `<div class="grp">RAN</div><button class="src ${gnbAct}" data-gnb="1"><span>${esc(CONFIG.gnb_name || "gNB")} (real)</span><span class="dot ${gdot}"></span></button>` +
-      `<div class="grp">Core (${esc(CONFIG.release || "open5gs")})</div>` + core.flatMap((p) => p.containers.map((c) => item(p, c))).join("") +
-      Object.entries(groups).map(([g, ps]) => `<div class="grp">${esc(g)}</div>` + ps.flatMap((p) => p.containers.map((c) => item(p, c))).join("")).join("");
+      `<div class="grp">Core 5G (Open5GS)</div>` + core.flatMap((p) => p.containers.map((c) => item(p, c))).join("") +
+      Object.entries(groups).map(([g, ps]) => `<div class="grp">${esc(g === "ueransim" ? "UERANSIM (simulador)" : g)}</div>` + ps.flatMap((p) => p.containers.map((c) => item(p, c))).join("")).join("");
     $$("#log-sources .src").forEach((b) => b.addEventListener("click", () => {
       if (b.dataset.gnb) this.open({ kind: "gnb", label: (CONFIG.gnb_name || "gNB") + " (real)" });
-      else this.open({ kind: "pod", pod: b.dataset.pod, container: b.dataset.c, component: b.dataset.comp, label: b.dataset.label });
+      else this.open({ kind: "pod", pod: b.dataset.pod, container: b.dataset.c, component: b.dataset.comp, plabel: b.dataset.plabel, label: b.dataset.label });
     }));
   },
   stop() {

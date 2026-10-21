@@ -97,6 +97,7 @@ load_config() {
   declare -p SLICES      &>/dev/null || die "SLICES não definido no config"
   declare -p SUBSCRIBERS &>/dev/null || SUBSCRIBERS=()
   declare -p K3S_EXTRA_ARGS &>/dev/null || K3S_EXTRA_ARGS=()
+  declare -p DASHBOARD_UE_NAMES &>/dev/null || DASHBOARD_UE_NAMES=()
 
   CHARTS_DIR="${INSTALL_DIR}/5g-charts"
   export HELM_CACHE_HOME="${INSTALL_DIR}/helm/cache"
@@ -230,6 +231,9 @@ validate_config() {
     [[ -z "${GNB_METRICS_URL}" || "${GNB_METRICS_URL}" =~ ^wss?://[^[:space:]]+$ ]] || bad "GNB_METRICS_URL deve ser ws://host:porta"
     [[ -z "${GNB_LOG_SSH}" || "${GNB_LOG_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_LOG_SSH deve ser usuario@host"
     [[ "${GNB_LOG_FILE}" =~ ^/[^[:space:]\'\"]+$ ]] || bad "GNB_LOG_FILE deve ser um caminho absoluto sem espaços"
+    for e in "${DASHBOARD_UE_NAMES[@]}"; do
+      [[ "$e" =~ ^[0-9]{15}:[^\;=\"]+$ ]] || bad "DASHBOARD_UE_NAMES: use 'IMSI:nome' sem ; = ou aspas (atual: $e)"
+    done
     if [[ -n "${GNB_LOG_DROP}" ]] && ! python3 -c 'import re,sys; re.compile(sys.argv[1])' "${GNB_LOG_DROP}" 2>/dev/null; then
       bad "GNB_LOG_DROP não é uma regex válida"
     fi
@@ -556,7 +560,13 @@ EOF
 # Painel (dashboard/): ServiceAccount só leitura, ConfigMap com os arquivos da
 # página, Secret (senha/token), Deployment e Service NodePort.
 render_dashboard() {
-  local out="${GENERATED_DIR}/dashboard.yaml" app="${PROJECT_DIR}/dashboard/app" files=() f hash cm
+  local out="${GENERATED_DIR}/dashboard.yaml" app="${PROJECT_DIR}/dashboard/app" files=() f hash cm i e
+  local sims="" names=""
+  # IMSIs do UERANSIM (o painel marca como simulados) e apelidos "IMSI=nome;..."
+  if is_true "${DEPLOY_UERANSIM}"; then
+    for (( i = 0; i < UE_COUNT; i++ )); do sims+="${sims:+ }$(ue_imsi "$i")"; done
+  fi
+  for e in "${DASHBOARD_UE_NAMES[@]}"; do names+="${names:+;}${e%%:*}=${e#*:}"; done
   mkdir -p "${GENERATED_DIR}"
   for f in server.py index.html app.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
@@ -565,7 +575,7 @@ render_dashboard() {
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -649,6 +659,8 @@ spec:
             - {name: GNB_NAME, value: $(_q "${GNB_NAME}")}
             - {name: NETWORK_NAME, value: $(_q "${NETWORK_NAME}")}
             - {name: HISTORY_SECONDS, value: $(_q "${DASHBOARD_HISTORY_SECONDS}")}
+            - {name: SIM_IMSIS, value: $(_q "${sims}")}
+            - {name: UE_NAMES, value: $(_q "${names}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
             - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
             - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}
