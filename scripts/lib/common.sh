@@ -611,7 +611,7 @@ render_dashboard() {
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -704,6 +704,7 @@ spec:
             - {name: LOCAL_HOST_ROLE, value: $(_q "${DASHBOARD_LOCAL_ROLE}")}
             - {name: HOSTS, value: $(_q "${hosts}")}
             - {name: UPF_DEVS, value: $(_q "${upfdevs}")}
+            - {name: WEBUI_PORT, value: $(_q "$(is_true "${WEBUI_ENABLED}" && echo "${WEBUI_NODEPORT}" || true)")}
             - {name: ENERGY_METER_URL, value: $(_q "${ENERGY_METER_URL}")}
             - {name: ENERGY_METER_HOST, value: $(_q "${ENERGY_METER_HOST}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}

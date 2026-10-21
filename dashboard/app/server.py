@@ -81,6 +81,7 @@ LOCAL_HOST_NAME = _env("LOCAL_HOST_NAME")
 LOCAL_HOST_ROLE = _env("LOCAL_HOST_ROLE", "Core 5G (k3s)")
 HOSTS = [h.split("|", 1) for h in _env("HOSTS").split(";") if "|" in h]
 # Interfaces de túnel do UPF -> DNN ("ogstun=internet;ogstun2=internet2")
+WEBUI_PORT = _env("WEBUI_PORT")      # NodePort da WebUI do Open5GS (vazio = sem a sub-aba Assinantes)
 UPF_DEVS = dict(kv.split("=", 1) for kv in _env("UPF_DEVS").split(";") if "=" in kv)
 HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
 # Medidor de energia MiEnergy (página /Data com "chave": número). Mede a máquina ENERGY_METER_HOST.
@@ -1299,7 +1300,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"namespace": NAMESPACE, "gnb_name": GNB_NAME, "network_name": NETWORK_NAME, "gnb_url": GNB_METRICS_URL,
                                         "history_seconds": HISTORY_SECONDS, "core_metrics": CORE_METRICS,
                                         "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE,
-                                        "config_edit": bool(CONFIG), "version": VERSION})
+                                        "config_edit": bool(CONFIG), "version": VERSION,
+                                        "webui_port": WEBUI_PORT})
             if path == "/api/settings":
                 if not self._admin():
                     return None

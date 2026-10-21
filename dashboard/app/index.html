@@ -124,6 +124,18 @@
 
   <!-- ======================= CORE ======================= -->
   <section id="tab-core" class="tab">
+    <div class="seg" id="core-seg">
+      <button class="btn on" data-view="metrics">Métricas</button>
+      <button class="btn hidden" data-view="webui" id="core-seg-webui">Assinantes (WebUI do Open5GS)</button>
+    </div>
+    <div id="core-webui" class="hidden">
+      <div class="toolbar">
+        <span class="muted">WebUI original do Open5GS (usuário <code>admin</code>) — cadastro de assinantes, slices, QoS.</span>
+        <button class="btn" id="webui-reload">Recarregar</button>
+      </div>
+      <iframe id="webui-frame" title="WebUI do Open5GS" class="webui"></iframe>
+    </div>
+    <div id="core-metrics">
     <div class="toolbar">
       <label>Janela <select id="core-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
       <span class="muted" id="core-live-status"></span>
@@ -156,6 +168,7 @@
           <input id="core-filter" type="search" placeholder="Filtrar métricas" spellcheck="false"></div>
         <div class="tablewrap"><table id="core-table"></table></div>
       </div>
+    </div>
     </div>
   </section>
   <!-- ======================= MÁQUINAS ======================= -->

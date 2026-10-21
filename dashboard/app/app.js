@@ -609,6 +609,20 @@ $("#log-download").addEventListener("click", () => Logs.download());
 //  Core (métricas Prometheus do Open5GS)
 // ---------------------------------------------------------------------------
 const Core = {
+  view: "metrics",
+  setView(v) {
+    this.view = v;
+    store.set("core.view", v);
+    $$("#core-seg [data-view]").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+    $("#core-metrics").classList.toggle("hidden", v !== "metrics");
+    $("#core-webui").classList.toggle("hidden", v !== "webui");
+    const f = $("#webui-frame");
+    if (v === "webui" && !f.getAttribute("src")) f.src = this.webuiUrl();
+    if (v === "metrics") refreshNow();
+  },
+  webuiUrl() {
+    return `${location.protocol}//${location.hostname}:${CONFIG.webui_port}/`;
+  },
   async live() {
     const d = await api("api/core/live?window=" + $("#core-window").value);
     const lg = d.log || {};
@@ -670,6 +684,7 @@ const Core = {
         <td class="num">${fmtBytes(x.rx_bytes)} / ${fmtBytes(x.tx_bytes)}</td></tr>`).join("");
   },
   async refresh() {
+    if (this.view === "webui") return;   // a WebUI se atualiza sozinha; não recarregar o iframe
     await this.live();
     const d = await api("api/core/metrics?window=" + $("#core-window").value);
     $("#core-disabled").classList.toggle("hidden", d.enabled);
@@ -730,6 +745,8 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
   try {
     CONFIG = await api("api/config");
     $("#tabbtn-settings").classList.toggle("hidden", !CONFIG.config_edit);
+    $("#core-seg-webui").classList.toggle("hidden", !CONFIG.webui_port);
+    if (CONFIG.webui_port && store.get("core.view", "metrics") === "webui") Core.setView("webui");
     $("#netname").textContent = CONFIG.network_name ? "· " + CONFIG.network_name : "";
     $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · namespace ${CONFIG.namespace} · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
   } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
@@ -739,3 +756,5 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();
 $("#ran-old").addEventListener("click", () => { Ran.showOld = !Ran.showOld; Ran.refresh(); });
+$$("#core-seg [data-view]").forEach((b) => b.addEventListener("click", () => Core.setView(b.dataset.view)));
+$("#webui-reload").addEventListener("click", () => { $("#webui-frame").src = Core.webuiUrl(); });

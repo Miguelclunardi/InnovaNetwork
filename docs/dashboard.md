@@ -139,6 +139,13 @@ painel guarda as últimas 20 000 linhas do gNB.
 > O arquivo `/tmp/gnb.log` do OCUDU cresce sem limite (1,7 GB em 2026-10-21). Isso é do gNB, não do
 > painel — vale rotacionar ou reduzir `all_level`.
 
+### WebUI do Open5GS dentro do painel (aba Core → Assinantes)
+
+A aba Core tem duas visões: **Métricas** e **Assinantes (WebUI do Open5GS)**. A segunda mostra a WebUI original
+(`WEBUI_NODEPORT`, login `admin`) num quadro dentro do painel — cadastro de assinantes, slices, QoS — sem abrir outra
+aba. O quadro usa o mesmo endereço pelo qual o painel foi aberto, trocando só a porta. Some quando
+`WEBUI_ENABLED=false`.
+
 ### Métricas do core (aba Core)
 
 Sem reiniciar nada: o pod do painel já monta o `/proc` do host (só leitura). Ele acha os processos `open5gs-<nf>d`
