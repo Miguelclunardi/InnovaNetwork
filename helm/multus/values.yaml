@@ -1,0 +1,12 @@
+# Multus (chart rke2-multus) ajustado às pastas do k3s.
+# Dá uma 2ª interface (net1) aos pods que pedirem; usado para AMF (N2) e UPF (N3) no link com o gNB.
+# Instalação: helm upgrade --install multus rke2-multus --repo https://rke2-charts.rancher.io \
+#               --version v4.3.110 -n kube-system -f helm/multus/values.yaml
+# Antes, o CRD (o chart não traz): kubectl apply -f helm/multus/crd.yaml
+config:
+  fullnameOverride: multus
+  cni_conf:
+    confDir: /var/lib/rancher/k3s/agent/etc/cni/net.d
+    multusAutoconfigDir: /var/lib/rancher/k3s/agent/etc/cni/net.d   # onde o k3s grava o 10-flannel.conflist
+    binDir: /var/lib/rancher/k3s/data/cni/
+    kubeconfig: /var/lib/rancher/k3s/agent/etc/cni/net.d/multus.d/multus.kubeconfig
