@@ -1,4 +1,4 @@
-# Painel — Innova Center Dashboard (v1.0)
+# Painel — Innova Center Dashboard (v1.1)
 
 Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar:
 
