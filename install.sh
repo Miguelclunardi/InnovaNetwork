@@ -495,7 +495,8 @@ step_dashboard() {
   dashboard_config_edit
   kc create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kc apply -f - >/dev/null
   render_dashboard
-  kc apply -f "${DASHBOARD_MANIFEST}" >/dev/null
+  # server-side: os arquivos do painel passam de 256 KB (limite da anotação last-applied do apply comum)
+  kc apply --server-side --force-conflicts --field-manager=open5gk3s -f "${DASHBOARD_MANIFEST}" >/dev/null
   kc -n "${K8S_NAMESPACE}" rollout status deploy/dashboard --timeout=300s >/dev/null \
     || { kc -n "${K8S_NAMESPACE}" get pods -l app.kubernetes.io/name=dashboard; die "painel não ficou pronto"; }
   dashboard_firewall
