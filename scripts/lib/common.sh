@@ -644,7 +644,7 @@ render_dashboard() {
     hist_vol="
         - {name: history, hostPath: {path: $(_q "${DASHBOARD_DATA_DIR}"), type: Directory}}"
   fi
-  for f in server.py configedit.py control.py history.py history.js settings.js control.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
+  for f in server.py configedit.py control.py history.py history.js settings.js control.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css logo.svg; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done

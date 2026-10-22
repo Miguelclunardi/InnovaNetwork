@@ -28,7 +28,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--panel2); p
   padding: 8px 16px; background: var(--bar); color: var(--bar-text); border-bottom: 3px solid var(--brand);
   box-shadow: 0 1px 3px rgba(0,0,0,.15); }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 19px; }
-.brand svg { color: var(--brand); width: 26px; height: 26px; }
+.brand .logo { height: 21px; width: auto; display: block; }
 #netname { display: none; }   /* NETWORK_NAME continua no core (nome da rede no celular); só não aparece aqui */
 .brand .muted { color: rgba(255,255,255,.7); }
 .tabs { display: flex; gap: 2px; flex-wrap: wrap; }

@@ -1389,7 +1389,7 @@ def _range(qs):
     return t0, min(t1, now + 60)
 
 
-STATIC_FILES = {"control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
+STATIC_FILES = {"control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
