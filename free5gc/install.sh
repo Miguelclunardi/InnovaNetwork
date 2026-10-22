@@ -74,10 +74,11 @@ fi
 
 # Variáveis para os geradores (Python)
 export F5_NAMESPACE F5_VERSION F5_REGISTRY F5_MONGO_IMAGE F5_MONGO_SIZE F5_AMF_N2_IP F5_UPF_N3_IP F5_GNB_SIM_IP
-export F5_WEBUI_NODEPORT F5_NETWORK_NAME_SHORT F5_UERANSIM_RELEASE F5_LOG_LEVEL
+export F5_WEBUI_NODEPORT F5_NETWORK_NAME F5_UERANSIM_RELEASE F5_LOG_LEVEL
 export MCC MNC TAC DNS_SERVERS NETWORK_NAME RAN_LINK_IFACE RAN_LINK_CIDR RAN_LINK_MTU UE_COUNT UE_MSIN_START UE_KEY UE_OPC
 F5_UE_POOLS_TXT=$(printf '%s\n' "${F5_UE_POOLS[@]}"); SLICES_TXT=$(printf '%s\n' "${SLICES[@]}")
 SUBS_TXT=$(printf '%s\n' "${SUBSCRIBERS[@]+"${SUBSCRIBERS[@]}"}")
+export F5_EXTRA_DNNS_ENV="$(printf '%s\n' "${F5_EXTRA_DNNS[@]}")"
 export F5_UE_POOLS_ENV="${F5_UE_POOLS_TXT}" SLICES_ENV="${SLICES_TXT}" SUBSCRIBERS_ENV="${SUBS_TXT}"
 export F5_WEBUI_URL="http://127.0.0.1:${F5_WEBUI_NODEPORT}"
 
@@ -172,9 +173,11 @@ if ! ${NO_UERANSIM} && is_true "${F5_DEPLOY_UERANSIM}"; then
   "${HELM}" upgrade --install "${F5_UERANSIM_RELEASE}" "${CHARTS_DIR}/charts/ueransim-gnb" -n "${NS}" \
     -f "${OUT}/ueransim-values.json" --post-renderer "${PROJECT_DIR}/helm/postrender/drop-gnb-hpa.sh" \
     --wait --timeout 10m >/dev/null || die "UERANSIM do free5GC falhou (kubectl -n ${NS} get pods)"
-  # helm não mexe em réplicas que alguém zerou (core parado): volta o gNB e depois os UEs
+  # helm não mexe em réplicas que alguém zerou (core parado): volta o gNB e depois os UEs.
+  # Reinicia os dois: o gNB do UERANSIM não reconecta sozinho se o AMF foi reiniciado.
   for d in "${F5_UERANSIM_RELEASE}" "${F5_UERANSIM_RELEASE}-ues"; do
     k -n "${NS}" scale deploy "${d}" --replicas=1 >/dev/null 2>&1 || continue
+    k -n "${NS}" rollout restart deploy "${d}" >/dev/null
     k -n "${NS}" rollout status deploy "${d}" --timeout=180s >/dev/null || die "${d} não subiu"
   done
   ok "UERANSIM no ar (teste: ./free5gc/test.sh)"

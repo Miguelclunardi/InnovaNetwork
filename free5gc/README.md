@@ -11,7 +11,7 @@ própria (`free5gc/free5gc.env`), instalador e desinstalador próprios. **Um cor
 
 | Vem do `config.env` (igual nos dois cores) | Vem do `free5gc/free5gc.env` |
 |---|---|
-| PLMN (MCC/MNC), TAC, `NETWORK_NAME` | versão e imagens (`F5_VERSION`) |
+| PLMN (MCC/MNC), TAC | versão e imagens (`F5_VERSION`); nome da rede `F5_NETWORK_NAME` (InnovaFree5GC) |
 | slices: SST, SD, DNN (`SLICES`) | pool de IPs dos UEs por slice (`F5_UE_POOLS`: 10.60/16, 10.61/16) |
 | link da fibra (`RAN_LINK_*`) | IPs na fibra: AMF `10.10.0.30`, UPF `10.10.0.31`, gNB simulado `10.10.0.32` |
 | UEs do UERANSIM e `SUBSCRIBERS` | WebConsole NodePort `31000` |

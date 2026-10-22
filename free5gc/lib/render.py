@@ -39,8 +39,16 @@ for i, line in enumerate(x for x in env("SLICES_ENV").split("\n") if x.strip()):
     if i >= len(pools):
         sys.exit("render.py: F5_UE_POOLS tem menos itens que SLICES")
     SLICES.append({"sst": int(sst), "sd": sd.lower(), "dnn": dnn, "pool": pools[i]})
+# DNNs extras só do free5GC (F5_EXTRA_DNNS: "SST:SD:DNN:CIDR"), ex.: ims, que os celulares pedem
+for line in (x for x in env("F5_EXTRA_DNNS_ENV").split("\n") if x.strip()):
+    sst, sd, dnn, cidr = line.split(":")
+    SLICES.append({"sst": int(sst), "sd": sd.lower(), "dnn": dnn, "pool": cidr})
 PLMN = {"mcc": MCC, "mnc": MNC}
-SNSSAIS = [{"sst": s["sst"], "sd": s["sd"]} for s in SLICES]
+SNSSAIS = []
+for s in SLICES:
+    if {"sst": s["sst"], "sd": s["sd"]} not in SNSSAIS:
+        SNSSAIS.append({"sst": s["sst"], "sd": s["sd"]})
+BY_SNSSAI = [(n, [s for s in SLICES if s["sst"] == n["sst"] and s["sd"] == n["sd"]]) for n in SNSSAIS]
 DNNS = sorted({s["dnn"] for s in SLICES})
 NRF = "http://nrf:8000"
 MONGO = "mongodb://mongodb:27017"
@@ -71,10 +79,10 @@ CFG["amf"] = {"info": info("AMF", "1.0.9"), "configuration": {
     "plmnSupportList": [{"plmnId": PLMN, "snssaiList": SNSSAIS}],
     "supportDnnList": DNNS, "nrfUri": NRF, "nrfCertPem": "cert/nrf.pem",
     "security": {"integrityOrder": ["NIA2"], "cipheringOrder": ["NEA0", "NEA2"]},
-    "networkName": {"full": env("NETWORK_NAME"), "short": env("F5_NETWORK_NAME_SHORT", "free5GC")},
+    "networkName": {"full": env("F5_NETWORK_NAME", "free5GC"), "short": env("F5_NETWORK_NAME", "free5GC")},
     "ngapIE": {"mobilityRestrictionList": {"enable": True}, "maskedIMEISV": {"enable": True},
                "redirectionVoiceFallback": {"enable": False}},
-    "nasIE": {"networkFeatureSupport5GS": {"enable": True, "length": 1, "imsVoPS": 0, "emc": 0, "emf": 0,
+    "nasIE": {"networkFeatureSupport5GS": {"enable": True, "length": 1, "imsVoPS": 1, "emc": 0, "emf": 0,
                                            "iwkN26": 0, "mpsi": 0, "emcN3": 0, "mcsi": 0}},
     "t3502Value": 720, "t3512Value": 3600, "non3gppDeregTimerValue": 3240,
     **{t: {"enable": True, "expireTime": "6s", "maxRetryTimes": 4}
@@ -86,8 +94,8 @@ CFG["amf"] = {"info": info("AMF", "1.0.9"), "configuration": {
 CFG["smf"] = {"info": info("SMF", "1.0.7"), "configuration": {
     "smfName": "SMF", "sbi": sbi("smf"),
     "serviceNameList": ["nsmf-pdusession", "nsmf-event-exposure", "nsmf-oam", "nsmf-callback"],
-    "snssaiInfos": [{"sNssai": {"sst": s["sst"], "sd": s["sd"]},
-                     "dnnInfos": [{"dnn": s["dnn"], "dns": {"ipv4": DNS}}]} for s in SLICES],
+    "snssaiInfos": [{"sNssai": n, "dnnInfos": [{"dnn": s["dnn"], "dns": {"ipv4": DNS}} for s in ss]}
+                    for n, ss in BY_SNSSAI],
     "plmnList": [PLMN], "locality": "area1",
     # POD_IP_ADDR e UPF_IP_ADDR: trocados na partida (wrapper) pelo IP do pod do SMF e do UPF
     "pfcp": {"nodeID": "POD_IP_ADDR", "listenAddr": "POD_IP_ADDR", "externalAddr": "POD_IP_ADDR",
@@ -96,9 +104,10 @@ CFG["smf"] = {"info": info("SMF", "1.0.7"), "configuration": {
         "upNodes": {
             "gNB1": {"type": "AN"},
             "UPF": {"type": "UPF", "nodeID": "UPF_IP_ADDR", "addr": "UPF_IP_ADDR",
-                    "sNssaiUpfInfos": [{"sNssai": {"sst": s["sst"], "sd": s["sd"]},
-                                        "dnnUpfInfoList": [{"dnn": s["dnn"], "pools": [{"cidr": s["pool"]}]}]}
-                                       for s in SLICES],
+                    "sNssaiUpfInfos": [{"sNssai": n,
+                                        "dnnUpfInfoList": [{"dnn": s["dnn"], "pools": [{"cidr": s["pool"]}]}
+                                                           for s in ss]}
+                                       for n, ss in BY_SNSSAI],
                     "interfaces": [{"interfaceType": "N3", "endpoints": [UPF_IP], "networkInstances": DNNS}]}},
         "links": [{"A": "gNB1", "B": "UPF"}]},
     "t3591": {"enable": True, "expireTime": "16s", "maxRetryTimes": 3},
@@ -150,9 +159,9 @@ CFG["nssf"] = {"info": info("NSSF", "1.0.2"), "configuration": {
     "serviceNameList": ["nnssf-nsselection", "nnssf-nssaiavailability"],
     "nrfUri": NRF, "nrfCertPem": "cert/nrf.pem", "supportedPlmnList": [PLMN],
     "supportedNssaiInPlmnList": [{"plmnId": PLMN, "supportedSnssaiList": SNSSAIS}],
-    "nsiList": [{"snssai": {"sst": s["sst"], "sd": s["sd"]},
+    "nsiList": [{"snssai": n,
                  "nsiInformationList": [{"nrfId": NRF + "/nnrf-nfm/v1/nf-instances", "nsiId": 10 + i}]}
-                for i, s in enumerate(SLICES)],
+                for i, n in enumerate(SNSSAIS)],
     "taList": [{"tai": {"plmnId": PLMN, "tac": TAC_HEX}, "accessType": "3GPP_ACCESS",
                 "supportedSnssaiList": SNSSAIS}]}, "logger": LOGGER}
 

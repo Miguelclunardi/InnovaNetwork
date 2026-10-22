@@ -22,6 +22,10 @@ SLICES = []
 for line in (x for x in E["SLICES_ENV"].split("\n") if x.strip()):
     sst, sd, dnn, _ = line.split(":")
     SLICES.append((int(sst), sd.lower(), dnn))
+EXTRA = []   # DNNs extras do free5GC (F5_EXTRA_DNNS), ex.: (1, "111111", "ims")
+for line in (x for x in os.environ.get("F5_EXTRA_DNNS_ENV", "").split("\n") if x.strip()):
+    sst, sd, dnn, _ = line.split(":")
+    EXTRA.append((int(sst), sd.lower(), dnn))
 
 
 def call(method, path, body=None, token=None):
@@ -91,11 +95,13 @@ def from_open5gs(docs):
             if not conf:
                 skipped.append("slice %d/%s" % (sst, sd or "-"))
                 continue
-            csst, csd, cdnn = conf[0]
+            csst, csd, _ = conf[0]
+            have = [c[2] for c in SLICES + EXTRA if c[0] == csst and c[1] == csd]
             names = [x.get("name") for x in sl.get("session") or []]
-            if cdnn in names:
-                out.append((csst, csd, [cdnn]))
-            skipped += ["DNN %s" % n for n in names if n != cdnn]
+            ok = [n for n in names if n in have]
+            if ok:
+                out.append((csst, csd, ok))
+            skipped += ["DNN %s" % n for n in names if n not in have]
         yield d.get("imsi", ""), k, (opc or op), ("OPc" if opc else "OP"), out, skipped
 
 
