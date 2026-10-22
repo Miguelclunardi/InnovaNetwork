@@ -241,3 +241,7 @@ dialog.dlg label { display: block; font-size: 13px; margin: 10px 0; }
 dialog.dlg input[type=text], dialog.dlg textarea, #hist-custom input { font: inherit; font-size: 13px; color: var(--text); background: var(--panel);
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; width: 100%; box-sizing: border-box; margin-top: 4px; }
 #hist-custom input { width: auto; margin: 0; }
+
+/* aba RU */
+body.no-ru .ru-only { display: none; }
+#ru-state .kpi .value.small { font-size: 18px; }

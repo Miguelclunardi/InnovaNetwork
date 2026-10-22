@@ -482,6 +482,7 @@ step_dashboard() {
     fi
     remove_gnb_log_agent
     remove_hosts_agent
+    remove_ru_agent
     return 0
   fi
   step "Painel Innova Center Dashboard (NodePort ${DASHBOARD_NODEPORT})"
@@ -509,6 +510,71 @@ step_dashboard() {
   if [[ -n "${GNB_METRICS_URL}" ]]; then info "métricas do gNB: ${GNB_METRICS_URL}"; fi
   setup_gnb_log_agent
   setup_hosts_agent
+  setup_ru_agent
+}
+
+remove_ru_agent() {
+  [[ -f "${RU_UNIT_FILE}" ]] || return 0
+  systemctl disable --now open5gs-k3s-ru.service >/dev/null 2>&1 || true
+  rm -f "${RU_UNIT_FILE}" "${INSTALL_DIR}/dashboard-agent/ru.env"; systemctl daemon-reload
+  ok "unit open5gs-k3s-ru removida"
+}
+
+# RU (aba RU): sessão SSH com senha na porta de gestão, só comandos "show".
+# A senha fica num arquivo do root (grupo do usuário) criado à mão — nunca no config.env/git.
+setup_ru_agent() {
+  if [[ -z "${RU_MGMT_IP}" ]]; then remove_ru_agent; return 0; fi
+  [[ "${TARGET_USER}" != root ]] || { warn "agente da RU precisa de um usuário comum"; return 0; }
+  local dst="${INSTALL_DIR}/dashboard-agent" cred="${INSTALL_DIR}/state/ru-credentials" unit pre=""
+  local ifc="${RU_MGMT_IFACE:-${NODE_IFACE}}"
+  install -d -m 0755 -o root -g root "${dst}"
+  install -m 0755 -o root -g root "${PROJECT_DIR}/dashboard/agent/ru-agent.py" "${dst}/ru-agent.py"
+  install -m 0640 -o root -g "${TARGET_GROUP}" /dev/null "${dst}/ru.env"
+  {
+    echo "DASHBOARD_URL=http://${K3S_NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"  # IP fixo do nó: não muda com o DHCP
+    echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
+    echo "RU_TARGET=${RU_SSH_USER}@${RU_MGMT_IP}"
+    echo "RU_POLL_SECONDS=${RU_POLL_SECONDS}"
+  } >"${dst}/ru.env"
+  # IP extra desta máquina na rede de gestão da RU, refeito a cada início do agente (o "+" roda como root)
+  if [[ -n "${RU_MGMT_LOCAL_CIDR}" && -n "${ifc}" ]]; then
+    pre="ExecStartPre=+/usr/sbin/ip addr replace ${RU_MGMT_LOCAL_CIDR} dev ${ifc}"
+  fi
+  unit=$(cat <<EOU
+# Gerado por open5GK3S/install.sh
+[Unit]
+Description=open5GK3S: estado da RU (${RU_SSH_USER}@${RU_MGMT_IP}, so leitura) para o painel
+After=network-online.target k3s.service
+Wants=network-online.target
+ConditionPathExists=${cred}
+
+[Service]
+Type=simple
+User=${TARGET_USER}
+EnvironmentFile=${dst}/ru.env
+EnvironmentFile=${cred}
+${pre}
+ExecStart=/usr/bin/python3 -u ${dst}/ru-agent.py
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
+EOU
+)
+  if [[ "$(cat "${RU_UNIT_FILE}" 2>/dev/null)" != "${unit}" ]]; then
+    printf '%s\n' "${unit}" >"${RU_UNIT_FILE}"; systemctl daemon-reload
+  fi
+  systemctl enable open5gs-k3s-ru.service >/dev/null 2>&1
+  if [[ ! -s "${cred}" ]]; then
+    warn "aba RU: falta o arquivo de senhas da RU. Crie com (troque pelas senhas reais):"
+    warn "  printf 'RU_PASS=%s\\nRU_ENABLE=%s\\n' 'SENHA_SSH' 'SENHA_ENABLE' | sudo install -m 0640 -g ${TARGET_GROUP} /dev/stdin ${cred}"
+    warn "  e depois: sudo systemctl restart open5gs-k3s-ru"
+    return 0
+  fi
+  chown root:"${TARGET_GROUP}" "${cred}"; chmod 0640 "${cred}"
+  systemctl restart open5gs-k3s-ru.service
+  ok "aba RU: agente ativo (${RU_SSH_USER}@${RU_MGMT_IP} via ${ifc}${RU_MGMT_LOCAL_CIDR:+, IP local ${RU_MGMT_LOCAL_CIDR}}; journalctl -u open5gs-k3s-ru)"
 }
 
 remove_hosts_agent() {

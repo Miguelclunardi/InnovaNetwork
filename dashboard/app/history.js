@@ -259,6 +259,11 @@ const Hist = {
     });
     Charts.make("hc-upf", us.length ? us : [{ label: "sem dados" }], o);
     Charts.set("hc-upf", us.length ? uc : [[], []]);
+    if (CONFIG.ru) {
+      const ru = (S.ru || {}).data || { t: [] };
+      Charts.make("hc-ru", [{ label: "Potência W", fill: true }, { label: "Temp. rádio °C", color: "#6b7280", scale: "y2", dec: 0 }], { ...o, y2: true });
+      Charts.set("hc-ru", [ru.t, ru.power || [], ru.temp || []]);
+    }
   },
 
   // ---- comparar experimentos
@@ -271,7 +276,7 @@ const Hist = {
     const now = Date.now() / 1000;
     const res = await Promise.all(exps.map(async (e) => {
       const q = `from=${e.t_start}&to=${e.t_end || now}`;
-      const [sm, d] = await Promise.all([api("api/history/summary?" + q), api(`api/history/data?${q}&points=600&rel=1&prefix=cell:,host:`)]);
+      const [sm, d] = await Promise.all([api("api/history/summary?" + q), api(`api/history/data?${q}&points=600&rel=1&prefix=cell:,host:,ru`)]);
       return { e, sm, d };
     }));
     // tabela de KPIs lado a lado (melhor valor de cada linha em destaque)
@@ -299,6 +304,13 @@ const Hist = {
         [`${h}: CPU média`, (r) => r.sm.hosts[h] && r.sm.hosts[h].cpu ? r.sm.hosts[h].cpu.avg : null, (v) => fmt(v, 1) + "%", "min"],
         [`${h}: temperatura máx.`, (r) => r.sm.hosts[h] && r.sm.hosts[h].temp ? r.sm.hosts[h].temp.max : null, (v) => fmt(v, 0) + " °C", "min"],
       ]),
+      ...(CONFIG.ru ? [
+        ["RU: potência média (W)", (r) => r.sm.ru && r.sm.ru.power ? r.sm.ru.power.avg : null, (v) => fmt(v, 1), "min"],
+        ["RU: temperatura máx.", (r) => r.sm.ru && r.sm.ru.temp ? r.sm.ru.temp.max : null, (v) => fmt(v, 0) + " °C", "min"],
+        ["RU: pacotes fora da janela", (r) => r.sm.ru && r.sm.ru.late_pct ? r.sm.ru.late_pct.avg : null, (v) => fmt(v, 3) + "%", "min"],
+        ["RU: tempo sincronizada", (r) => r.sm.ru ? r.sm.ru.ok_sync : null, (v) => fmt(v, 1) + "%", "max"],
+        ["RU: tempo com DU conectado", (r) => r.sm.ru ? r.sm.ru.ok_du : null, (v) => fmt(v, 1) + "%", "max"],
+      ] : []),
     ];
     $("#hist-cmp-table").innerHTML = `<tr><th>Métrica</th>${res.map((r) => `<th class="num">${esc(r.e.name)}<br><span class="muted">${fmtDateTime(r.e.t_start)}</span></th>`).join("")}</tr>` +
       rows.map(([l, f, fm, best]) => {
@@ -320,6 +332,7 @@ const Hist = {
     const gh = hostNames.find((h) => h !== CONFIG.local_host) || hostNames[0];
     $("#hcc-host-title").textContent = gh ? `CPU de ${gh}` : "CPU";
     plot("hcc-cpu", (S) => (S["host:" + gh] || {}).data, "cpu", 1);
+    if (CONFIG.ru) plot("hcc-ru", (S) => (S.ru || {}).data, "temp", 1);
     $("#hist-compare").scrollIntoView({ behavior: "smooth", block: "start" });
   },
 

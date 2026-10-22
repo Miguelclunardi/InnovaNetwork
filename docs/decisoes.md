@@ -135,6 +135,11 @@ Documentação do projeto: **português**.
       séries em blocos de 60 s comprimidos, eventos do core, **experimentos** (marcadores com nome/notas/setup) e
       comparação lado a lado. Escolhido SQLite da biblioteca padrão em vez de InfluxDB/Prometheus: nada novo para
       instalar, um arquivo só, fácil de copiar;
+    - **aba RU** (v1.2): a O-RU LiteOn é lida pela porta de gestão RJ45 (10.101.131.59, mesmo switch do core) por
+      SSH com senha, só comandos `show`, numa unit da máquina do core (`open5gs-k3s-ru`). Senhas num arquivo do root
+      (`state/ru-credentials`), nunca no `config.env`/git. IP extra `/24` na interface do core (nunca `/8`: cobriria a
+      fibra e o k3s). Escolhido CLI em vez de NETCONF (porta 830 aberta) porque a CLI já dá estado, PM e
+      configuração, sem biblioteca nova;
     - **energia** do innovaserver pelo medidor MiEnergy: o painel lê `http://IP/Data` direto (sem InfluxDB/Grafana do
       projeto original). Pendente: o medidor ficar alcançável a partir do torre2 (`ENERGY_METER_URL`).
 
@@ -172,3 +177,5 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   10.254.254.1). Depois do boot, AMF/UPF/UERANSIM subiram sem `net1` (Multus ainda não estava pronto) e o `heal.sh`
   reiniciou gNB e UEs ao mesmo tempo (o UE pegou o IP do gNB antigo). Decidido: o core **não** sobe sozinho no boot;
   só o painel. O painel ganha iniciar/parar/reiniciar por função e "iniciar core inteiro" em ordem (em andamento).
+- 2026-10-22: RU LiteOn ligada no switch (gestão 10.101.131.59). Painel **v1.2** com a aba RU (estado, potência,
+  temperatura, fronthaul, configuração; só leitura) e a RU no histórico/experimentos.

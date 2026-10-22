@@ -287,6 +287,11 @@ class History:
             elif s == "core:upf":
                 keys = {k for _, v in rows for k in v}
                 out["upf"] = {k: stats(col(k), 1e-6) for k in sorted(keys)}
+            elif s == "ru":
+                out["ru"] = {k: stats(col(k)) for k in ("power", "temp", "temp_cpu", "late_pct", "rx_total")}
+                for k in ("sync", "rf", "du"):
+                    st = stats(col("ok_" + k), 100.0)
+                    out["ru"]["ok_" + k] = st["avg"] if st else None
             elif s == "energy":
                 out["energy"] = {k: stats(col(k)) for k in ("power", "voltage", "current")}
         # UEs: junta as séries do mesmo IMSI (o RNTI muda a cada conexão)

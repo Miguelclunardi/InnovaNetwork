@@ -20,6 +20,7 @@
     <button role="tab" data-tab="ran">Rádio (gNB)</button>
     <button role="tab" data-tab="logs">Logs</button>
     <button role="tab" data-tab="core">Core</button>
+    <button role="tab" data-tab="ru" class="hidden" id="tabbtn-ru">RU</button>
     <button role="tab" data-tab="hosts">Máquinas</button>
     <button role="tab" data-tab="history">Histórico</button>
     <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Configuração</button>
@@ -27,6 +28,7 @@
   <div class="topright">
     <span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span>
     <span class="pill" id="pill-core" title="Pods do core">core …</span>
+    <span class="pill hidden" id="pill-ru" title="Estado da RU">RU …</span>
     <button class="rec hidden" id="rec">● Gravar experimento</button>
     <button class="icon" id="theme" title="Tema claro/escuro" aria-label="Alternar tema">◐</button>
   </div>
@@ -174,6 +176,32 @@
     </div>
   </section>
   <!-- ======================= MÁQUINAS ======================= -->
+  <!-- ======================= RU ======================= -->
+  <section id="tab-ru" class="tab">
+    <div class="toolbar">
+      <h2 id="ru-title" class="hd-title">RU</h2>
+      <span class="muted" id="ru-sub"></span>
+      <label>Janela <select id="ru-window"><option value="300">5 min</option><option value="900" selected>15 min</option></select></label>
+    </div>
+    <div class="kpis" id="ru-state"></div>
+    <div class="kpis" id="ru-kpis" style="margin-top:10px"></div>
+    <div class="charts" style="margin-top:12px">
+      <div class="chart card"><h4>Potência e temperatura <span class="unit">W · °C</span></h4><div id="c-ru-pt"></div></div>
+      <div class="chart card"><h4>Fronthaul: pacotes U-plane por janela do PM <span class="unit">pacotes</span></h4><div id="c-ru-fh"></div></div>
+      <div class="chart card"><h4>Portas de gestão <span class="unit">Mbit/s</span></h4><div id="c-ru-net"></div></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h2>Configuração de rádio</h2><div class="tablewrap"><table id="ru-cfg"></table></div>
+        <details style="margin-top:8px"><summary class="muted">Todos os parâmetros</summary>
+          <div class="tablewrap"><table id="ru-cfg-raw"></table></div></details></div>
+      <div class="card"><h2>Mudanças de estado</h2><div class="events" id="ru-events"></div></div>
+    </div>
+    <div class="card" style="margin-top:12px"><h2>Interfaces da RU</h2><div class="tablewrap"><table id="ru-eth"></table></div>
+      <div class="muted" id="ru-system" style="margin-top:6px;font-size:12px"></div></div>
+    <p class="note">Somente leitura: o painel entra na RU por SSH (porta RJ45) e roda apenas comandos <code>show</code>.
+      O fronthaul (C/U-plane, VLAN da configuração) passa pela SFP+ direto no FPGA e não aparece nas portas de gestão.</p>
+  </section>
+
   <section id="tab-hosts" class="tab">
     <div class="hostlist" id="host-list"></div>
     <div id="host-detail" class="hidden">
@@ -247,6 +275,7 @@
           <div class="chart card"><h4>Máquinas: CPU e temperatura <span class="unit">% · °C</span></h4><div id="hc-hosts"></div></div>
           <div class="chart card"><h4>CPU por função do core <span class="unit">% de 1 núcleo</span></h4><div id="hc-nf"></div></div>
           <div class="chart card"><h4>Tráfego no UPF (N6) <span class="unit">Mbit/s</span></h4><div id="hc-upf"></div></div>
+          <div class="chart card ru-only"><h4>RU: potência e temperatura <span class="unit">W · °C</span></h4><div id="hc-ru"></div></div>
         </div>
         <div class="card" style="margin-top:12px"><h2>UEs no período <span class="muted">(por IMSI; o RNTI muda a cada conexão)</span></h2>
           <div class="tablewrap"><table id="hist-ues"></table></div></div>
@@ -262,6 +291,7 @@
           <div class="chart card"><h4>UL da célula <span class="unit">Mbit/s</span></h4><div id="hcc-ul"></div></div>
           <div class="chart card"><h4>PRBs DL</h4><div id="hcc-prb"></div></div>
           <div class="chart card"><h4 id="hcc-host-title">CPU</h4><div id="hcc-cpu"></div></div>
+          <div class="chart card ru-only"><h4>RU: temperatura <span class="unit">°C</span></h4><div id="hcc-ru"></div></div>
         </div>
       </div>
     </div>
@@ -329,6 +359,7 @@
 <script src="uPlot.iife.min.js"></script>
 <script src="app.js"></script>
 <script src="hosts.js"></script>
+<script src="ru.js"></script>
 <script src="settings.js"></script>
 <script src="history.js"></script>
 </body>

@@ -23,6 +23,7 @@ K3S_DROPIN_FILE="/etc/systemd/system/k3s.service.d/10-open5gs-k3s-netif.conf"
 HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"
 GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # log do gNB -> painel
 HOSTS_UNIT_FILE="/etc/systemd/system/open5gs-k3s-hosts.service"        # outras máquinas -> painel
+RU_UNIT_FILE="/etc/systemd/system/open5gs-k3s-ru.service"              # RU (porta de gestão) -> painel
 DASHBOARD_DATA_DIR="/var/lib/open5gs-k3s/dashboard"   # histórico persistente do painel (fora do INSTALL_DIR)
 HASH_ANNOTATION="open5gs-k3s/config-hash"
 
@@ -104,6 +105,7 @@ load_config() {
   : "${DASHBOARD_PERSIST:=false}" "${DASHBOARD_PERSIST_DAYS:=365}" "${DASHBOARD_PERSIST_MAX_GB:=50}"
   : "${DASHBOARD_CONFIG_EDIT:=false}" "${DASHBOARD_ADMIN_PASSWORD:=}" "${DASHBOARD_CONFIG_GID:=}"
   : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}" "${ENERGY_METER_URL:=}" "${ENERGY_METER_HOST:=}"
+  : "${RU_MGMT_IP:=}" "${RU_NAME:=RU}" "${RU_SSH_USER:=user}" "${RU_MGMT_IFACE:=}" "${RU_MGMT_LOCAL_CIDR:=}" "${RU_POLL_SECONDS:=10}"
 
   CHARTS_DIR="${INSTALL_DIR}/5g-charts"
   export HELM_CACHE_HOME="${INSTALL_DIR}/helm/cache"
@@ -248,6 +250,19 @@ validate_config() {
     [[ "${DASHBOARD_PERSIST_MAX_GB}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_MAX_GB deve ser um número de GB (0 = sem limite)"
     [[ -z "${ENERGY_METER_URL}" || "${ENERGY_METER_URL}" =~ ^https?://[^[:space:]]+$ ]] \
       || bad "ENERGY_METER_URL deve ser http://IP/Data"
+    if [[ -n "${RU_MGMT_IP}" ]]; then
+      valid_ipv4 "${RU_MGMT_IP}" || bad "RU_MGMT_IP inválido"
+      [[ "${RU_SSH_USER}" =~ ^[A-Za-z0-9._-]+$ ]] || bad "RU_SSH_USER inválido"
+      [[ "${RU_NAME}" =~ ^[^\"\;]+$ ]] || bad "RU_NAME não pode ter aspas nem ;"
+      [[ -z "${RU_MGMT_IFACE}" || "${RU_MGMT_IFACE}" =~ ^[A-Za-z0-9._-]+$ ]] || bad "RU_MGMT_IFACE inválido"
+      [[ "${RU_POLL_SECONDS}" =~ ^[0-9]+$ ]] && (( RU_POLL_SECONDS >= 2 )) || bad "RU_POLL_SECONDS deve ser um número >= 2"
+      if [[ -n "${RU_MGMT_LOCAL_CIDR}" ]]; then
+        local ru_ip="${RU_MGMT_LOCAL_CIDR%/*}" ru_len="${RU_MGMT_LOCAL_CIDR##*/}"
+        if [[ "${RU_MGMT_LOCAL_CIDR}" == */* && "${ru_len}" =~ ^[0-9]+$ ]] && valid_ipv4 "${ru_ip}" \
+           && (( ru_len >= 16 && ru_len <= 32 )); then :
+        else bad "RU_MGMT_LOCAL_CIDR: use IP/prefixo de /16 a /32 (um /8 em 10.x cobriria a fibra e a rede do k3s)"; fi
+      fi
+    fi
     if [[ -n "${GNB_LOG_DROP}" ]] && ! python3 -c 'import re,sys; re.compile(sys.argv[1])' "${GNB_LOG_DROP}" 2>/dev/null; then
       bad "GNB_LOG_DROP não é uma regex válida"
     fi
@@ -620,14 +635,14 @@ render_dashboard() {
     hist_vol="
         - {name: history, hostPath: {path: $(_q "${DASHBOARD_DATA_DIR}"), type: Directory}}"
   fi
-  for f in server.py configedit.py history.py history.js settings.js hoststats.py index.html app.js hosts.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
+  for f in server.py configedit.py history.py history.js settings.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -723,6 +738,8 @@ spec:
             - {name: WEBUI_PORT, value: $(_q "$(is_true "${WEBUI_ENABLED}" && echo "${WEBUI_NODEPORT}" || true)")}
             - {name: ENERGY_METER_URL, value: $(_q "${ENERGY_METER_URL}")}
             - {name: ENERGY_METER_HOST, value: $(_q "${ENERGY_METER_HOST}")}
+            - {name: RU_NAME, value: $(_q "$([[ -n "${RU_MGMT_IP}" ]] && echo "${RU_NAME}" || true)")}
+            - {name: RU_ADDR, value: $(_q "${RU_MGMT_IP}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
             - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
             - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}${cfg_env}${hist_env}

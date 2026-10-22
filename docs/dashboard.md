@@ -1,4 +1,4 @@
-# Painel — Innova Center Dashboard (v1.1)
+# Painel — Innova Center Dashboard (v1.2)
 
 Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar:
 
@@ -7,6 +7,7 @@ Página web que roda **no próprio cluster do core** (máquina do core) e junta 
 | **Visão geral** | UEs no rádio (vazão, MCS, CQI, RI, BLER, SNR), assinantes vistos pelo core (registro, sessões DNN → IP), pods (estado, reinícios, IP, IP no link RAN), eventos do core (avisos/erros iguais agrupados com contador) | métricas do gNB + API do Kubernetes + logs do AMF/SMF/UPF |
 | **Rádio (gNB)** | UEs identificados por **nome, IMSI, IP e tipo** (SIM real / UERANSIM), não só RNTI; RNTIs parados há mais de 2 min ficam escondidos (botão "Mostrar antigos"); vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
+| **RU** | O-RU LiteOn FlexFi: sincronismo PTP, RF, DPD, DU conectado; potência e temperatura (rádio e CPU); pacotes U-plane do fronthaul (recebidos, adiantados, atrasados); portas de gestão; firmware; configuração de rádio (frequência/NR-ARFCN, banda, SCS, 4T4R, potência, compressão, VLAN, MAC do DU); mudanças de estado | SSH na porta de gestão (RJ45) da RU, só comandos `show` |
 | **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
 | **Histórico** | métricas **persistentes** (rádio 1 s, core, máquinas, energia, eventos) de qualquer período; **experimentos** (botão "● Gravar experimento" no topo) com nome, notas e retrato do setup; **comparação** lado a lado de 2+ experimentos (KPIs com o melhor em destaque + gráficos sobrepostos); exportação CSV | SQLite em `/var/lib/open5gs-k3s/dashboard` (`DASHBOARD_PERSIST=true`) |
 | **Configuração** | edita o `config.env` (senha de administrador): campos por seção com a explicação do próprio arquivo, diff antes de salvar, validação do install, backup e restauração, e o comando para aplicar | `config.env` da máquina do core |
@@ -171,6 +172,38 @@ dos logs.
 - Sem a chave, a máquina aparece como "sem dados" com o motivo. Estado: `journalctl -u open5gs-k3s-hosts -f`.
 - Núcleos isolados (`isolcpus`, ex.: 0–17 do gNB) aparecem com fundo azul; um núcleo do gNB em 100 % é normal
   (laço do DPDK).
+
+### Aba RU (LiteOn FlexFi)
+
+A RU tem uma CLI própria por SSH na porta **RJ45 de gestão** (IP de fábrica `10.101.131.59/24`, manual
+"User guide LITEON FlexFi Indoor FR1", seção 5.1.2 e 5.2). A unit `open5gs-k3s-ru` (máquina do core, usuário do
+install) mantém **uma** sessão aberta e, a cada `RU_POLL_SECONDS`, roda só comandos de leitura:
+`show oru-status`, `show sync-trace`, `show pm-data`, `show eth-info`, `show uptime`; a cada 5 min também
+`show fw-info`, `show running-config`, `show dl-ul-layer`, `show system`. O agente recusa qualquer comando que não
+comece com `show`. A RU só aceita senha (não aceita chave), por isso o agente usa um pseudo-terminal.
+
+- **Rede**: a RU fica na rede 10.101.131.0/24, no mesmo switch da máquina do core. O agente põe um IP extra
+  (`RU_MGMT_LOCAL_CIDR`, padrão `10.101.131.10/24`) na interface `RU_MGMT_IFACE` (vazio = a interface principal)
+  antes de iniciar (`ExecStartPre=+ip addr replace`), então ele volta sozinho depois de reboot. **Nunca /8**:
+  10.0.0.0/8 cobriria a fibra (10.10.0.0/24) e as redes do k3s (10.42/10.43).
+- **Senhas fora do git**: arquivo `/opt/open5gs-k3s/state/ru-credentials` (root, grupo do usuário, 0640):
+  ```bash
+  printf 'RU_PASS=%s\nRU_ENABLE=%s\n' 'SENHA_SSH' 'SENHA_ENABLE' | \
+    sudo install -m 0640 -g "$(id -gn)" /dev/stdin /opt/open5gs-k3s/state/ru-credentials
+  sudo systemctl restart open5gs-k3s-ru
+  ```
+  Sem o arquivo a unit não inicia (o install avisa). Senha recusada: o agente espera 5 min antes de tentar de novo
+  (para a RU não bloquear o usuário).
+- **O que significa**: `DuConnected notReady` com o gNB parado é normal. `Sync` diferente de `SYNCHRONIZED` = PTP
+  sem grandmaster (a RU não transmite certo). "Fora da janela" = pacotes U-plane que chegaram adiantados ou
+  atrasados em relação à janela de recepção da RU (problema de tempo no fronthaul ou no DU).
+- O fronthaul (C/U-plane, VLAN `Control and User Plane vlan`) passa pela SFP+ direto no FPGA: **não** aparece nas
+  portas `eth0`/`eth1`, só nos contadores do PM.
+- Histórico: série `ru` (potência, temperaturas, contadores, estados 0/1) e eventos `ru`; o retrato do setup de cada
+  experimento inclui firmware e configuração da RU, e a comparação mostra potência, temperatura, pacotes fora da
+  janela e % do tempo sincronizada / com DU.
+- Estado do agente: `journalctl -u open5gs-k3s-ru -f`. Teste manual de uma leitura (não envia ao painel):
+  `RU_TARGET=user@10.101.131.59 RU_PASS=... RU_ENABLE=... python3 dashboard/agent/ru-agent.py --once`.
 
 ### Energia (medidor MiEnergy)
 

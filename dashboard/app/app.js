@@ -218,6 +218,7 @@ async function refreshNow() {
       if (currentTab === "ran") await Ran.refresh();
       else if (currentTab === "core") await Core.refresh();
       else if (currentTab === "hosts") await Machines.refresh();
+      else if (currentTab === "ru") await RuTab.refresh();
       else if (currentTab === "settings") await Settings.refresh();
       else if (currentTab === "history") await Hist.refresh();
       else if (currentTab === "logs" && Logs.src === null) Logs.renderSources();
@@ -242,6 +243,16 @@ function updatePills(ov) {
   const pc = $("#pill-core");
   pc.textContent = `core ${c.pods_ready}/${c.pods_total}`;
   pc.className = "pill " + (c.pods_error ? "err" : c.pods_ready === c.pods_total && c.pods_total ? "ok" : "warn");
+  const r = ov.ru;
+  const pr = $("#pill-ru");
+  pr.classList.toggle("hidden", !r);
+  if (r) {
+    const good = (v) => v === "Ready" || v === "SYNCHRONIZED";
+    const radio = good(r.sync) && good(r.rf) && good(r.dpd);
+    pr.textContent = !r.online ? "RU sem dados" : !radio ? "RU com falha" : good(r.du) ? "RU ok · DU conectado" : "RU pronta · sem DU";
+    pr.className = "pill " + (!r.online || !radio ? "err" : good(r.du) ? "ok" : "warn");
+    pr.title = r.error || `sync ${r.sync} · RF ${r.rf} · DPD ${r.dpd} · DU ${r.du}`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -753,13 +764,15 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     $("#tabbtn-settings").classList.toggle("hidden", !CONFIG.config_edit);
     $("#core-seg-webui").classList.toggle("hidden", !CONFIG.webui_port);
     $("#rec").classList.toggle("hidden", !CONFIG.persist);
+    $("#tabbtn-ru").classList.toggle("hidden", !CONFIG.ru);
+    document.body.classList.toggle("no-ru", !CONFIG.ru);
     Hist.refreshHeader();
     if (CONFIG.webui_port && store.get("core.view", "metrics") === "webui") Core.setView("webui");
     $("#netname").textContent = CONFIG.network_name ? "· " + CONFIG.network_name : "";
     $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · namespace ${CONFIG.namespace} · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
   } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
   const start = (location.hash || "").slice(1) || store.get("tab", "overview");
-  showTab(["overview", "ran", "logs", "core", "hosts", "history", "settings"].includes(start) ? start : "overview");
+  showTab(["overview", "ran", "logs", "core", "ru", "hosts", "history", "settings"].includes(start) ? start : "overview");
   setInterval(refreshNow, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();

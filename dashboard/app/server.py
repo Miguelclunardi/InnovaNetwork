@@ -13,6 +13,7 @@
 import base64
 import collections
 import csv
+import datetime
 import hmac
 import io
 import json
@@ -61,7 +62,7 @@ CORE_METRICS = _env("CORE_METRICS", "false").lower() in ("1", "true", "yes", "si
 CORE_METRICS_PORT = int(_env("CORE_METRICS_PORT", "9090"))
 CORE_POLL_SECONDS = float(_env("CORE_POLL_SECONDS", "5"))
 OPEN5GS_RELEASE = _env("OPEN5GS_RELEASE", "open5gs")
-VERSION = "1.1"
+VERSION = "1.2"
 PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usuário: admin)
 INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
 # Aba Configuração (editar o config.env). Vazio = aba desligada.
@@ -96,6 +97,9 @@ HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
 ENERGY_METER_URL = _env("ENERGY_METER_URL")          # ex.: http://192.168.68.105/Data (vazio = desligado)
 ENERGY_METER_HOST = _env("ENERGY_METER_HOST")        # nome da máquina na aba Máquinas
 ENERGY_INTERVAL = float(_env("ENERGY_INTERVAL", "2"))
+# RU (O-RU LiteOn FlexFi): estado enviado por um agente (POST /api/ingest/ru). Vazio = sem aba RU.
+RU_NAME = _env("RU_NAME")
+RU_ADDR = _env("RU_ADDR")            # IP de gestão (só para mostrar)
 UE_INACTIVE_SECONDS = 30
 BLER_WINDOW = 10   # s: BLER "agora" dos cartões/tabelas (1 s com poucos blocos oscila demais)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -928,6 +932,91 @@ class EnergyMeter(threading.Thread):
                 "url": self.url, **main}
 
 
+class RuState:
+    """Último estado da RU, série para gráficos/histórico e eventos de mudança de estado."""
+    STATE_KEYS = (("sync", "Sincronismo (PTP)"), ("rf", "RF"), ("dpd", "DPD"), ("du", "DU conectado"))
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.last = None
+        self.info = None
+        self.ts = None
+        self.error = None
+        self.err_ts = None
+        self.series = Series("ru")
+        self.events = collections.deque(maxlen=200)
+
+    def push(self, sample=None, error=None):
+        now = time.time()
+        with self.lock:
+            if error:
+                if self.error != error:
+                    self._event(now, "warning", "agente da RU: %s" % error)
+                self.error, self.err_ts = error, now
+                return
+            if not isinstance(sample, dict):
+                return
+            st = sample.get("status") or {}
+            old = (self.last or {}).get("status") or {}
+            for k, label in self.STATE_KEYS:
+                if st.get(k) != old.get(k) and (self.last is not None or st.get(k) not in ("Ready", "SYNCHRONIZED")):
+                    good = st.get(k) in ("Ready", "SYNCHRONIZED")
+                    msg = ("%s: %s → %s" % (label, old[k], st.get(k))) if old.get(k) else ("%s: %s (ao iniciar o painel)" % (label, st.get(k)))
+                    self._event(now, "info" if good or k == "du" else "warning", msg)
+            if self.error:
+                self._event(now, "info", "agente da RU reconectado")
+            if sample.get("info"):
+                self.info = sample["info"]
+            self.last, self.ts, self.error = sample, now, None
+            pm = sample.get("pm") or {}
+            v = {}
+            for name, key in (("POWER", "power"), ("TEMPERATURE", "temp")):
+                m = pm.get(name) or {}
+                if (m.get("radio") or {}).get("avg") is not None:
+                    v[key] = m["radio"]["avg"]
+                if name == "TEMPERATURE" and (m.get("cpu") or {}).get("avg") is not None:
+                    v["temp_cpu"] = m["cpu"]["avg"]
+            for name in ("RX_TOTAL", "RX_ON_TIME", "RX_EARLY", "RX_LATE", "TX_TOTAL"):
+                c = (pm.get(name) or {}).get("count")
+                if c is not None:
+                    v[name.lower()] = c
+            tot = v.get("rx_total")
+            if tot:
+                v["late_pct"] = 100.0 * (v.get("rx_late", 0) + v.get("rx_early", 0)) / tot
+            for ifn, e in (sample.get("eth") or {}).items():
+                if e.get("rx_bps") is not None:
+                    v["rx:" + ifn] = e["rx_bps"] / 1e6
+                    v["tx:" + ifn] = e["tx_bps"] / 1e6
+            for k, _ in self.STATE_KEYS:
+                v["ok_" + k] = 1 if st.get(k) in ("Ready", "SYNCHRONIZED") else 0
+            self.series.add(now, v)
+
+    def _event(self, ts, lvl, msg):
+        # mesmo formato dos eventos do core (ISO UTC com microssegundos)
+        iso = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        self.events.appendleft({"ts": iso, "level": lvl, "msg": msg})
+        if HISTORY is not None:
+            HISTORY.event(iso, "ru", lvl, msg)
+
+    def summary(self):
+        with self.lock:
+            st = (self.last or {}).get("status") or {}
+            pm = (self.last or {}).get("pm") or {}
+            return {"enabled": True, "name": RU_NAME, "addr": RU_ADDR,
+                    "online": bool(self.ts and time.time() - self.ts < 60), "error": self.error,
+                    "age": time.time() - self.ts if self.ts else None,
+                    "sync": st.get("sync"), "rf": st.get("rf"), "dpd": st.get("dpd"), "du": st.get("du"),
+                    "power": ((pm.get("POWER") or {}).get("radio") or {}).get("avg"),
+                    "temp": ((pm.get("TEMPERATURE") or {}).get("radio") or {}).get("avg")}
+
+    def detail(self, window):
+        out = self.summary()
+        with self.lock:
+            out.update(last=self.last, info=self.info, events=list(self.events)[:60],
+                       series=self.series.window(time.time() - window))
+        return out
+
+
 def local_host_loop(hosts):
     import hoststats
     c = hoststats.Collector(HOST_ROOT, HOST_FSROOT or None)
@@ -1151,6 +1240,7 @@ GNBLOG = GnbLog()
 ENERGY = EnergyMeter(ENERGY_METER_URL) if ENERGY_METER_URL else None
 COREPROCS = CoreProcs(HOST_ROOT) if HOST_ROOT else None
 HOSTS_STATE = Hosts()
+RU = RuState() if RU_NAME else None
 STARTED = time.time()
 
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
@@ -1254,7 +1344,8 @@ def experiment_setup():
         except OSError:
             cfg = None
     return cfg, {"version": VERSION, "gnb_name": GNB_NAME, "network": NETWORK_NAME, "gnb_url": GNB_METRICS_URL,
-                 "ues": ues, "hosts": [h["name"] for h in HOSTS_STATE.summary()]}
+                 "ues": ues, "hosts": [h["name"] for h in HOSTS_STATE.summary()],
+                 "ru": dict(RU.detail(60).get("info") or {}, addr=RU_ADDR, name=RU_NAME) if RU else None}
 
 
 def _range(qs):
@@ -1266,7 +1357,7 @@ def _range(qs):
     return t0, min(t1, now + 60)
 
 
-STATIC_FILES = {"history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
+STATIC_FILES = {"ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -1352,7 +1443,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE,
                                         "config_edit": bool(CONFIG), "version": VERSION,
                                         "webui_port": WEBUI_PORT, "persist": HISTORY is not None,
-                                        "local_host": LOCAL_HOST_NAME})
+                                        "local_host": LOCAL_HOST_NAME, "ru": RU_NAME or None})
             if path.startswith("/api/history"):
                 return self._history_get(path, qs)
             if path == "/api/settings":
@@ -1400,6 +1491,10 @@ class Handler(BaseHTTPRequestHandler):
                                         "seq": lines[-1][0] if lines else 0, "lines": [l for _, l in lines]})
             if path == "/api/gnb-log/stream":
                 return self._gnblog_stream(qs)
+            if path == "/api/ru":
+                if not RU:
+                    return self._send(200, {"enabled": False})
+                return self._send(200, RU.detail(min(_q(qs, "window", 900, int), HISTORY_SECONDS)))
             if path == "/api/hosts":
                 hs = HOSTS_STATE.summary()
                 if ENERGY:
@@ -1561,7 +1656,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._history_post(u.path)
         if u.path in ("/api/admin/login", "/api/admin/logout", "/api/settings/preview", "/api/settings/save"):
             return self._settings_post(u.path)
-        if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host"):
+        if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host", "/api/ingest/ru"):
             return self._send(404, {"error": "não encontrado"})
         if not INGEST_TOKEN:
             return self._send(403, {"error": "ingestão desligada (INGEST_TOKEN vazio)"})
@@ -1572,6 +1667,15 @@ class Handler(BaseHTTPRequestHandler):
         if n > 8 * 1024 * 1024:
             return self._send(413, {"error": "lote grande demais"})
         body = self.rfile.read(n).decode("utf-8", "replace")
+        if u.path == "/api/ingest/ru":
+            if not RU:
+                return self._send(404, {"error": "aba RU desligada (RU_NAME vazio)"})
+            try:
+                d = json.loads(body)
+            except ValueError:
+                return self._send(400, {"error": "JSON inválido"})
+            RU.push(d.get("sample"), str(d["error"])[:300] if d.get("error") else None)
+            return self._send(200, {"ok": True})
         if u.path == "/api/ingest/host":
             try:
                 d = json.loads(body)
@@ -1618,6 +1722,7 @@ class Handler(BaseHTTPRequestHandler):
                      "events": core["events"][:60]},
             "pods": pods,
             "gnb_log": {"enabled": bool(INGEST_TOKEN), "last_push": GNBLOG.last_push, "source": GNBLOG.source},
+            "ru": RU.summary() if RU else None,
         }
 
     def _ran_csv(self, window):
