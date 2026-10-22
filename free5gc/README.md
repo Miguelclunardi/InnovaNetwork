@@ -1,5 +1,8 @@
 # free5GC — segundo core (InnovaNetwork)
 
+> **Opcional.** O padrão do InnovaNetwork é OCUDU + Open5GS (o `install.sh` da raiz). O free5GC só existe se
+> você rodar `free5gc/install.sh`; sem ele nada muda.
+
 Core **free5GC v4.3.0** no mesmo k3s do torre2, separado do Open5GS: namespace `free5gc`, configuração
 própria (`free5gc/free5gc.env`), instalador e desinstalador próprios. **Um core por vez** em operação
 (o gNB OCUDU aponta para um AMF de cada vez), mas os IPs não colidem, então os dois podem coexistir instalados.

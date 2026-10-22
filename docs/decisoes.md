@@ -202,6 +202,8 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
     Máquinas e Histórico não mudam; cada experimento registra o core). Protótipo aprovado pelo usuário;
   - nomes técnicos instalados (`open5gs-k3s-*`, `/opt/open5gs-k3s`) só migram numa janela combinada.
   - 2026-10-22: a pasta do projeto no torre2 passou a ser `~/InnovaNetwork` (era `~/open5GK3S`).
+  - **padrão do InnovaNetwork = OCUDU + Open5GS**; o free5GC é **opcional** (instalado à parte com `free5gc/install.sh`;
+    sem ele tudo funciona como hoje). O painel só mostra a troca de core quando o free5GC estiver instalado.
 - 2026-10-22: **free5GC — fase 1** (branch `innovanetwork` = projeto completo, pasta `free5gc/`, ver `free5gc/README.md`): v4.3.0 com
   manifestos gerados pelo nosso `render.py` a partir dos configs oficiais (o chart free5gc-helm 4.2.2 fixa PLMN,
   slices e IPs nos templates e o modo multus dele põe rota padrão na fibra). Mesmo desenho de rede do Open5GS:
