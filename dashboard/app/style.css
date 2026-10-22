@@ -27,12 +27,13 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--panel2); p
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 8px 16px; background: var(--bar); color: var(--bar-text); border-bottom: 3px solid var(--brand);
   box-shadow: 0 1px 3px rgba(0,0,0,.15); }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 15px; }
-.brand svg { color: var(--brand); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 19px; }
+.brand svg { color: var(--brand); width: 26px; height: 26px; }
+#netname { display: none; }   /* NETWORK_NAME continua no core (nome da rede no celular); só não aparece aqui */
 .brand .muted { color: rgba(255,255,255,.7); }
 .tabs { display: flex; gap: 2px; flex-wrap: wrap; }
 .tabs button { background: none; border: 0; color: rgba(255,255,255,.78); padding: 8px 12px; border-radius: 6px;
-  font: inherit; cursor: pointer; }
+  font: inherit; font-size: 15px; cursor: pointer; }
 .tabs button:hover { color: #fff; background: rgba(255,255,255,.1); }
 .tabs button.active { color: var(--bar); background: #fff; font-weight: 600; }
 .topbar .pill { border-color: rgba(255,255,255,.35); color: rgba(255,255,255,.85); }
