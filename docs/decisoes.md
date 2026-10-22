@@ -185,5 +185,8 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
 - 2026-10-22: RU LiteOn ligada no switch (gestão 10.101.131.59). Painel **v1.2** com a aba RU (estado, potência,
   temperatura, fronthaul, configuração; só leitura) e a RU no histórico/experimentos.
 - 2026-10-22: painel **v1.3** com a aba Controle (core, UERANSIM e gNB OCUDU). Testado o "Iniciar tudo" com tudo
-  rodando (só confere, nada reiniciado). Falta: instalar o serviço do gNB no innovaserver (sudo lá) e o
-  `--dashboard-only`.
+  rodando (só confere, nada reiniciado). Validado em uso pelo usuário: Parar tudo → Iniciar core (~4 min, UPF/SMF/AMF
+  conferidos) → gNB OCUDU pelo serviço (RU "DU conectado" e N2 em ~14 s) → UERANSIM. O serviço passa
+  `configs/metricas.yml` como 2º `-c` (como o usuário rodava à mão; liga as métricas na porta 8001 do painel; o
+  arquivo não é alterado). Abas: Visão geral, Controle, Rádio, Core, RU, Logs, Máquinas, Histórico, Configuração.
+  Tags `v1.2-dashboard` (8b8c9ed, aba RU) e `v1.3-dashboard` (aba Controle).
