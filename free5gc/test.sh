@@ -18,7 +18,7 @@ pass() { echo "    ${C_GRN}[ok]${C_0} $*"; P=$((P+1)); }
 fail() { echo "    ${C_RED}[falhou]${C_0} $*"; F=$((F+1)); }
 
 step "free5GC (${NS})"
-notready=$(kubectl -n "${NS}" get pods --no-headers 2>/dev/null | awk '$2 !~ /^([0-9]+)\/\1$/ || $3 != "Running" {print $1}')
+notready=$(kubectl -n "${NS}" get pods --no-headers 2>/dev/null | awk '{split($2, r, "/"); if (r[1] != r[2] || $3 != "Running") print $1}' | paste -sd' ')
 total=$(kubectl -n "${NS}" get pods --no-headers 2>/dev/null | wc -l)
 [[ ${total} -gt 0 && -z "${notready}" ]] && pass "${total} pods prontos" || fail "pods não prontos: ${notready:-nenhum pod}"
 kubectl -n "${NS}" logs deploy/amf --tail=-1 2>/dev/null | grep -q "ngap_server\|NGAP server\|Listen on ${F5_AMF_N2_IP}" \

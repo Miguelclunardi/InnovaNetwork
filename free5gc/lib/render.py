@@ -295,7 +295,7 @@ def manifests():
                 "set -e",
                 "POD_IP=$(hostname -i | awk '{print $1}')",
                 "sed \"s/POD_IP_ADDR/$POD_IP/g\" config/upfcfg.yaml > /tmp/upfcfg.yaml",
-                "sysctl -w net.ipv4.ip_forward=1 >/dev/null",
+                "echo 1 > /proc/sys/net/ipv4/ip_forward",   # a imagem não tem sysctl
                 "iptables -C FORWARD -j ACCEPT 2>/dev/null || iptables -A FORWARD -j ACCEPT",
                 nat,
                 "echo \"UPF pfcp=$POD_IP  N3=%s (net1)\"" % UPF_IP,

@@ -68,7 +68,7 @@ for p in "${F5_UE_POOLS[@]}"; do
 done
 k get crd network-attachment-definitions.k8s.cni.cncf.io >/dev/null 2>&1 || die "Multus não encontrado (rode o install.sh da raiz antes)"
 ok "config ok: AMF ${F5_AMF_N2_IP}, UPF ${F5_UPF_N3_IP}, gNB simulado ${F5_GNB_SIM_IP}, pools ${F5_UE_POOLS[*]}"
-if ! ${DRY} && ! ${ONLY_SUBS} && ! lsmod | grep -q '^gtp5g '; then
+if ! ${DRY} && ! ${ONLY_SUBS} && ! grep -q '^gtp5g ' /proc/modules; then
   die "módulo gtp5g não carregado (o UPF do free5GC precisa dele). Uma vez, com sudo: sudo ./free5gc/setup-gtp5g.sh"
 fi
 
