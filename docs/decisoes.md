@@ -167,3 +167,8 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   host), WebUI do Open5GS embutida na aba Core (Assinantes), install do painel com server-side apply. Pendentes:
   pool para a DNN `ims` (SMF/UPF reiniciam: janela sem usuários), medidor de energia atrás do NAT do Wi-Fi,
   temperatura do innovaserver (ver IPMI), rotação do `/tmp/gnb.log` (9 GB).
+- 2026-10-22: reboot com troca de IP (torre2 .17 → .117, innovaserver .77 → .122). Os agentes do painel (log do gNB e
+  aba Máquinas) enviavam para o IP físico gravado no install ⇒ passaram a usar o IP fixo do nó (`k3s0`
+  10.254.254.1). Depois do boot, AMF/UPF/UERANSIM subiram sem `net1` (Multus ainda não estava pronto) e o `heal.sh`
+  reiniciou gNB e UEs ao mesmo tempo (o UE pegou o IP do gNB antigo). Decidido: o core **não** sobe sozinho no boot;
+  só o painel. O painel ganha iniciar/parar/reiniciar por função e "iniciar core inteiro" em ordem (em andamento).

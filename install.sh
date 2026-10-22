@@ -529,7 +529,7 @@ setup_hosts_agent() {
   for e in "${DASHBOARD_HOSTS[@]}"; do hosts+="${hosts:+;}${e}"; done
   install -m 0640 -o root -g "${TARGET_GROUP}" /dev/null "${dst}/hosts.env"
   {
-    echo "DASHBOARD_URL=http://${NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"
+    echo "DASHBOARD_URL=http://${K3S_NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"  # IP fixo do nó: não muda com o DHCP
     echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
     echo "HOSTS=${hosts}"
   } >"${dst}/hosts.env"
@@ -589,7 +589,7 @@ setup_gnb_log_agent() {
   # Token legível só por root e pelo grupo do usuário que roda o agente
   install -m 0640 -o root -g "${TARGET_GROUP}" /dev/null "${dst}/agent.env"
   {
-    echo "DASHBOARD_URL=http://${NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"
+    echo "DASHBOARD_URL=http://${K3S_NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"  # IP fixo do nó: não muda com o DHCP
     echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
     echo "GNB_LOG_SSH=${GNB_LOG_SSH}"
     echo "GNB_LOG_DROP=${GNB_LOG_DROP}"
