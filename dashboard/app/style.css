@@ -245,3 +245,13 @@ dialog.dlg input[type=text], dialog.dlg textarea, #hist-custom input { font: inh
 /* aba RU */
 body.no-ru .ru-only { display: none; }
 #ru-state .kpi .value.small { font-size: 18px; }
+
+/* aba Controle */
+.btn.danger { color: var(--err); }
+.btn.danger:hover { background: var(--err-soft); }
+td.nowrap .btn { margin-left: 2px; }
+ul.plain { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+ul.plain li { padding: 3px 0; border-bottom: 1px solid var(--border); }
+.note.err { color: var(--err); background: var(--err-soft); }
+.note.warn { color: var(--warn); background: var(--warn-soft); }
+#ctl-ocudu-card { margin-bottom: 12px; }

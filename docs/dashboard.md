@@ -1,4 +1,4 @@
-# Painel — Innova Center Dashboard (v1.2)
+# Painel — Innova Center Dashboard (v1.3)
 
 Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar:
 
@@ -8,6 +8,7 @@ Página web que roda **no próprio cluster do core** (máquina do core) e junta 
 | **Rádio (gNB)** | UEs identificados por **nome, IMSI, IP e tipo** (SIM real / UERANSIM), não só RNTI; RNTIs parados há mais de 2 min ficam escondidos (botão "Mostrar antigos"); vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
 | **RU** | O-RU LiteOn FlexFi: sincronismo PTP, RF, DPD, DU conectado; potência e temperatura (rádio e CPU); pacotes U-plane do fronthaul (recebidos, adiantados, atrasados); portas de gestão; firmware; configuração de rádio (frequência/NR-ARFCN, banda, SCS, 4T4R, potência, compressão, VLAN, MAC do DU); mudanças de estado | SSH na porta de gestão (RJ45) da RU, só comandos `show` |
+| **Controle** | iniciar / parar / reiniciar cada função do core e o UERANSIM; "Iniciar tudo" em ordem com conferência (fibra, PFCP, NG Setup); gNB OCUDU: escolher o `.yml`, iniciar, parar, reiniciar, ver PTP, VF do DPDK e a saída do serviço. Ações pedem a senha de administrador | API do Kubernetes (escala/pods) + agente `gnb-ctl` (SSH ao host do gNB) |
 | **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
 | **Histórico** | métricas **persistentes** (rádio 1 s, core, máquinas, energia, eventos) de qualquer período; **experimentos** (botão "● Gravar experimento" no topo) com nome, notas e retrato do setup; **comparação** lado a lado de 2+ experimentos (KPIs com o melhor em destaque + gráficos sobrepostos); exportação CSV | SQLite em `/var/lib/open5gs-k3s/dashboard` (`DASHBOARD_PERSIST=true`) |
 | **Configuração** | edita o `config.env` (senha de administrador): campos por seção com a explicação do próprio arquivo, diff antes de salvar, validação do install, backup e restauração, e o comando para aplicar | `config.env` da máquina do core |
@@ -204,6 +205,48 @@ comece com `show`. A RU só aceita senha (não aceita chave), por isso o agente 
   janela e % do tempo sincronizada / com DU.
 - Estado do agente: `journalctl -u open5gs-k3s-ru -f`. Teste manual de uma leitura (não envia ao painel):
   `RU_TARGET=user@10.101.131.59 RU_PASS=... RU_ENABLE=... python3 dashboard/agent/ru-agent.py --once`.
+
+### Aba Controle (iniciar / parar / reiniciar)
+
+`DASHBOARD_CONTROL=true` (precisa de `DASHBOARD_CONFIG_EDIT=true`: usa a mesma senha de administrador). Ver o estado
+é livre; cada ação pede a senha.
+
+**Core e UERANSIM** (pod do painel, Role `dashboard-control`: escalar Deployments e apagar pods — nada mais):
+- **Parar** = escala 0 (nada é apagado; a configuração e os assinantes ficam). **Iniciar** = escala 1 e espera ficar
+  pronto. **Reiniciar** = apaga o pod (o Deployment recria) e reinicia também quem depende dele:
+  UPF → SMF (o SMF só resolve o endereço do UPF ao iniciar) e AMF → gNB UERANSIM → UEs.
+- **Iniciar tudo** sobe em ordem: MongoDB → NRF → SCP → AUSF/UDM/UDR/PCF/BSF/NSSF → populate/WebUI → UPF → SMF →
+  AMF → gNB UERANSIM → UEs. Cada etapa espera o pod ficar pronto e confere o log: UPF com `gtp_server()` no IP da
+  fibra, AMF com `ngap_server()` no IP da fibra, SMF com `PFCP associated`, gNB simulado com `NG Setup ... successful`.
+  Pod que sobe sem a interface da fibra (corrida com o Multus no boot: `No amf.ngap.address`, `ngapIp is missing`) é
+  **recriado sozinho** (até 2 vezes). O que já está rodando é mantido; se um "fornecedor" foi (re)iniciado, o
+  dependente que já rodava é reiniciado (ex.: SMF depois de um UPF novo).
+- Uma ação por vez; o andamento aparece na aba e vai para os eventos (fonte `painel`) e para o histórico.
+
+**Boot** (`CORE_AUTOSTART=false`): a unit `open5gs-k3s-heal` passa a rodar `heal.sh --boot-off`, que coloca em 0
+todos os Deployments do namespace menos o painel. Depois de ligar a máquina, só o painel está no ar; o resto começa
+pela aba Controle. Um `sudo ./install.sh` ou `--deploy-only` volta a subir tudo (o Helm põe as réplicas em 1).
+`CORE_AUTOSTART=true` volta ao comportamento antigo (sobe tudo + recuperação automática).
+
+**gNB OCUDU** (`GNB_CTL_SSH`, `GNB_CTL_DIR`):
+- No host do gNB, **uma vez, com sudo**: `scripts/ocudu/setup-gnb-service.sh` cria
+  `ocudu-gnb@<arquivo>.service` (roda `taskset -c 0-17 build/apps/gnb/gnb -c configs/<arquivo>.yml` a partir da
+  pasta do OCUDU do usuário; parar = SIGINT, como Ctrl+C) e uma regra do **polkit** que deixa só esse usuário
+  iniciar/parar/reiniciar essas units — sem sudo sem senha.
+  ```bash
+  scp scripts/ocudu/setup-gnb-service.sh innovaserver@10.10.0.1:/tmp/
+  ssh -t innovaserver@10.10.0.1 sudo bash /tmp/setup-gnb-service.sh   # --cpus 0-17 --dir /home/innovaserver/ocudu
+  ```
+- Na máquina do core, a unit `open5gs-k3s-gnb-ctl` (usuário do install, mesma chave SSH do log) lê a cada 3 s o
+  estado (serviço, PID, saída, arquivos `.yml` com o AMF de cada um, PTP, driver da VF do DPDK) e executa os
+  comandos do painel com `systemctl` (sem sudo).
+- Um gNB por vez: iniciar com outro arquivo para o atual antes. Se houver um `gnb` aberto no terminal, o serviço
+  recusa e a aba avisa (pare-o com Ctrl+C).
+- Depois de iniciar, a aba confere: serviço rodando (e ainda rodando 5 s depois), **RU com DU conectado** (aba RU)
+  e **N2 no AMF** deste core. O arquivo que aponta para outro AMF (ex.: `127.0.0.5`, o Open5GS local do
+  innovaserver) aparece marcado.
+- **A máquina tem que estar preparada** (interface, VF/DPDK, XDP `xdp_ptp_pad.o`, PTP): o botão não faz isso.
+- Remover: `sudo bash setup-gnb-service.sh --remove` no host do gNB.
 
 ### Energia (medidor MiEnergy)
 

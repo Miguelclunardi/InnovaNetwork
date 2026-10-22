@@ -66,6 +66,11 @@ if [[ -f "${GNBLOG_UNIT_FILE}" ]]; then
   rm -f "${GNBLOG_UNIT_FILE}"; rm -rf "${INSTALL_DIR}/dashboard-agent"; systemctl daemon-reload
   ok "unit open5gs-k3s-gnb-log removida"
 fi
+if [[ -f "${GNBCTL_UNIT_FILE}" ]]; then
+  systemctl disable --now open5gs-k3s-gnb-ctl.service >/dev/null 2>&1 || true
+  rm -f "${GNBCTL_UNIT_FILE}"; systemctl daemon-reload
+  ok "unit open5gs-k3s-gnb-ctl removida (no host do gNB o serviço ocudu-gnb@ continua; para tirar: setup-gnb-service.sh --remove)"
+fi
 if [[ -f "${RU_UNIT_FILE}" ]]; then
   systemctl disable --now open5gs-k3s-ru.service >/dev/null 2>&1 || true
   rm -f "${RU_UNIT_FILE}"; systemctl daemon-reload

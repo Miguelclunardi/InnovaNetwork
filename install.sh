@@ -483,6 +483,7 @@ step_dashboard() {
     remove_gnb_log_agent
     remove_hosts_agent
     remove_ru_agent
+    remove_gnb_ctl_agent
     return 0
   fi
   step "Painel Innova Center Dashboard (NodePort ${DASHBOARD_NODEPORT})"
@@ -511,6 +512,62 @@ step_dashboard() {
   setup_gnb_log_agent
   setup_hosts_agent
   setup_ru_agent
+  setup_gnb_ctl_agent
+}
+
+remove_gnb_ctl_agent() {
+  [[ -f "${GNBCTL_UNIT_FILE}" ]] || return 0
+  systemctl disable --now open5gs-k3s-gnb-ctl.service >/dev/null 2>&1 || true
+  rm -f "${GNBCTL_UNIT_FILE}" "${INSTALL_DIR}/dashboard-agent/gnb-ctl.env"; systemctl daemon-reload
+  ok "unit open5gs-k3s-gnb-ctl removida"
+}
+
+# gNB OCUDU pela aba Controle: o agente lê o estado do serviço ocudu-gnb@ no host do gNB e
+# executa iniciar/parar (systemctl sem sudo; autorizado pelo polkit lá). Mesma chave SSH do log.
+setup_gnb_ctl_agent() {
+  if ! is_true "${DASHBOARD_CONTROL}" || [[ -z "${GNB_CTL_SSH}" ]]; then remove_gnb_ctl_agent; return 0; fi
+  [[ "${TARGET_USER}" != root ]] || { warn "agente do controle do gNB precisa de um usuário comum"; return 0; }
+  local dst="${INSTALL_DIR}/dashboard-agent" unit
+  install -d -m 0755 -o root -g root "${dst}"
+  install -m 0755 -o root -g root "${PROJECT_DIR}/dashboard/agent/gnb-ctl-agent.py" "${dst}/gnb-ctl-agent.py"
+  install -m 0640 -o root -g "${TARGET_GROUP}" /dev/null "${dst}/gnb-ctl.env"
+  {
+    echo "DASHBOARD_URL=http://${K3S_NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"  # IP fixo do nó: não muda com o DHCP
+    echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
+    echo "GNB_CTL_SSH=${GNB_CTL_SSH}"
+    echo "GNB_CTL_DIR=${GNB_CTL_DIR}"
+  } >"${dst}/gnb-ctl.env"
+  unit=$(cat <<EOU
+# Gerado por open5GK3S/install.sh
+[Unit]
+Description=open5GK3S: iniciar/parar o gNB OCUDU (${GNB_CTL_SSH}) pelo painel
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${TARGET_USER}
+EnvironmentFile=${dst}/gnb-ctl.env
+ExecStart=/usr/bin/python3 -u ${dst}/gnb-ctl-agent.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOU
+)
+  if [[ "$(cat "${GNBCTL_UNIT_FILE}" 2>/dev/null)" != "${unit}" ]]; then
+    printf '%s\n' "${unit}" >"${GNBCTL_UNIT_FILE}"; systemctl daemon-reload
+  fi
+  systemctl enable open5gs-k3s-gnb-ctl.service >/dev/null 2>&1
+  systemctl restart open5gs-k3s-gnb-ctl.service
+  if su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${GNB_CTL_SSH} test -f /etc/polkit-1/rules.d/50-ocudu-gnb.rules" &>/dev/null; then
+    ok "aba Controle: gNB OCUDU controlável (${GNB_CTL_SSH}; journalctl -u open5gs-k3s-gnb-ctl)"
+  else
+    warn "aba Controle: falta instalar o serviço do gNB no host do gNB (uma vez, com sudo lá):"
+    warn "  scp scripts/ocudu/setup-gnb-service.sh ${GNB_CTL_SSH}:/tmp/ && ssh -t ${GNB_CTL_SSH} sudo bash /tmp/setup-gnb-service.sh --dir ${GNB_CTL_DIR}"
+  fi
 }
 
 remove_ru_agent() {
@@ -702,8 +759,12 @@ EOU
 #  nunca os arquivos editáveis do projeto do usuário.
 # ----------------------------------------------------------------------------
 step_boot_heal() {
-  step "Recuperação automática no boot (AUTO_HEAL=${AUTO_HEAL})"
-  if ! is_true "${AUTO_HEAL}"; then
+  step "Boot: CORE_AUTOSTART=${CORE_AUTOSTART}, AUTO_HEAL=${AUTO_HEAL}"
+  local mode="--boot" desc="verifica e recupera o plano de usuario apos o boot"
+  if ! is_true "${CORE_AUTOSTART}"; then
+    mode="--boot-off"; desc="para o core no boot (inicia pela aba Controle do painel)"
+  fi
+  if ! is_true "${AUTO_HEAL}" && is_true "${CORE_AUTOSTART}"; then
     if [[ -f "${HEAL_UNIT_FILE}" ]]; then
       systemctl disable open5gs-k3s-heal.service >/dev/null 2>&1 || true
       rm -f "${HEAL_UNIT_FILE}"; systemctl daemon-reload
@@ -721,7 +782,7 @@ step_boot_heal() {
   unit=$(cat <<EOU
 # Gerado por open5GK3S/install.sh
 [Unit]
-Description=open5GK3S: verifica e recupera o plano de usuario apos o boot
+Description=open5GK3S: ${desc}
 After=k3s.service
 Wants=k3s.service
 
@@ -729,7 +790,7 @@ Wants=k3s.service
 # exec (não oneshot): não atrasa o boot enquanto espera os pods
 Type=exec
 Environment=CONFIG=${dst}/config.env HOME=/root
-ExecStart=${dst}/scripts/heal.sh --boot
+ExecStart=${dst}/scripts/heal.sh ${mode}
 
 [Install]
 WantedBy=multi-user.target
@@ -739,7 +800,11 @@ EOU
     printf '%s\n' "${unit}" >"${HEAL_UNIT_FILE}"; systemctl daemon-reload
   fi
   systemctl enable open5gs-k3s-heal.service >/dev/null 2>&1
-  ok "unit open5gs-k3s-heal ativa no boot (cópia em ${dst}; log: journalctl -u open5gs-k3s-heal)"
+  if [[ "${mode}" == --boot-off ]]; then
+    ok "no boot o core fica PARADO (CORE_AUTOSTART=false): inicie pela aba Controle (log: journalctl -u open5gs-k3s-heal)"
+  else
+    ok "unit open5gs-k3s-heal ativa no boot (cópia em ${dst}; log: journalctl -u open5gs-k3s-heal)"
+  fi
 }
 
 # ----------------------------------------------------------------------------
@@ -814,6 +879,7 @@ main() {
   if ${DASHBOARD_ONLY}; then
     k3s_ready || die "--dashboard-only requer k3s já instalado e no ar"
     step_dashboard
+    step_boot_heal   # só a unit de boot (CORE_AUTOSTART); não mexe no core agora
     return 0
   fi
 

@@ -21,6 +21,7 @@
     <button role="tab" data-tab="logs">Logs</button>
     <button role="tab" data-tab="core">Core</button>
     <button role="tab" data-tab="ru" class="hidden" id="tabbtn-ru">RU</button>
+    <button role="tab" data-tab="control" class="hidden" id="tabbtn-control">Controle</button>
     <button role="tab" data-tab="hosts">Máquinas</button>
     <button role="tab" data-tab="history">Histórico</button>
     <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Configuração</button>
@@ -313,6 +314,78 @@
     <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="cfg-dialog-close">Fechar</button></div>
   </dialog>
   <!-- ======================= CONFIGURAÇÃO ======================= -->
+  <!-- ======================= CONTROLE ======================= -->
+  <section id="tab-control" class="tab">
+    <div class="note err hidden" id="ctl-error"></div>
+    <div class="card" id="ctl-login">
+      <h2>Controle</h2>
+      <p class="muted">Ver o estado é livre; iniciar, parar e reiniciar pedem a senha de administrador (a mesma da aba Configuração).</p>
+      <form id="ctl-login-form" class="toolbar">
+        <input type="password" id="ctl-pass" placeholder="senha de administrador" autocomplete="current-password">
+        <button class="btn on" type="submit">Entrar</button> <span class="muted" id="ctl-login-msg"></span>
+      </form>
+    </div>
+    <div class="toolbar hidden" id="ctl-logged">
+      <button class="btn on" data-act="start" data-target="all">▶ Iniciar tudo (core + UERANSIM, em ordem)</button>
+      <button class="btn" data-act="restart" data-target="all">↻ Reiniciar tudo</button>
+      <button class="btn danger" data-act="stop" data-target="all">■ Parar tudo</button>
+      <span class="muted">Depois de um boot só o painel sobe: o resto começa por aqui.</span>
+      <button class="btn small" id="ctl-logout" style="margin-left:auto">Sair</button>
+    </div>
+    <div class="card" id="ctl-job" style="margin-top:12px">
+      <h2 id="ctl-job-title"></h2>
+      <div class="events" id="ctl-job-log" style="max-height:260px"></div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Core 5G (Open5GS) <span class="muted" id="ctl-core-sub"></span></h2>
+        <div class="toolbar">
+          <button class="btn small on" data-act="start" data-target="core">▶ Iniciar core</button>
+          <button class="btn small" data-act="restart" data-target="core">↻ Reiniciar core</button>
+          <button class="btn small danger" data-act="stop" data-target="core">■ Parar core</button>
+        </div>
+        <div class="tablewrap" style="max-height:none"><table id="ctl-core"></table></div>
+      </div>
+      <div>
+        <div class="card" id="ctl-ocudu-card">
+          <h2>gNB OCUDU <span class="muted" id="ctl-ocudu-sub"></span></h2>
+          <div class="note warn hidden" id="ctl-ocudu-setup">O serviço do gNB ainda não foi instalado no host do gNB.
+            Rode uma vez, a partir da máquina do core:<br>
+            <code>scp scripts/ocudu/setup-gnb-service.sh innovaserver@10.10.0.1:/tmp/ &amp;&amp; ssh -t innovaserver@10.10.0.1 sudo bash /tmp/setup-gnb-service.sh</code></div>
+          <div class="note warn hidden" id="ctl-ocudu-manual"></div>
+          <div class="kpis" id="ctl-ocudu-kpis"></div>
+          <div class="toolbar" style="margin-top:10px">
+            <label>Arquivo <select id="ctl-ocudu-cfg" style="max-width:420px"></select></label>
+            <label class="muted"><input type="checkbox" id="ctl-ocudu-all"> todos os .yml</label>
+          </div>
+          <div class="muted" id="ctl-ocudu-cfginfo" style="font-size:12px;margin:4px 0 8px"></div>
+          <div class="toolbar">
+            <button class="btn on" data-act="start" data-target="ocudu">▶ Iniciar gNB com este arquivo</button>
+            <button class="btn" data-act="restart" data-target="ocudu">↻ Reiniciar</button>
+            <button class="btn danger" data-act="stop" data-target="ocudu">■ Parar gNB</button>
+          </div>
+          <details style="margin-top:8px"><summary class="muted">Saída do serviço (journal)</summary>
+            <pre class="cfgout" id="ctl-ocudu-journal"></pre></details>
+          <p class="muted" style="font-size:12px">A máquina já deve estar preparada (interface, VF do DPDK, XDP, PTP): o botão só roda
+            <code>taskset … ./gnb -c configs/&lt;arquivo&gt;.yml</code> como serviço. Parar = Ctrl+C no gNB.</p>
+        </div>
+        <div class="card">
+          <h2>UERANSIM (gNB e UEs simulados) <span class="muted" id="ctl-ueransim-sub"></span></h2>
+          <div class="toolbar">
+            <button class="btn small on" data-act="start" data-target="ueransim">▶ Iniciar</button>
+            <button class="btn small" data-act="restart" data-target="ueransim">↻ Reiniciar</button>
+            <button class="btn small danger" data-act="stop" data-target="ueransim">■ Parar</button>
+          </div>
+          <div class="tablewrap" style="max-height:none"><table id="ctl-ueransim"></table></div>
+        </div>
+        <div class="card"><h2>Ações recentes</h2><ul id="ctl-recent" class="plain"></ul></div>
+      </div>
+    </div>
+    <p class="note">Parar = escala 0 (nada é apagado). Reiniciar recria o pod e também os que dependem dele (UPF → SMF; AMF → gNB e UEs
+      simulados). "Iniciar tudo" sobe em ordem: MongoDB → NRF → SCP → demais → UPF → SMF → AMF → gNB UERANSIM → UEs, conferindo a
+      fibra no AMF/UPF, o PFCP e o NG Setup; um pod que suba sem a fibra é recriado sozinho.</p>
+  </section>
+
   <section id="tab-settings" class="tab">
     <div id="cfg-msg" class="cfgmsg hidden"></div>
     <div id="cfg-login" class="card cfglogin">
@@ -360,6 +433,7 @@
 <script src="app.js"></script>
 <script src="hosts.js"></script>
 <script src="ru.js"></script>
+<script src="control.js"></script>
 <script src="settings.js"></script>
 <script src="history.js"></script>
 </body>

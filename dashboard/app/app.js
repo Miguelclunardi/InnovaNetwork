@@ -219,6 +219,7 @@ async function refreshNow() {
       else if (currentTab === "core") await Core.refresh();
       else if (currentTab === "hosts") await Machines.refresh();
       else if (currentTab === "ru") await RuTab.refresh();
+      else if (currentTab === "control") await Control.refresh();
       else if (currentTab === "settings") await Settings.refresh();
       else if (currentTab === "history") await Hist.refresh();
       else if (currentTab === "logs" && Logs.src === null) Logs.renderSources();
@@ -765,6 +766,7 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     $("#core-seg-webui").classList.toggle("hidden", !CONFIG.webui_port);
     $("#rec").classList.toggle("hidden", !CONFIG.persist);
     $("#tabbtn-ru").classList.toggle("hidden", !CONFIG.ru);
+    $("#tabbtn-control").classList.toggle("hidden", !CONFIG.control);
     document.body.classList.toggle("no-ru", !CONFIG.ru);
     Hist.refreshHeader();
     if (CONFIG.webui_port && store.get("core.view", "metrics") === "webui") Core.setView("webui");
@@ -772,7 +774,7 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · namespace ${CONFIG.namespace} · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
   } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
   const start = (location.hash || "").slice(1) || store.get("tab", "overview");
-  showTab(["overview", "ran", "logs", "core", "ru", "hosts", "history", "settings"].includes(start) ? start : "overview");
+  showTab(["overview", "ran", "logs", "core", "ru", "control", "hosts", "history", "settings"].includes(start) ? start : "overview");
   setInterval(refreshNow, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();

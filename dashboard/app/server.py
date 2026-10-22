@@ -31,6 +31,7 @@ import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import configedit
+import control
 import history
 
 # ----------------------------------------------------------------------------
@@ -62,7 +63,7 @@ CORE_METRICS = _env("CORE_METRICS", "false").lower() in ("1", "true", "yes", "si
 CORE_METRICS_PORT = int(_env("CORE_METRICS_PORT", "9090"))
 CORE_POLL_SECONDS = float(_env("CORE_POLL_SECONDS", "5"))
 OPEN5GS_RELEASE = _env("OPEN5GS_RELEASE", "open5gs")
-VERSION = "1.2"
+VERSION = "1.3"
 PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usuário: admin)
 INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
 # Aba Configuração (editar o config.env). Vazio = aba desligada.
@@ -100,6 +101,12 @@ ENERGY_INTERVAL = float(_env("ENERGY_INTERVAL", "2"))
 # RU (O-RU LiteOn FlexFi): estado enviado por um agente (POST /api/ingest/ru). Vazio = sem aba RU.
 RU_NAME = _env("RU_NAME")
 RU_ADDR = _env("RU_ADDR")            # IP de gestão (só para mostrar)
+# Aba Controle (iniciar/parar/reiniciar). Exige a senha de administrador (aba Configuração).
+CONTROL = _env("CONTROL", "false").lower() in ("1", "true", "yes", "sim", "on")
+UERANSIM_RELEASE = _env("UERANSIM_RELEASE", "ueransim")
+RAN_AMF_IP = _env("RAN_AMF_IP")       # IP do AMF na fibra (confere o N2 no log)
+RAN_UPF_IP = _env("RAN_UPF_IP")       # IP do UPF na fibra (confere o N3 no log)
+GNB_CTL_TARGET = _env("GNB_CTL_TARGET")   # usuario@host do gNB OCUDU (vazio = sem controle do gNB)
 UE_INACTIVE_SECONDS = 30
 BLER_WINDOW = 10   # s: BLER "agora" dos cartões/tabelas (1 s com poucos blocos oscila demais)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -150,6 +157,17 @@ class K8s:
     def get_text(self, path, params=None, timeout=20):
         with self.open(path, params, timeout=timeout) as r:
             return r.read().decode("utf-8", "replace")
+
+    def request(self, method, path, body=None, ctype="application/json"):
+        """Escrita (aba Controle): PATCH de escala e DELETE de pod."""
+        req = urllib.request.Request(self.base + path, method=method,
+                                     data=json.dumps(body).encode() if body is not None else None)
+        req.add_header("Content-Type", ctype)
+        tok = self._token()
+        if tok:
+            req.add_header("Authorization", "Bearer " + tok)
+        with urllib.request.urlopen(req, timeout=20, context=self.ctx) as r:
+            return json.load(r)
 
 
 K8S = K8s()
@@ -1283,6 +1301,20 @@ ADMIN = Admin()
 CONFIG = (configedit.ConfigStore(CONFIG_PATH, os.path.join(PROJECT_DIR, "config.env"), PROJECT_DIR, CONFIG_BACKUP_DIR)
           if ADMIN_PASSWORD and CONFIG_PATH and PROJECT_DIR and CONFIG_BACKUP_DIR else None)
 CONFIG_LOCK = threading.Lock()
+
+
+def _control_event(level, msg):
+    CORE.state._event(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                      "painel", level, msg)
+
+
+GNBCTL = control.GnbCtl(GNB_CTL_TARGET) if CONTROL and CONFIG and GNB_CTL_TARGET else None
+if GNBCTL:
+    GNBCTL.ru_ref = RU
+    _gnb_host = GNB_CTL_TARGET.rsplit("@", 1)[-1]
+    GNBCTL.n2_ref = lambda: next((g.get("accepted") for g in CORE.snapshot()["gnbs"] if g["addr"] == _gnb_host), None)
+CONTROLLER = (control.Controller(K8S, NAMESPACE, OPEN5GS_RELEASE, UERANSIM_RELEASE, RAN_AMF_IP, RAN_UPF_IP,
+                                 _control_event, GNBCTL) if CONTROL and CONFIG else None)
 MASK = "••••••••"
 
 
@@ -1357,7 +1389,7 @@ def _range(qs):
     return t0, min(t1, now + 60)
 
 
-STATIC_FILES = {"ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
+STATIC_FILES = {"control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -1443,7 +1475,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE,
                                         "config_edit": bool(CONFIG), "version": VERSION,
                                         "webui_port": WEBUI_PORT, "persist": HISTORY is not None,
-                                        "local_host": LOCAL_HOST_NAME, "ru": RU_NAME or None})
+                                        "local_host": LOCAL_HOST_NAME, "ru": RU_NAME or None,
+                                        "control": bool(CONTROLLER), "ocudu_ctl": bool(GNBCTL), "amf_ip": RAN_AMF_IP})
             if path.startswith("/api/history"):
                 return self._history_get(path, qs)
             if path == "/api/settings":
@@ -1491,6 +1524,10 @@ class Handler(BaseHTTPRequestHandler):
                                         "seq": lines[-1][0] if lines else 0, "lines": [l for _, l in lines]})
             if path == "/api/gnb-log/stream":
                 return self._gnblog_stream(qs)
+            if path == "/api/control":
+                if not CONTROLLER:
+                    return self._send(404, {"error": "aba Controle desligada (DASHBOARD_CONTROL)"})
+                return self._send(200, CONTROLLER.view())
             if path == "/api/ru":
                 if not RU:
                     return self._send(200, {"enabled": False})
@@ -1610,6 +1647,24 @@ class Handler(BaseHTTPRequestHandler):
             raise configedit.ConfigError("JSON inválido")
         return d
 
+    def _control_post(self):
+        if not self._auth_ok():
+            return self._send(401, {"error": "autenticação necessária"},
+                              extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
+        if not CONTROLLER:
+            return self._send(404, {"error": "aba Controle desligada (DASHBOARD_CONTROL)"})
+        if not self._admin():
+            return None
+        try:
+            body = self._json_body(16 * 1024)
+            job = CONTROLLER.submit(body, self.client_address[0])
+        except (ValueError, configedit.ConfigError) as e:
+            return self._send(400, {"error": str(e)})
+        except RuntimeError as e:
+            return self._send(409, {"error": str(e)})
+        log("controle:", job["title"], "de", self.client_address[0])
+        return self._send(200, {"ok": True, "job": job})
+
     def _settings_post(self, path):
         if not self._auth_ok():
             return self._send(401, {"error": "autenticação necessária"},
@@ -1656,7 +1711,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._history_post(u.path)
         if u.path in ("/api/admin/login", "/api/admin/logout", "/api/settings/preview", "/api/settings/save"):
             return self._settings_post(u.path)
-        if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host", "/api/ingest/ru"):
+        if u.path == "/api/control":
+            return self._control_post()
+        if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host", "/api/ingest/ru", "/api/ingest/gnb-ctl"):
             return self._send(404, {"error": "não encontrado"})
         if not INGEST_TOKEN:
             return self._send(403, {"error": "ingestão desligada (INGEST_TOKEN vazio)"})
@@ -1667,6 +1724,15 @@ class Handler(BaseHTTPRequestHandler):
         if n > 8 * 1024 * 1024:
             return self._send(413, {"error": "lote grande demais"})
         body = self.rfile.read(n).decode("utf-8", "replace")
+        if u.path == "/api/ingest/gnb-ctl":
+            if not GNBCTL:
+                return self._send(404, {"error": "controle do gNB desligado"})
+            try:
+                d = json.loads(body)
+            except ValueError:
+                return self._send(400, {"error": "JSON inválido"})
+            cmd = GNBCTL.push(d.get("status"), d.get("result"))
+            return self._send(200, {"ok": True, "command": cmd})
         if u.path == "/api/ingest/ru":
             if not RU:
                 return self._send(404, {"error": "aba RU desligada (RU_NAME vazio)"})

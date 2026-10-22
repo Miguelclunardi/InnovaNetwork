@@ -6,18 +6,23 @@
 #  e pingando o UPF e, se não estiverem, reinicia em ordem os UEs e depois
 #  UPF -> SMF -> gNB -> UEs (refaz a associação PFCP/N4 e o NG Setup).
 #
-#  Uso:  ./scripts/heal.sh          (usa sudo automaticamente se precisar)
-#        ./scripts/heal.sh --boot   (modo da unit open5gs-k3s-heal: espera até 15 min)
+#  Uso:  ./scripts/heal.sh             (usa sudo automaticamente se precisar)
+#        ./scripts/heal.sh --boot      (modo da unit open5gs-k3s-heal: espera até 15 min)
+#        ./scripts/heal.sh --boot-off  (CORE_AUTOSTART=false: no boot PARA o core e o
+#                                       UERANSIM — escala 0; o painel continua; inicia-se
+#                                       pela aba Controle, que sobe tudo em ordem)
 #  Código de saída: 0 = plano de usuário OK, 1 = não recuperou.
 # =============================================================================
 set -Eeuo pipefail
 source "$(dirname "$(readlink -f "$0")")/lib/common.sh"
 
 BOOT=false
+OFF=false
 for a in "$@"; do
   case "$a" in
     --boot) BOOT=true ;;
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --boot-off) BOOT=true; OFF=true ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "opção desconhecida: $a" ;;
   esac
 done
@@ -32,8 +37,19 @@ t=0
 until k3s_ready; do (( t += 5 )); (( t < wait_s )) || die "k3s não respondeu em ${wait_s}s"; sleep 5; done
 ok "API do k3s pronta"
 
-step "Aguardando os pods de ${K8S_NAMESPACE}"
 kc get ns "${K8S_NAMESPACE}" &>/dev/null || { info "namespace ${K8S_NAMESPACE} não existe; nada a fazer"; exit 0; }
+if ${OFF}; then
+  step "Parando o core e o UERANSIM (CORE_AUTOSTART=false)"
+  deps=$(kc -n "${K8S_NAMESPACE}" get deploy -o name | grep -v '^deployment.apps/dashboard$' || true)
+  if [[ -n "${deps}" ]]; then
+    # shellcheck disable=SC2086
+    kc -n "${K8S_NAMESPACE}" scale --replicas=0 ${deps} >/dev/null
+    ok "$(wc -w <<<"${deps}") deployment(s) em 0; inicie pela aba Controle do painel"
+  fi
+  exit 0
+fi
+
+step "Aguardando os pods de ${K8S_NAMESPACE}"
 # No boot os pods antigos ainda aparecem por alguns segundos antes de serem recriados
 ${BOOT} && sleep 30
 if kc -n "${K8S_NAMESPACE}" wait --for=condition=Ready pod --all --timeout="${wait_s}s" >/dev/null 2>&1; then

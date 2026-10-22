@@ -140,6 +140,11 @@ Documentação do projeto: **português**.
       (`state/ru-credentials`), nunca no `config.env`/git. IP extra `/24` na interface do core (nunca `/8`: cobriria a
       fibra e o k3s). Escolhido CLI em vez de NETCONF (porta 830 aberta) porque a CLI já dá estado, PM e
       configuração, sem biblioteca nova;
+    - **aba Controle** (v1.3): iniciar/parar/reiniciar por função, "Iniciar tudo" em ordem com conferência e
+      recriação de pod sem `net1`; no boot só o painel (`CORE_AUTOSTART=false`, `heal.sh --boot-off`). gNB OCUDU
+      por serviço `ocudu-gnb@<yml>` + regra polkit só para essas units (o usuário não quer sudo sem senha);
+      escolha do usuário: o serviço roda binário e `.yml` direto da home (sem cópia do root) e não prepara a
+      máquina (interface/DPDK/XDP/PTP continuam manuais);
     - **energia** do innovaserver pelo medidor MiEnergy: o painel lê `http://IP/Data` direto (sem InfluxDB/Grafana do
       projeto original). Pendente: o medidor ficar alcançável a partir do torre2 (`ENERGY_METER_URL`).
 
@@ -179,3 +184,6 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   só o painel. O painel ganha iniciar/parar/reiniciar por função e "iniciar core inteiro" em ordem (em andamento).
 - 2026-10-22: RU LiteOn ligada no switch (gestão 10.101.131.59). Painel **v1.2** com a aba RU (estado, potência,
   temperatura, fronthaul, configuração; só leitura) e a RU no histórico/experimentos.
+- 2026-10-22: painel **v1.3** com a aba Controle (core, UERANSIM e gNB OCUDU). Testado o "Iniciar tudo" com tudo
+  rodando (só confere, nada reiniciado). Falta: instalar o serviço do gNB no innovaserver (sudo lá) e o
+  `--dashboard-only`.

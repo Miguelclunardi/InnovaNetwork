@@ -22,6 +22,7 @@ NETIF_UNIT_FILE="/etc/systemd/system/open5gs-k3s-netif.service"   # interface es
 K3S_DROPIN_FILE="/etc/systemd/system/k3s.service.d/10-open5gs-k3s-netif.conf"
 HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"
 GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # log do gNB -> painel
+GNBCTL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-ctl.service"     # painel -> iniciar/parar gNB OCUDU
 HOSTS_UNIT_FILE="/etc/systemd/system/open5gs-k3s-hosts.service"        # outras máquinas -> painel
 RU_UNIT_FILE="/etc/systemd/system/open5gs-k3s-ru.service"              # RU (porta de gestão) -> painel
 DASHBOARD_DATA_DIR="/var/lib/open5gs-k3s/dashboard"   # histórico persistente do painel (fora do INSTALL_DIR)
@@ -105,6 +106,7 @@ load_config() {
   : "${DASHBOARD_PERSIST:=false}" "${DASHBOARD_PERSIST_DAYS:=365}" "${DASHBOARD_PERSIST_MAX_GB:=50}"
   : "${DASHBOARD_CONFIG_EDIT:=false}" "${DASHBOARD_ADMIN_PASSWORD:=}" "${DASHBOARD_CONFIG_GID:=}"
   : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}" "${ENERGY_METER_URL:=}" "${ENERGY_METER_HOST:=}"
+  : "${DASHBOARD_CONTROL:=false}" "${GNB_CTL_SSH:=}" "${GNB_CTL_DIR:=}" "${CORE_AUTOSTART:=true}"
   : "${RU_MGMT_IP:=}" "${RU_NAME:=RU}" "${RU_SSH_USER:=user}" "${RU_MGMT_IFACE:=}" "${RU_MGMT_LOCAL_CIDR:=}" "${RU_POLL_SECONDS:=10}"
 
   CHARTS_DIR="${INSTALL_DIR}/5g-charts"
@@ -250,6 +252,13 @@ validate_config() {
     [[ "${DASHBOARD_PERSIST_MAX_GB}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_MAX_GB deve ser um número de GB (0 = sem limite)"
     [[ -z "${ENERGY_METER_URL}" || "${ENERGY_METER_URL}" =~ ^https?://[^[:space:]]+$ ]] \
       || bad "ENERGY_METER_URL deve ser http://IP/Data"
+    if is_true "${DASHBOARD_CONTROL}" && ! is_true "${DASHBOARD_CONFIG_EDIT}"; then
+      bad "DASHBOARD_CONTROL=true precisa de DASHBOARD_CONFIG_EDIT=true (usa a mesma senha de administrador)"
+    fi
+    if [[ -n "${GNB_CTL_SSH}" ]]; then
+      [[ "${GNB_CTL_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_CTL_SSH: use usuario@host"
+      [[ "${GNB_CTL_DIR}" =~ ^/[A-Za-z0-9/_.-]+$ ]] || bad "GNB_CTL_DIR deve ser um caminho absoluto (pasta do OCUDU)"
+    fi
     if [[ -n "${RU_MGMT_IP}" ]]; then
       valid_ipv4 "${RU_MGMT_IP}" || bad "RU_MGMT_IP inválido"
       [[ "${RU_SSH_USER}" =~ ^[A-Za-z0-9._-]+$ ]] || bad "RU_SSH_USER inválido"
@@ -635,14 +644,14 @@ render_dashboard() {
     hist_vol="
         - {name: history, hostPath: {path: $(_q "${DASHBOARD_DATA_DIR}"), type: Directory}}"
   fi
-  for f in server.py configedit.py history.py history.js settings.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
+  for f in server.py configedit.py control.py history.py history.js settings.js control.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_CONTROL}" "${GNB_CTL_SSH}" "${AMF_N2_IP}" "${UPF_N3_IP}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
@@ -674,6 +683,37 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+---
+# Aba Controle (DASHBOARD_CONTROL): escalar Deployments e apagar pods. Vazio quando desligada.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dashboard-control
+  namespace: ${K8S_NAMESPACE}
+rules:$(is_true "${DASHBOARD_CONTROL}" && printf '%s' "
+  - apiGroups: [\"apps\"]
+    resources: [\"deployments\"]
+    verbs: [\"get\", \"list\", \"watch\"]
+  - apiGroups: [\"apps\"]
+    resources: [\"deployments/scale\"]
+    verbs: [\"get\", \"patch\", \"update\"]
+  - apiGroups: [\"\"]
+    resources: [\"pods\"]
+    verbs: [\"delete\"]" || printf ' []')
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dashboard-control
+  namespace: ${K8S_NAMESPACE}
+subjects:
+  - kind: ServiceAccount
+    name: dashboard
+    namespace: ${K8S_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dashboard-control
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -738,6 +778,11 @@ spec:
             - {name: WEBUI_PORT, value: $(_q "$(is_true "${WEBUI_ENABLED}" && echo "${WEBUI_NODEPORT}" || true)")}
             - {name: ENERGY_METER_URL, value: $(_q "${ENERGY_METER_URL}")}
             - {name: ENERGY_METER_HOST, value: $(_q "${ENERGY_METER_HOST}")}
+            - {name: CONTROL, value: $(_q "$(is_true "${DASHBOARD_CONTROL}" && echo true || echo false)")}
+            - {name: UERANSIM_RELEASE, value: $(_q "${UERANSIM_RELEASE}")}
+            - {name: RAN_AMF_IP, value: $(_q "$(is_true "${RAN_LINK_ENABLED}" && echo "${AMF_N2_IP}" || true)")}
+            - {name: RAN_UPF_IP, value: $(_q "$(is_true "${RAN_LINK_ENABLED}" && echo "${UPF_N3_IP}" || true)")}
+            - {name: GNB_CTL_TARGET, value: $(_q "$(is_true "${DASHBOARD_CONTROL}" && echo "${GNB_CTL_SSH}" || true)")}
             - {name: RU_NAME, value: $(_q "$([[ -n "${RU_MGMT_IP}" ]] && echo "${RU_NAME}" || true)")}
             - {name: RU_ADDR, value: $(_q "${RU_MGMT_IP}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
