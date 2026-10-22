@@ -201,3 +201,10 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   - painel com o conceito de **core ativo** (adaptador por core; as abas mostram só o core ativo; Rádio, RU,
     Máquinas e Histórico não mudam; cada experimento registra o core). Protótipo aprovado pelo usuário;
   - nomes técnicos instalados (`open5gs-k3s-*`, `/opt/open5gs-k3s`) só migram numa janela combinada.
+- 2026-10-22: **free5GC — fase 1** (branch `free5gc`, pasta `free5gc/`, ver `free5gc/README.md`): v4.3.0 com
+  manifestos gerados pelo nosso `render.py` a partir dos configs oficiais (o chart free5gc-helm 4.2.2 fixa PLMN,
+  slices e IPs nos templates e o modo multus dele põe rota padrão na fibra). Mesmo desenho de rede do Open5GS:
+  só N2 (AMF 10.10.0.30) e N3 (UPF 10.10.0.31) na fibra; pools 10.60/16 e 10.61/16; WebConsole NodePort 31000;
+  PKI de teste própria fora do git. Instala como usuário comum; só o `gtp5g` (DKMS, v0.10.3) pede sudo.
+  Validado no cluster: as 11 funções do plano de controle sobem, AMF escuta em 10.10.0.30:38412, cadastro pela
+  API ok. Falta: gtp5g carregado → UPF/SMF → UERANSIM → ping; depois `.yml` do OCUDU e importação dos SIMs.
