@@ -230,7 +230,8 @@ pela aba Controle. Um `sudo ./install.sh` ou `--deploy-only` volta a subir tudo 
 
 **gNB OCUDU** (`GNB_CTL_SSH`, `GNB_CTL_DIR`):
 - No host do gNB, **uma vez, com sudo**: `scripts/ocudu/setup-gnb-service.sh` cria
-  `ocudu-gnb@<arquivo>.service` (roda `taskset -c 0-17 build/apps/gnb/gnb -c configs/<arquivo>.yml` a partir da
+  `ocudu-gnb@<arquivo>.service` (roda `taskset -c 0-17 build/apps/gnb/gnb -c configs/<arquivo>.yml -c configs/metricas.yml`
+  — o 2º só se existir; é ele que liga as métricas na porta 8001 que o painel lê — a partir da
   pasta do OCUDU do usuário; parar = SIGINT, como Ctrl+C) e uma regra do **polkit** que deixa só esse usuário
   iniciar/parar/reiniciar essas units — sem sudo sem senha.
   ```bash
