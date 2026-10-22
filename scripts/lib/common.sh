@@ -654,7 +654,8 @@ render_dashboard() {
          "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_CONTROL}" "${GNB_CTL_SSH}" "${AMF_N2_IP}" "${UPF_N3_IP}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
-    printf '%s\n' "${cm}" | sed '/creationTimestamp/d'
+    # só o campo vazio gerado pelo kubectl (não linhas dos arquivos do painel que citem a palavra)
+    printf '%s\n' "${cm}" | sed '/^  creationTimestamp: null$/d'
     cat <<EOF
 ---
 apiVersion: v1
