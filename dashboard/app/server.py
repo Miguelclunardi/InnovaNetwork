@@ -63,7 +63,7 @@ CORE_METRICS = _env("CORE_METRICS", "false").lower() in ("1", "true", "yes", "si
 CORE_METRICS_PORT = int(_env("CORE_METRICS_PORT", "9090"))
 CORE_POLL_SECONDS = float(_env("CORE_POLL_SECONDS", "5"))
 OPEN5GS_RELEASE = _env("OPEN5GS_RELEASE", "open5gs")
-VERSION = "1.3"
+VERSION = "1.4"
 PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usuário: admin)
 INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
 # Aba Configuração (editar o config.env). Vazio = aba desligada.
