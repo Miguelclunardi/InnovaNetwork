@@ -21,9 +21,9 @@ step "free5GC (${NS})"
 notready=$(kubectl -n "${NS}" get pods --no-headers 2>/dev/null | awk '{split($2, r, "/"); if (r[1] != r[2] || $3 != "Running") print $1}' | paste -sd' ')
 total=$(kubectl -n "${NS}" get pods --no-headers 2>/dev/null | wc -l)
 [[ ${total} -gt 0 && -z "${notready}" ]] && pass "${total} pods prontos" || fail "pods não prontos: ${notready:-nenhum pod}"
-kubectl -n "${NS}" logs deploy/amf --tail=-1 2>/dev/null | grep -q "ngap_server\|NGAP server\|Listen on ${F5_AMF_N2_IP}" \
+grep -q "ngap_server\|NGAP server\|Listen on ${F5_AMF_N2_IP}"  <<<"$(kubectl -n "${NS}" logs deploy/amf --tail=-1 2>/dev/null)" \
   && pass "AMF escutando N2 em ${F5_AMF_N2_IP}" || true
-kubectl -n "${NS}" logs deploy/smf --tail=-1 2>/dev/null | grep -qi "association.*\(setup\|success\)" \
+grep -qi "association.*\(setup\|success\)"  <<<"$(kubectl -n "${NS}" logs deploy/smf --tail=-1 2>/dev/null)" \
   && pass "SMF associado ao UPF (PFCP)" || fail "SMF sem associação PFCP com o UPF"
 kubectl -n "${NS}" logs "deploy/${REL}" --tail=-1 2>/dev/null | grep -q "NG Setup procedure is successful" \
   && pass "gNB simulado: NG Setup ok" || fail "gNB simulado sem NG Setup"

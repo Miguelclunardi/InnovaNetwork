@@ -210,4 +210,6 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   só N2 (AMF 10.10.0.30) e N3 (UPF 10.10.0.31) na fibra; pools 10.60/16 e 10.61/16; WebConsole NodePort 31000;
   PKI de teste própria fora do git. Instala como usuário comum; só o `gtp5g` (DKMS, v0.10.3) pede sudo.
   Validado no cluster: as 11 funções do plano de controle sobem, AMF escuta em 10.10.0.30:38412, cadastro pela
-  API ok. Falta: gtp5g carregado → UPF/SMF → UERANSIM → ping; depois `.yml` do OCUDU e importação dos SIMs.
+  API ok. **Validado ponta a ponta (2026-10-22)**: gtp5g **0.10.2** (o UPF 4.3.0 só aceita 0.9.3 ≤ v < 0.10.3),
+  PFCP SMF↔UPF, NG Setup do gNB simulado, sessão PDU (10.60.0.1) e ping 8.8.8.8 — `free5gc/test.sh` 6/6.
+  SIMs do Open5GS importados (`--importar-open5gs`, 7 IMSIs). Falta: `.yml` do OCUDU (AMF .30) e o painel “core ativo”.
