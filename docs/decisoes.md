@@ -29,7 +29,7 @@ Documentação do projeto: **português**.
 3. **Ubuntu Server `torre2`: migrado e validado em 2026-10-20** (`./test.sh` 7/7, ping 8.8.8.8 a ~19 ms; units netif e heal habilitadas):
    - acesso do desktop por SSH com chave: `Host torre2` em `~/.ssh/config` (usuário `torre2`; IP por DHCP,
      hoje 191.4.205.114 — atualizar `HostName` quando mudar);
-   - **o servidor é o ambiente principal** (decisão do usuário, 2026-10-20): edita-se direto em `torre2:~/open5GK3S`,
+   - **o servidor é o ambiente principal** (decisão do usuário, 2026-10-20): edita-se direto em `torre2:~/InnovaNetwork`,
      aplica-se com `sudo ./install.sh`, testa-se com `./test.sh` e **o git vai do servidor para o GitHub**
      (`git commit` + `git push` no servidor). O clone do desktop vira cópia: `git pull` antes de mexer nele;
    - push pelo servidor com **deploy key de leitura e escrita** só deste repositório (`~/.ssh/github-open5gk3s`,
@@ -201,6 +201,7 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   - painel com o conceito de **core ativo** (adaptador por core; as abas mostram só o core ativo; Rádio, RU,
     Máquinas e Histórico não mudam; cada experimento registra o core). Protótipo aprovado pelo usuário;
   - nomes técnicos instalados (`open5gs-k3s-*`, `/opt/open5gs-k3s`) só migram numa janela combinada.
+  - 2026-10-22: a pasta do projeto no torre2 passou a ser `~/InnovaNetwork` (era `~/open5GK3S`).
 - 2026-10-22: **free5GC — fase 1** (branch `innovanetwork` = projeto completo, pasta `free5gc/`, ver `free5gc/README.md`): v4.3.0 com
   manifestos gerados pelo nosso `render.py` a partir dos configs oficiais (o chart free5gc-helm 4.2.2 fixa PLMN,
   slices e IPs nos templates e o modo multus dele põe rota padrão na fibra). Mesmo desenho de rede do Open5GS:
