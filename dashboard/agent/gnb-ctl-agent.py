@@ -40,8 +40,14 @@ def sh(*a):
         return subprocess.run(a, capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return ""
+def polkit_rule():
+    # rules.d costuma ser root:polkitd 0750: um usuário comum não lista -> desconhecido (None), não "falta"
+    try:
+        return "50-ocudu-gnb.rules" in os.listdir("/etc/polkit-1/rules.d")
+    except OSError:
+        return None
 out = {"dir": D, "unit_installed": os.path.exists("/etc/systemd/system/ocudu-gnb@.service"),
-       "polkit": os.path.exists("/etc/polkit-1/rules.d/50-ocudu-gnb.rules"),
+       "polkit": polkit_rule(),
        "gnb_bin": os.path.exists(os.path.join(D, "build/apps/gnb/gnb"))}
 b = os.path.join(D, "build/apps/gnb/gnb")
 out["gnb_bin_mtime"] = os.path.getmtime(b) if os.path.exists(b) else None

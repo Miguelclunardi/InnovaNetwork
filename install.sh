@@ -562,7 +562,7 @@ EOU
   fi
   systemctl enable open5gs-k3s-gnb-ctl.service >/dev/null 2>&1
   systemctl restart open5gs-k3s-gnb-ctl.service
-  if su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${GNB_CTL_SSH} test -f /etc/polkit-1/rules.d/50-ocudu-gnb.rules" &>/dev/null; then
+  if su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${GNB_CTL_SSH} test -f /etc/systemd/system/ocudu-gnb@.service" &>/dev/null; then
     ok "aba Controle: gNB OCUDU controlável (${GNB_CTL_SSH}; journalctl -u open5gs-k3s-gnb-ctl)"
   else
     warn "aba Controle: falta instalar o serviço do gNB no host do gNB (uma vez, com sudo lá):"
