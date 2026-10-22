@@ -190,3 +190,14 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   `configs/metricas.yml` como 2º `-c` (como o usuário rodava à mão; liga as métricas na porta 8001 do painel; o
   arquivo não é alterado). Abas: Visão geral, Controle, Rádio, Core, RU, Logs, Máquinas, Histórico, Configuração.
   Tags `v1.2-dashboard` (8b8c9ed, aba RU) e `v1.3-dashboard` (aba Controle).
+- 2026-10-22 (noite): painel **v1.4** — logotipo oficial da Innova, abas na ordem Visão geral, Controle, Rádio, Core,
+  RU, Logs, Máquinas, Histórico, Configuração; título maior sem o nome da rede. Tag `v1.4-dashboard` = estado
+  estável de referência (Open5GS + OCUDU + RU + painel).
+- **Próxima fase (decidida em 2026-10-22):**
+  - o projeto completo passa a se chamar **InnovaNetwork** (repositório novo); **Open5GK3S** fica sendo só o
+    core Open5GS + UERANSIM (setor 1, `v1.0-ueransim`);
+  - segundo core: **free5GC** (versão mais nova) no mesmo k3s do torre2, namespace próprio, pasta e config
+    próprios; **um core por vez**, trocado pela aba Controle; também com o OCUDU (`.yml` próprio, AMF na fibra);
+  - painel com o conceito de **core ativo** (adaptador por core; as abas mostram só o core ativo; Rádio, RU,
+    Máquinas e Histórico não mudam; cada experimento registra o core). Protótipo aprovado pelo usuário;
+  - nomes técnicos instalados (`open5gs-k3s-*`, `/opt/open5gs-k3s`) só migram numa janela combinada.
