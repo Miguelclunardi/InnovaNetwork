@@ -172,6 +172,11 @@ if ! ${NO_UERANSIM} && is_true "${F5_DEPLOY_UERANSIM}"; then
   "${HELM}" upgrade --install "${F5_UERANSIM_RELEASE}" "${CHARTS_DIR}/charts/ueransim-gnb" -n "${NS}" \
     -f "${OUT}/ueransim-values.json" --post-renderer "${PROJECT_DIR}/helm/postrender/drop-gnb-hpa.sh" \
     --wait --timeout 10m >/dev/null || die "UERANSIM do free5GC falhou (kubectl -n ${NS} get pods)"
+  # helm não mexe em réplicas que alguém zerou (core parado): volta o gNB e depois os UEs
+  for d in "${F5_UERANSIM_RELEASE}" "${F5_UERANSIM_RELEASE}-ues"; do
+    k -n "${NS}" scale deploy "${d}" --replicas=1 >/dev/null 2>&1 || continue
+    k -n "${NS}" rollout status deploy "${d}" --timeout=180s >/dev/null || die "${d} não subiu"
+  done
   ok "UERANSIM no ar (teste: ./free5gc/test.sh)"
 fi
 
