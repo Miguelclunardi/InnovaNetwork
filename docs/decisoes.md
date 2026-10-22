@@ -212,4 +212,7 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   Validado no cluster: as 11 funções do plano de controle sobem, AMF escuta em 10.10.0.30:38412, cadastro pela
   API ok. **Validado ponta a ponta (2026-10-22)**: gtp5g **0.10.2** (o UPF 4.3.0 só aceita 0.9.3 ≤ v < 0.10.3),
   PFCP SMF↔UPF, NG Setup do gNB simulado, sessão PDU (10.60.0.1) e ping 8.8.8.8 — `free5gc/test.sh` 6/6.
-  SIMs do Open5GS importados (`--importar-open5gs`, 7 IMSIs). Falta: `.yml` do OCUDU (AMF .30) e o painel “core ativo”.
+  SIMs do Open5GS importados (`--importar-open5gs`, 7 IMSIs). Celulares reais com OCUDU + LiteOn (`configs/gnb_ru_liteon_FREE5GC.yml` no innovaserver, só o AMF muda):
+  slice 1 ok com internet, depois de anunciar voz IMS e criar a DNN `ims`. Slice 2: limitação do free5GC
+  (sem S-NSSAI no pedido usa a 1ª slice permitida) — **decisão do usuário: deixar como está** (ver free5gc/README.md).
+  Nomes das redes: InnovaOpen5GS (config.env, vale após `--deploy-only`) e InnovaFree5GC. Falta: painel “core ativo”.

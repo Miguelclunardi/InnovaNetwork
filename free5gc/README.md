@@ -50,6 +50,19 @@ dos pools para a internet pelo `eth0` do pod.
 Um `.yml` próprio, cópia do que usa o Open5GS com o AMF trocado (`cu_cp.amf.addr: 10.10.0.30`), por exemplo
 `configs/gnb_ru_liteon_FREE5GC.yml`. O N3 do gNB continua `10.10.0.1`. Iniciar pela aba Controle.
 
+## Celulares comerciais (validado 2026-10-22, OCUDU + LiteOn)
+
+- Funciona na **slice 1**: registro, sessões `internet` (10.60/16) e `ims` (10.62/16), internet ok.
+- Precisa de **voz IMS anunciada** (`imsVoPS: 1`) e da DNN **`ims`** (`F5_EXTRA_DNNS`): sem isso o celular
+  registra e sai da célula ~1 s depois (celular de voz desliga o 5G quando a rede diz que não tem voz).
+- **Limitação do free5GC (slice 2):** quando o celular pede sessão **sem informar a S-NSSAI**, o AMF usa sempre a
+  primeira slice permitida (`allowedNssai[0]`, `internal/gmm/handler.go`), sem olhar a DNN. Um celular que pede
+  `internet2` sem slice cai na slice 1 e é recusado (403 / "DNN not matched"). O Open5GS escolhe a slice pela DNN,
+  por isso lá funciona. Decisão: manter o free5GC original; slice 2 só com UE que informa a slice (UERANSIM,
+  celular com URSP/slice configurada).
+- O gNB OCUDU não reconecta sozinho se o AMF reiniciar: reinicie o gNB (aba Controle).
+- O nome da rede só aparece no celular depois do registro; na busca manual aparece o nome antigo/do chip.
+
 ## Remover
 
 `./free5gc/uninstall.sh` apaga só o namespace `free5gc` (inclusive os assinantes dele). O módulo:
