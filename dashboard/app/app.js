@@ -1,4 +1,4 @@
-/* Innova Center Dashboard — open5GK3S (sem dependências além do uPlot) */
+/* Innova Center Dashboard — InnovaNetwork (sem dependências além do uPlot) */
 "use strict";
 
 // ---------------------------------------------------------------------------
@@ -21,11 +21,18 @@ const NF_INFO = {
   udm: ["UDM", "dados de assinante"], udr: ["UDR", "repositório de dados"], pcf: ["PCF", "políticas"],
   bsf: ["BSF", "vínculo de sessões"], nssf: ["NSSF", "seleção de slice"], mongodb: ["MongoDB", "banco de assinantes"],
   webui: ["WebUI", "cadastro de assinantes"], populate: ["Populate", "cadastro inicial"],
+  chf: ["CHF", "tarifação"], nef: ["NEF", "exposição de rede"],
   gnb: ["gNB simulado", "UERANSIM"], ues: ["UEs simulados", "UERANSIM"], dashboard: ["Painel", "este site"],
 };
 function nfInfo(p) {
   const k = (p.label || p.component || "").toLowerCase();
+  if (k === "webui" && CONFIG.core_kind === "free5gc") return ["WebConsole", "cadastro de assinantes"];
   return NF_INFO[k] || [p.label || p.component || p.name, ""];
+}
+// Nome do core ativo nos textos (troca quando o core ativo muda)
+function paintCore() {
+  $$(".core-name").forEach((e) => (e.textContent = CONFIG.core_name || "Open5GS"));
+  document.body.dataset.core = CONFIG.core || "open5gs";
 }
 
 // Identificação do UE no rádio: nome / IMSI / IP (o gNB só conhece o RNTI)
@@ -222,6 +229,7 @@ async function refreshNow() {
       else if (currentTab === "control") await Control.refresh();
       else if (currentTab === "settings") await Settings.refresh();
       else if (currentTab === "history") await Hist.refresh();
+      else if (currentTab === "docs") await Docs.refresh();
       else if (currentTab === "logs" && Logs.src === null) Logs.renderSources();
     }
     banner(null);
@@ -242,7 +250,10 @@ function updatePills(ov) {
   } else { pg.className = "pill err"; pg.textContent = "gNB sem dados"; pg.title = g.error || ""; }
   const c = ov.core;
   const pc = $("#pill-core");
-  pc.textContent = `core ${c.pods_ready}/${c.pods_total}`;
+  pc.textContent = `${ov.core_name || "core"} ${c.pods_ready}/${c.pods_total}`;
+  pc.title = "Pods do core ativo (" + (ov.core_name || "") + ")";
+  // o core ativo mudou (troca pela aba Controle ou por fora): recarrega a configuração e os textos
+  if (ov.core_active && CONFIG.core && ov.core_active !== CONFIG.core) reloadConfig();
   pc.className = "pill " + (c.pods_error ? "err" : c.pods_ready === c.pods_total && c.pods_total ? "ok" : "warn");
   const r = ov.ru;
   const pr = $("#pill-ru");
@@ -283,7 +294,9 @@ const Overview = {
       { l: "gNBs no AMF (N2)", v: c.nof_gnbs ?? "–", s: (c.gnbs || []).map((g) => g.addr).join(", ") || "–" },
       { l: "UEs registrados", v: regs, s: `${c.ues.filter((u) => u.registered && u.kind === "real").length} real(is) · ${c.ues.filter((u) => u.registered && u.kind === "ueransim").length} simulado(s) · ${c.sessions.length} sessões` },
       { l: "Pods do core", v: `${c.pods_ready}/${c.pods_total}`, s: `${c.restarts} reinício(s) no total`, c: c.pods_ready === c.pods_total ? "ok" : "warn" },
-      { l: "Erros PFCP (UPF)", v: c.counters.pfcp_cannot_find || 0, s: "Cannot find PFCP-Node", c: c.counters.pfcp_cannot_find ? "err" : "ok" },
+      CONFIG.core_kind === "free5gc"
+        ? { l: "Sessões recusadas (SMF)", v: c.counters.dnn_not_subscribed || 0, s: "DNN/slice fora da configuração", c: c.counters.dnn_not_subscribed ? "warn" : "ok" }
+        : { l: "Erros PFCP (UPF)", v: c.counters.pfcp_cannot_find || 0, s: "Cannot find PFCP-Node", c: c.counters.pfcp_cannot_find ? "err" : "ok" },
     ];
     $("#kpis").innerHTML = k.map((x) => `<div class="kpi ${x.c || ""}"><div class="label">${esc(x.l)}</div>
       <div class="value">${esc(x.v)}</div><div class="sub">${esc(x.s)}</div></div>`).join("");
@@ -468,9 +481,9 @@ const Logs = {
   },
   renderSources() {
     const pods = (LAST_OVERVIEW && LAST_OVERVIEW.pods) || [];
-    const core = pods.filter((p) => p.instance === CONFIG.release);
+    const core = pods.filter((p) => (p.group || "core") === "core");
     const groups = {};
-    pods.filter((p) => p.instance !== CONFIG.release).forEach((p) => (groups[p.instance || "outros"] ||= []).push(p));
+    pods.filter((p) => (p.group || "core") !== "core").forEach((p) => (groups[p.instance || "outros"] ||= []).push(p));
     const item = (p, c) => {
       const nm = nfInfo(p)[0];
       const label = p.containers.length > 1 ? `${nm} · ${c}` : nm;
@@ -484,7 +497,7 @@ const Logs = {
     const gdot = g && g.last_push && Date.now() / 1000 - g.last_push < 30 ? "ok" : "";
     $("#log-sources").innerHTML =
       `<div class="grp">RAN</div><button class="src ${gnbAct}" data-gnb="1"><span>${esc(CONFIG.gnb_name || "gNB")} (real)</span><span class="dot ${gdot}"></span></button>` +
-      `<div class="grp">Core 5G (Open5GS)</div>` + core.flatMap((p) => p.containers.map((c) => item(p, c))).join("") +
+      `<div class="grp">Core 5G (${esc(CONFIG.core_name || "Open5GS")})</div>` + core.flatMap((p) => p.containers.map((c) => item(p, c))).join("") +
       Object.entries(groups).map(([g, ps]) => `<div class="grp">${esc(g === "ueransim" ? "UERANSIM (simulador)" : g)}</div>` + ps.flatMap((p) => p.containers.map((c) => item(p, c))).join("")).join("");
     $$("#log-sources .src").forEach((b) => b.addEventListener("click", () => {
       if (b.dataset.gnb) this.open({ kind: "gnb", label: (CONFIG.gnb_name || "gNB") + " (real)" });
@@ -516,7 +529,7 @@ const Logs = {
       this.add(d.lines);
       return;
     }
-    const q = `pod=${encodeURIComponent(src.pod)}&container=${encodeURIComponent(src.container)}&tail=${tail}`;
+    const q = `pod=${encodeURIComponent(src.pod)}&container=${encodeURIComponent(src.container)}&tail=${tail}&core=${encodeURIComponent(CONFIG.core || "")}`;
     if ($("#log-follow").checked) return this.follow("api/logs/stream?" + q);
     try {
       const d = await api("api/logs?" + q);
@@ -569,6 +582,8 @@ const Logs = {
     if (m) {
       rest = m[2];
       // Se a linha já tem horário próprio (Open5GS: "10/21 19:02:13.271:"), não repete o do Kubernetes
+      // free5GC: "2026-10-22T20:25:09.5Z [INFO]..." (também já tem horário)
+      if (/^\d{4}-\d\d-\d\dT[\d:.]+Z /.test(rest)) rest = rest.replace(/^\S+ /, "");
       if (!/^\d\d\/\d\d \d\d:\d\d:\d\d/.test(rest)) ts = new Date(m[1]).toLocaleTimeString("pt-BR", { hour12: false }) + "." + (m[1].split(".")[1] || "000").slice(0, 3) + " ";
     }
     let body = esc(rest);
@@ -624,7 +639,7 @@ $("#log-reload").addEventListener("click", () => Logs.src && Logs.open(Logs.src)
 $("#log-download").addEventListener("click", () => Logs.download());
 
 // ---------------------------------------------------------------------------
-//  Core (métricas Prometheus do Open5GS)
+//  Core (processos e tráfego do core ativo; Prometheus só no Open5GS)
 // ---------------------------------------------------------------------------
 const Core = {
   view: "metrics",
@@ -648,7 +663,7 @@ const Core = {
     const mb = (v) => fmt(v, 1);
     const ifs = d.ifaces || [];
     const sum = (pred, k) => ifs.filter(pred).reduce((a, x) => a + (x[k] || 0), 0);
-    const n6 = (x) => x.iface.startsWith("ogstun");
+    const n6 = (x) => /^(ogstun|upfgtp)/.test(x.iface);
     const nfs = d.nfs || [];
     const cpuTot = nfs.reduce((a, x) => a + x.cpu, 0);
     const memTot = nfs.reduce((a, x) => a + x.rss, 0);
@@ -667,7 +682,7 @@ const Core = {
     $("#core-live-status").textContent = d.enabled === false ? "leitura do host desligada" : d.error ? "erro: " + d.error : "atualiza a cada 2 s · sem Prometheus, sem reiniciar o core";
     // N6 por DNN
     const tr = d.traffic || { t: [] };
-    const tuns = Object.keys(tr).filter((x) => x.startsWith("ogstun") && x.endsWith("_tx")).map((x) => x.slice(0, -3)).sort();
+    const tuns = Object.keys(tr).filter((x) => /^(ogstun|upfgtp)/.test(x) && x.endsWith("_tx")).map((x) => x.slice(0, -3)).sort();
     const dnn = (t) => (d.devs || {})[t] || t;
     const n6s = [];
     const n6cols = [tr.t];
@@ -705,7 +720,7 @@ const Core = {
     if (this.view === "webui") return;   // a WebUI se atualiza sozinha; não recarregar o iframe
     await this.live();
     const d = await api("api/core/metrics?window=" + $("#core-window").value);
-    $("#core-disabled").classList.toggle("hidden", d.enabled);
+    $("#core-disabled").classList.toggle("hidden", d.enabled || CONFIG.core_kind !== "open5gs");
     $("#core-enabled").classList.toggle("hidden", !d.enabled);
     if (!d.enabled) return;
     const nfs = d.nfs;
@@ -761,6 +776,19 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
   $("#ran-window").value = store.get("ran.window", "300");
   if (store.get("logs.wrap", false)) { $("#log-wrap").checked = true; $("#log-view").classList.add("wrap"); }
   try {
+    await reloadConfig(true);
+  } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
+  const start = (location.hash || "").slice(1) || store.get("tab", "overview");
+  showTab(["overview", "ran", "logs", "core", "ru", "control", "hosts", "history", "docs", "settings"].includes(start) ? start : "overview");
+  setInterval(refreshNow, 2000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
+})();
+// Configuração do painel; recarregada quando o core ativo muda (os textos e a WebUI acompanham)
+async function reloadConfig(first = false) {
+  if (reloadConfig._busy) return;
+  reloadConfig._busy = true;
+  try {
+    const prev = CONFIG.core;
     CONFIG = await api("api/config");
     $("#tabbtn-settings").classList.toggle("hidden", !CONFIG.config_edit);
     $("#core-seg-webui").classList.toggle("hidden", !CONFIG.webui_port);
@@ -768,16 +796,21 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     $("#tabbtn-ru").classList.toggle("hidden", !CONFIG.ru);
     $("#tabbtn-control").classList.toggle("hidden", !CONFIG.control);
     document.body.classList.toggle("no-ru", !CONFIG.ru);
-    Hist.refreshHeader();
-    if (CONFIG.webui_port && store.get("core.view", "metrics") === "webui") Core.setView("webui");
+    paintCore();
+    if (first) {
+      Hist.refreshHeader();
+      if (CONFIG.webui_port && store.get("core.view", "metrics") === "webui") Core.setView("webui");
+    } else if (prev && prev !== CONFIG.core) {
+      // outro core: a WebUI/WebConsole e a fonte de log mudam
+      $("#webui-frame").removeAttribute("src");
+      if (!CONFIG.webui_port) Core.setView("metrics");
+      else if (Core.view === "webui") $("#webui-frame").src = Core.webuiUrl();
+      if (Logs.src && Logs.src.kind === "pod") { Logs.stop(); Logs.src = null; store.set("logs.src", null); if (currentTab === "logs") Logs.ensureSources(); }
+    }
     $("#netname").textContent = CONFIG.network_name ? "· " + CONFIG.network_name : "";
-    $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · namespace ${CONFIG.namespace} · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
-  } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
-  const start = (location.hash || "").slice(1) || store.get("tab", "overview");
-  showTab(["overview", "ran", "logs", "core", "ru", "control", "hosts", "history", "settings"].includes(start) ? start : "overview");
-  setInterval(refreshNow, 2000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
-})();
+    $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · InnovaNetwork · core ativo: ${CONFIG.core_name} (namespace ${CONFIG.namespace}) · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
+  } finally { reloadConfig._busy = false; }
+}
 $("#ran-old").addEventListener("click", () => { Ran.showOld = !Ran.showOld; Ran.refresh(); });
 $$("#core-seg [data-view]").forEach((b) => b.addEventListener("click", () => Core.setView(b.dataset.view)));
 $("#webui-reload").addEventListener("click", () => { $("#webui-frame").src = Core.webuiUrl(); });

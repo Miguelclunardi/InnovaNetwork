@@ -1,9 +1,12 @@
-# Painel — Innova Center Dashboard (v1.4)
+# Painel — Innova Center Dashboard (v2.0)
 
-Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar:
+Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar o InnovaNetwork
+inteiro: rádio, RU, máquinas e **o core ativo** (Open5GS ou free5GC — ver [Core ativo](#core-ativo-open5gs--free5gc)).
 
 | Aba | O que mostra | De onde vem |
 |---|---|---|
+| **Documentação** | os documentos `.md` do projeto (README, `docs/`, `free5gc/`), com busca, a branch e o commit em uso e link para o GitHub | pasta do projeto montada só leitura no pod |
+
 | **Visão geral** | UEs no rádio (vazão, MCS, CQI, RI, BLER, SNR), assinantes vistos pelo core (registro, sessões DNN → IP), pods (estado, reinícios, IP, IP no link RAN), eventos do core (avisos/erros iguais agrupados com contador) | métricas do gNB + API do Kubernetes + logs do AMF/SMF/UPF |
 | **Rádio (gNB)** | UEs identificados por **nome, IMSI, IP e tipo** (SIM real / UERANSIM), não só RNTI; RNTIs parados há mais de 2 min ficam escondidos (botão "Mostrar antigos"); vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
@@ -16,6 +19,30 @@ Página web que roda **no próprio cluster do core** (máquina do core) e junta 
 
 Endereço: `http://<IP-do-core>:30998` (`DASHBOARD_NODEPORT`). Sem senha por padrão; com
 `DASHBOARD_PASSWORD`, o navegador pede usuário `admin` e a senha.
+
+### Login de administrador (um só para todas as abas)
+
+O botão **🔒 Admin** no topo abre o login. A sessão (8 h) vale para **todas as abas do painel** (Controle,
+Configuração) e para as outras abas/janelas do mesmo navegador (guardada no `localStorage`, sincronizada pelo
+evento `storage`). **🔓 Admin · Sair** encerra a sessão em todas. Se o painel reiniciar, as sessões caem e o
+botão volta a 🔒 sozinho (`GET /api/admin` confere o token ao abrir a página).
+
+### Core ativo (Open5GS / free5GC)
+
+O painel conhece os dois cores: o Open5GS (namespace do `config.env`) e, se `free5gc/free5gc.env` existir, o
+free5GC (o install passa `FREE5GC_NAMESPACE`, `FREE5GC_AMF_IP`, `FREE5GC_UPF_IP`, `FREE5GC_WEBUI_PORT`,
+`FREE5GC_NETWORK_NAME` e `FREE5GC_POOLS` ao pod). **Core ativo** = o único com AMF rodando; se os dois ou nenhum
+estiverem, vale o último escolhido (guardado em `core-ativo.json`, ao lado do histórico).
+
+- Todas as abas seguem o core ativo: pílula do topo com o nome do core, funções e logs (agrupados por core),
+  assinantes (WebUI do Open5GS ou WebConsole do free5GC), sessões, tráfego do UPF (`ogstun*` ou `upfgtp`).
+  Rádio, RU, Máquinas e Histórico não mudam; cada experimento registra o core.
+- Aba **Controle** → cartão **Core ativo** (só com os dois instalados): clicar no outro core abre a troca. O
+  painel para o gNB OCUDU (se pedido) → para o core atual → marca o novo → sobe o novo em ordem conferindo cada
+  etapa → religa o gNB com o `.yml` escolhido (só são oferecidos os que apontam para o AMF do novo core).
+- Permissões no namespace do free5GC: Role/RoleBinding `innovanetwork-dashboard` (criados pelo
+  `free5gc/install.sh`) para a ServiceAccount do painel — ler pods/logs, escalar Deployments, apagar pods.
+- Boot: `heal.sh --boot-off` também para todo namespace com o rótulo `innovanetwork/core`.
 
 **Nada roda na máquina do gNB.** O painel *puxa* as métricas do gNB pelo WebSocket, e o agente do log
 (também na máquina do core) lê o arquivo do gNB por SSH (`tail -F`, só leitura).
@@ -337,12 +364,17 @@ Liga com `DASHBOARD_CONFIG_EDIT=true` (padrão no config deste repositório) + `
 | Rota | Retorna |
 |---|---|
 | `GET /api/health` | `{"ok":true}` (sem senha; usado pelas probes) |
+| `GET /api/cores` | cores conhecidos, qual está ativo e rodando |
+| `GET /api/admin` | `{"enabled":…,"admin":…}` — a sessão do cabeçalho `X-Admin-Token` ainda vale? |
+| `POST /api/admin/login` · `/api/admin/logout` | `{"password":…}` → `{"token":…,"ttl":28800}` |
+| `POST /api/control` | (admin) `{"action":"start|stop|restart","target":…}` · `{"action":"switch","core":"open5gs|free5gc","gnb":true,"config":"<yml>"}` |
+| `GET /api/docs` · `GET /api/docs/file?path=` | lista dos `.md` + git (branch, commit, repositório) · conteúdo de um `.md` do projeto |
 | `GET /api/overview` | resumo usado pela Visão geral |
 | `GET /api/ran?window=300` | séries por UE, célula e DU |
 | `GET /api/ran.csv?window=900` | CSV por UE (UTC) |
 | `GET /api/core` | pods, gNBs N2, UEs, sessões, eventos, contadores |
 | `GET /api/core/metrics?window=300` | métricas Prometheus dos NFs |
-| `GET /api/logs?pod=&container=&tail=` | log de um pod |
+| `GET /api/logs?pod=&container=&tail=&core=` | log de um pod (do core indicado; padrão: o ativo) |
 | `GET /api/logs/stream?pod=&container=` | log ao vivo (Server-Sent Events) |
 | `GET /api/gnb-log?tail=` · `/api/gnb-log/stream` | log do gNB |
 | `GET /api/history/summary?from=&to=` | KPIs do período (epoch em segundos) |

@@ -2,7 +2,8 @@
 "use strict";
 
 const Settings = {
-  token: (() => { try { return sessionStorage.getItem("icd.admin") || ""; } catch { return ""; } })(),
+  // sessão de administrador única: o mesmo token serve a todas as abas do painel e do navegador
+  token: (() => { try { return localStorage.getItem("icd.admin") || ""; } catch { return ""; } })(),
   data: null,
   edits: {},
   plan: null,
@@ -17,13 +18,16 @@ const Settings = {
     });
     let d = {};
     try { d = await r.json(); } catch { /* sem corpo */ }
-    if (r.status === 401 && d.admin) { this.setToken(""); this.render(); }
+    if (r.status === 401 && d.admin) { this.setToken(""); Admin.changed(); }
     if (!r.ok) { const e = new Error(d.error || r.status + " " + r.statusText); e.data = d; e.status = r.status; throw e; }
     return d;
   },
   setToken(t) {
     this.token = t;
-    try { t ? sessionStorage.setItem("icd.admin", t) : sessionStorage.removeItem("icd.admin"); } catch { /* sem storage */ }
+    try {
+      t ? localStorage.setItem("icd.admin", t) : localStorage.removeItem("icd.admin");
+      sessionStorage.removeItem("icd.admin");
+    } catch { /* sem storage */ }
   },
   msg(html, kind = "") {
     const m = $("#cfg-msg");
@@ -49,22 +53,10 @@ const Settings = {
     }
     this.render();
   },
-  async login() {
-    const pw = $("#cfg-pass").value;
-    try {
-      const d = await this.call("POST", "api/admin/login", { password: pw });
-      this.setToken(d.token);
-      $("#cfg-pass").value = "";
-      this.msg("");
-      await this.load();
-    } catch (e) { this.msg(esc(e.message), "err"); }
-  },
   async logout() {
     try { await this.call("POST", "api/admin/logout", {}); } catch { /* já expirou */ }
     this.setToken("");
-    this.data = null;
-    this.loaded = false;
-    this.render();
+    Admin.changed();
   },
 
   // ---- desenho
@@ -202,7 +194,6 @@ const Settings = {
   },
 };
 
-$("#cfg-login-form").addEventListener("submit", (e) => { e.preventDefault(); Settings.login(); });
 $("#cfg-logout").addEventListener("click", () => Settings.logout());
 $("#cfg-reveal").addEventListener("click", () => {
   if (Object.keys(Settings.edits).length && !confirm("Descartar as alterações não salvas?")) return;
@@ -224,3 +215,61 @@ document.addEventListener("click", (e) => {
     () => { /* sem clipboard (http): o texto está visível */ });
 });
 window.addEventListener("beforeunload", (e) => { if (Object.keys(Settings.edits).length) e.preventDefault(); });
+
+/* Botão "Admin" no topo: login único para Controle, Configuração e as outras abas do navegador */
+const Admin = {
+  enabled: false,
+  async init() {
+    try {
+      const d = await (await fetch("api/admin", { cache: "no-store", headers: { "X-Admin-Token": Settings.token } })).json();
+      this.enabled = !!d.enabled;
+      if (Settings.token && !d.admin) Settings.setToken("");   // expirou ou o painel reiniciou
+    } catch { /* painel antigo */ }
+    this.render();
+  },
+  render() {
+    $("#admin-box").classList.toggle("hidden", !this.enabled);
+    const on = !!Settings.token;
+    const b = $("#admin-btn");
+    b.textContent = on ? "🔓 Admin · Sair" : "🔒 Admin";
+    b.classList.toggle("on", on);
+    b.title = on ? "Sair da sessão de administrador (em todas as abas)" : "Login de administrador: vale para todas as abas";
+  },
+  open() {
+    $("#admin-pop").classList.remove("hidden");
+    $("#admin-msg").textContent = "";
+    $("#admin-pass").focus();
+  },
+  close() { $("#admin-pop").classList.add("hidden"); $("#admin-pass").value = ""; },
+  async login() {
+    try {
+      const d = await Settings.call("POST", "api/admin/login", { password: $("#admin-pass").value });
+      Settings.setToken(d.token);
+      this.close();
+      this.changed();
+    } catch (e) { $("#admin-msg").textContent = e.message; }
+  },
+  // sessão mudou (aqui ou em outra aba do navegador): redesenha quem depende dela
+  changed() {
+    Settings.data = null;
+    Settings.loaded = false;
+    this.render();
+    Settings.render();
+    if (Settings.token && typeof currentTab !== "undefined" && currentTab === "settings") Settings.load();
+    if (typeof Control !== "undefined" && Control.refresh) Control.refresh();
+  },
+};
+$("#admin-btn").addEventListener("click", () => {
+  if (Settings.token) return Settings.logout();
+  $("#admin-pop").classList.contains("hidden") ? Admin.open() : Admin.close();
+});
+$("#admin-cancel").addEventListener("click", () => Admin.close());
+$("#admin-pop").addEventListener("submit", (e) => { e.preventDefault(); Admin.login(); });
+document.addEventListener("click", (e) => { if (e.target.closest("[data-admin-login]")) Admin.open(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") Admin.close(); });
+window.addEventListener("storage", (e) => {
+  if (e.key !== "icd.admin") return;
+  Settings.token = e.newValue || "";
+  Admin.changed();
+});
+Admin.init();

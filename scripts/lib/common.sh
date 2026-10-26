@@ -611,6 +611,19 @@ render_dashboard() {
   # Túneis do UPF -> DNN (aba Core: tráfego N6 por DNN)
   local upfdevs=""
   for i in "${!SLICES[@]}"; do parse_slice "${SLICES[$i]}"; upfdevs+="${upfdevs:+;}$(tun_name "$i")=${S_DNN}"; done
+  # Segundo core (free5GC, opcional): o painel lê os dados do free5gc/free5gc.env, se existir
+  local f5env="" f5ns="" f5amf="" f5upf="" f5web="" f5name="" f5pools=""
+  if [[ -r "${PROJECT_DIR}/free5gc/free5gc.env" ]]; then
+    f5env=$(
+      # shellcheck disable=SC1091
+      source "${PROJECT_DIR}/free5gc/free5gc.env"
+      p=""
+      for i in "${!SLICES[@]}"; do parse_slice "${SLICES[$i]}"; p+="${p:+;}${F5_UE_POOLS[$i]:-}=${S_DNN}"; done
+      for e in "${F5_EXTRA_DNNS[@]+"${F5_EXTRA_DNNS[@]}"}"; do IFS=: read -r _ _ dn cidr <<<"$e"; p+="${p:+;}${cidr}=${dn}"; done
+      printf '%s\n' "${F5_NAMESPACE}" "${F5_AMF_N2_IP}" "${F5_UPF_N3_IP}" "${F5_WEBUI_NODEPORT}" "${F5_NETWORK_NAME:-free5GC}" "${p}"
+    )
+    { read -r f5ns; read -r f5amf; read -r f5upf; read -r f5web; read -r f5name; read -r f5pools; } <<<"${f5env}"
+  fi
   mkdir -p "${GENERATED_DIR}"
   # Aba Configuração: config.env gravável (pelo grupo do dono), projeto só leitura, backups
   local cfg_env="" cfg_mounts="" cfg_vols="" cfg_groups=""
@@ -644,14 +657,14 @@ render_dashboard() {
     hist_vol="
         - {name: history, hostPath: {path: $(_q "${DASHBOARD_DATA_DIR}"), type: Directory}}"
   fi
-  for f in server.py configedit.py control.py history.py history.js settings.js control.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css logo.svg; do
+  for f in server.py configedit.py control.py history.py history.js settings.js control.js docs.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css logo.svg; do
     [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_CONTROL}" "${GNB_CTL_SSH}" "${AMF_N2_IP}" "${UPF_N3_IP}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_CONTROL}" "${GNB_CTL_SSH}" "${AMF_N2_IP}" "${UPF_N3_IP}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" "${f5env}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     # só o campo vazio gerado pelo kubectl (não linhas dos arquivos do painel que citem a palavra)
@@ -787,6 +800,12 @@ spec:
             - {name: RU_NAME, value: $(_q "$([[ -n "${RU_MGMT_IP}" ]] && echo "${RU_NAME}" || true)")}
             - {name: RU_ADDR, value: $(_q "${RU_MGMT_IP}")}
             - {name: CORE_METRICS, value: $(_q "$(is_true "${OPEN5GS_METRICS}" && echo true || echo false)")}
+            - {name: FREE5GC_NAMESPACE, value: $(_q "${f5ns}")}
+            - {name: FREE5GC_AMF_IP, value: $(_q "${f5amf}")}
+            - {name: FREE5GC_UPF_IP, value: $(_q "${f5upf}")}
+            - {name: FREE5GC_WEBUI_PORT, value: $(_q "${f5web}")}
+            - {name: FREE5GC_NETWORK_NAME, value: $(_q "${f5name}")}
+            - {name: FREE5GC_POOLS, value: $(_q "${f5pools}")}
             - {name: DASHBOARD_PASSWORD, valueFrom: {secretKeyRef: {name: dashboard, key: password}}}
             - {name: INGEST_TOKEN, valueFrom: {secretKeyRef: {name: dashboard, key: ingest-token}}}${cfg_env}${hist_env}
           readinessProbe:

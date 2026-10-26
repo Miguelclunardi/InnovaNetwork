@@ -8,9 +8,11 @@
 #
 #  Uso:  ./scripts/heal.sh             (usa sudo automaticamente se precisar)
 #        ./scripts/heal.sh --boot      (modo da unit open5gs-k3s-heal: espera até 15 min)
-#        ./scripts/heal.sh --boot-off  (CORE_AUTOSTART=false: no boot PARA o core e o
+#        ./scripts/heal.sh --boot-off  (CORE_AUTOSTART=false: no boot PARA os cores e o
 #                                       UERANSIM — escala 0; o painel continua; inicia-se
-#                                       pela aba Controle, que sobe tudo em ordem)
+#                                       pela aba Controle, que sobe tudo em ordem). Vale
+#                                       também para o free5GC (namespace com o rótulo
+#                                       innovanetwork/core).
 #  Código de saída: 0 = plano de usuário OK, 1 = não recuperou.
 # =============================================================================
 set -Eeuo pipefail
@@ -46,6 +48,14 @@ if ${OFF}; then
     kc -n "${K8S_NAMESPACE}" scale --replicas=0 ${deps} >/dev/null
     ok "$(wc -w <<<"${deps}") deployment(s) em 0; inicie pela aba Controle do painel"
   fi
+  # outros cores (free5GC): todo namespace com o rótulo innovanetwork/core
+  for ns in $(kc get ns -l innovanetwork/core -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    deps=$(kc -n "${ns}" get deploy -o name || true)
+    [[ -n "${deps}" ]] || continue
+    # shellcheck disable=SC2086
+    kc -n "${ns}" scale --replicas=0 ${deps} >/dev/null
+    ok "${ns}: $(wc -w <<<"${deps}") deployment(s) em 0"
+  done
   exit 0
 fi
 

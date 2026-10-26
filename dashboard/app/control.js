@@ -17,6 +17,7 @@ const Control = {
     $("#ctl-login").classList.toggle("hidden", logged);
     $("#ctl-logged").classList.toggle("hidden", !logged);
     const busy = this.data.job && this.data.job.state === "running";
+    this.renderCores(busy, logged);
     this.renderGroup("core", "#ctl-core", busy, logged);
     this.renderGroup("ueransim", "#ctl-ueransim", busy, logged);
     this.renderOcudu(busy, logged);
@@ -45,6 +46,58 @@ const Control = {
             <button class="btn small" data-act="restart" data-target="${esc(c.key)}" title="Reiniciar (recria o pod)">↻</button>
             <button class="btn small danger" data-act="stop" data-target="${esc(c.key)}" title="Parar">■</button></td></tr>`;
       }).join("");
+  },
+
+  // ---- core ativo (Open5GS / free5GC): troca em ordem, religando o gNB OCUDU
+  switchTo: null,
+  renderCores(busy, logged) {
+    const cores = (CONFIG.cores || []).filter((c) => c.installed);
+    const card = $("#ctl-corecard");
+    card.classList.toggle("hidden", cores.length < 2);
+    if (cores.length < 2) return;
+    const active = this.data.core || CONFIG.core;
+    $("#ctl-core-seg").innerHTML = cores.map((c) => `<button class="btn ${c.name === active ? "on" : ""}" data-core="${esc(c.name)}"
+      ${!logged || busy ? "disabled" : ""} title="${c.name === active ? "core ativo" : "trocar para " + esc(c.label)}">${esc(c.label)}${c.running ? "" : " (parado)"}</button>`).join("");
+    const a = cores.find((c) => c.name === active) || {};
+    $("#ctl-core-info").textContent = `${a.label}: AMF ${a.amf_ip || "?"} · UPF ${a.upf_ip || "?"} · namespace ${a.namespace}` +
+      (a.running ? "" : " · parado (inicie com ▶ Iniciar tudo)");
+    const box = $("#ctl-switch");
+    box.classList.toggle("hidden", !this.switchTo);
+    if (!this.switchTo) return;
+    const to = cores.find((c) => c.name === this.switchTo);
+    if (!to) { this.switchTo = null; box.classList.add("hidden"); return; }
+    const st = (this.data.ocudu && this.data.ocudu.status) || {};
+    const cfgs = (st.configs || []).filter((c) => c.gnb);
+    const match = cfgs.filter((c) => c.amf === to.amf_ip);
+    $("#ctl-switch-text").innerHTML = `Trocar o core ativo de <b>${esc(a.label)}</b> para <b>${esc(to.label)}</b>: para ${esc(a.label)} e o
+      UERANSIM dele, sobe ${esc(to.label)} em ordem (AMF ${esc(to.amf_ip)}) e confere cada etapa.` +
+      (st.active ? ` O gNB OCUDU está rodando com <code>${esc(st.active.config)}.yml</code>.` : "");
+    const sel = $("#ctl-switch-cfg");
+    if (document.activeElement !== sel) {
+      const cur = sel.value && match.some((c) => c.name === sel.value) ? sel.value : (match[0] || {}).name;
+      sel.innerHTML = match.length ? match.map((c) => `<option value="${esc(c.name)}" ${c.name === cur ? "selected" : ""}>${esc(c.name)}.yml — AMF ${esc(c.amf)}</option>`).join("")
+        : `<option value="">nenhum .yml aponta para o AMF ${esc(to.amf_ip)}</option>`;
+    }
+    const gnbOk = !!this.data.ocudu && match.length > 0;
+    const chk = $("#ctl-switch-gnb");
+    chk.disabled = !gnbOk;
+    if (!gnbOk) chk.checked = false;
+    else if (!this._gnbTouched) chk.checked = !!st.active;
+    sel.disabled = !gnbOk || !chk.checked;
+    $("#ctl-switch-go").disabled = !logged || busy;
+  },
+
+  async doSwitch() {
+    const to = this.switchTo;
+    const gnb = $("#ctl-switch-gnb").checked;
+    const config = gnb ? $("#ctl-switch-cfg").value : "";
+    if (gnb && !config) return alert("Escolha o arquivo do gNB (ou desmarque religar o gNB).");
+    try {
+      await Settings.call("POST", "api/control", { action: "switch", core: to, gnb, config });
+      this.switchTo = null;
+      this._gnbTouched = false;
+    } catch (e) { alert(e.message); }
+    this.refresh();
   },
 
   renderOcudu(busy, logged) {
@@ -113,7 +166,8 @@ const Control = {
 
   async act(action, target, config) {
     const label = { start: "Iniciar", stop: "Parar", restart: "Reiniciar" }[action];
-    const what = { all: "core + UERANSIM", core: "o core inteiro", ueransim: "o UERANSIM", ocudu: "o gNB OCUDU" }[target] || target.toUpperCase();
+    const what = ({ all: "core + UERANSIM", core: "o core inteiro", ueransim: "o UERANSIM", ocudu: "o gNB OCUDU" }[target] || target.toUpperCase()) +
+      (target === "ocudu" ? "" : ` (${CONFIG.core_name || "core"})`);
     if ((action !== "start" || target === "ocudu") && !confirm(`${label} ${what}?` +
       (action !== "start" && ["core", "all", "amf", "upf", "smf", "ocudu"].includes(target) ? "\n\nQuem estiver usando a rede perde a conexão." : ""))) return;
     try {
@@ -124,6 +178,12 @@ const Control = {
 };
 
 document.addEventListener("click", (e) => {
+  const c = e.target.closest("#ctl-core-seg [data-core]");
+  if (c) {
+    Control.switchTo = c.dataset.core === (Control.data.core || CONFIG.core) ? null : c.dataset.core;
+    Control.refresh();
+    return;
+  }
   const b = e.target.closest("#tab-control [data-act]");
   if (!b) return;
   const t = b.dataset.target;
@@ -134,15 +194,8 @@ $("#ctl-ocudu-cfg").addEventListener("change", (e) => {
   try { localStorage.setItem("icd.ocudu.cfg", Control.cfgSel); } catch { /* sem storage */ }
   Control.refresh();
 });
+$("#ctl-switch-go").addEventListener("click", () => Control.doSwitch());
+$("#ctl-switch-cancel").addEventListener("click", () => { Control.switchTo = null; Control.refresh(); });
+$("#ctl-switch-gnb").addEventListener("change", () => { Control._gnbTouched = true; Control.refresh(); });
 $("#ctl-ocudu-all").addEventListener("change", (e) => { Control.showAll = e.target.checked; Control.refresh(); });
-$("#ctl-login-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  try {
-    const d = await Settings.call("POST", "api/admin/login", { password: $("#ctl-pass").value });
-    Settings.setToken(d.token);
-    $("#ctl-pass").value = "";
-    $("#ctl-login-msg").textContent = "";
-    Control.refresh();
-  } catch (err) { $("#ctl-login-msg").textContent = err.message; }
-});
-$("#ctl-logout").addEventListener("click", async () => { await Settings.logout(); Control.refresh(); });
+$("#ctl-logout").addEventListener("click", () => Settings.logout());

@@ -1,13 +1,23 @@
-# Decisões técnicas, estado e próximos passos — open5GK3S
+# Decisões técnicas, estado e próximos passos — InnovaNetwork
 
-Core 5G **Open5GS** em Kubernetes (**k3s**) num único nó Ubuntu 24.04, validado com **UERANSIM**.
-Próxima fase: RAN real com **OCUDU** + O-RU **LiteOn**.
+**InnovaNetwork**: rede 5G SA com RAN real **OCUDU** + O-RU **LiteOn** e core em Kubernetes (**k3s**) no torre2 —
+**Open5GS** (padrão) e **free5GC** (opcional), um por vez, trocados pelo painel **Innova Center Dashboard**.
+O projeto nasceu como **open5GK3S** (só o core Open5GS com UERANSIM, branch `main`, tag `v1.0-ueransim`).
 Documentação do projeto: **português**.
 
 > Regra do projeto: **sempre atualizar este arquivo** quando uma decisão nova for tomada
 > ou uma existente mudar (seções "Decisões", "Estado atual" e "Histórico").
 
-## Estado atual (2026-10-19, fim do dia)
+## Estado atual (2026-10-26)
+
+- **InnovaNetwork v2.0** (branch `innovanetwork`): dois cores no torre2, painel v2.0 com core ativo, troca de core,
+  login de administrador único e aba Documentação. Documentação oficial: `README.md` (visão do projeto),
+  `docs/operacao.md`, `docs/ran-ocudu-liteon.md`, `docs/open5gs-core.md` (antigo README do open5GK3S).
+- Troca de core validada pelo painel nos dois sentidos (free5GC → Open5GS ~5 min, `./test.sh` 7/7;
+  Open5GS → free5GC ~1 min, `./free5gc/test.sh` 6/6).
+- IPs da universidade depois do reboot de 2026-10-26: torre2 `191.4.205.77`, innovaserver `191.4.205.80`.
+
+## Estado anterior (2026-10-19, fim do dia)
 
 - **Funcionando** no desktop de dev: `./test.sh` → **7/7 OK** (16 pods, 9 NFs no NRF, NG Setup, UE `001010000000001`
   registrado, PDU `10.45.0.2`, ping ao UPF `10.45.0.1` e a `8.8.8.8` pela `uesimtun0`).
@@ -148,6 +158,27 @@ Documentação do projeto: **português**.
     - **energia** do innovaserver pelo medidor MiEnergy: o painel lê `http://IP/Data` direto (sem InfluxDB/Grafana do
       projeto original). Pendente: o medidor ficar alcançável a partir do torre2 (`ENERGY_METER_URL`).
 
+33. **Dois cores, um ativo (InnovaNetwork v2.0)**. O painel tem um adaptador por core (`CoreOps` em
+    `control.py`, `CoreCollector`/`CoreSet` em `server.py`). **Core ativo** = o único com AMF rodando; com os dois
+    ou nenhum, o último escolhido (`core-ativo.json` ao lado do histórico). A troca pelo painel segue uma ordem
+    fixa: para o gNB OCUDU (se pedido) → para o core atual inteiro → grava o novo ativo → sobe o novo em ordem com
+    as conferências de sempre → religa o gNB com um `.yml` cujo AMF é o do novo core. Não há troca "a quente": quem
+    estiver conectado cai. Escolhas:
+    - o free5GC dá ao painel uma Role própria no namespace dele (`innovanetwork-dashboard`) em vez de ClusterRole;
+    - o namespace do free5GC leva o rótulo `innovanetwork/core`, e o `heal.sh --boot-off` para todo namespace com
+      ele (um core futuro só precisa do rótulo);
+    - os dados do free5GC chegam ao painel pelo `render_dashboard` (lê `free5gc/free5gc.env` num subshell); sem o
+      arquivo, o painel fica igual ao de um core só.
+34. **Login de administrador único** (pedido do usuário): botão **Admin** no topo; o token vai para o
+    `localStorage` (antes `sessionStorage`, uma aba do navegador por vez) e é sincronizado entre abas pelo evento
+    `storage`. Ao abrir a página, `GET /api/admin` confere se o token ainda vale (o painel guarda as sessões em
+    memória; reiniciar o pod derruba todas).
+35. **Aba Documentação** (pedido do usuário: "pode ser o git mesmo"): o painel lê os `.md` da pasta do projeto
+    (já montada só leitura para a aba Configuração), renderiza com um leitor de Markdown próprio (sem
+    bibliotecas, âncoras como no GitHub) e mostra branch/commit lidos de `.git` (sem rodar `git`). Só arquivos
+    `.md` dentro do projeto, fora de pastas ocultas e fora do que o git ignora (`.git/info/exclude`,
+    `.gitignore`): arquivos locais não aparecem.
+
 ## Ruído conhecido
 
 - `journalctl -u k3s`: `127.0.0.1:10250 … use of closed network connection` = conexões locais do kubelet fechando ao fim de `kubectl logs/exec`. Inofensivo.
@@ -215,4 +246,11 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   SIMs do Open5GS importados (`--importar-open5gs`, 7 IMSIs). Celulares reais com OCUDU + LiteOn (`configs/gnb_ru_liteon_FREE5GC.yml` no innovaserver, só o AMF muda):
   slice 1 ok com internet, depois de anunciar voz IMS e criar a DNN `ims`. Slice 2: limitação do free5GC
   (sem S-NSSAI no pedido usa a 1ª slice permitida) — **decisão do usuário: deixar como está** (ver free5gc/README.md).
-  Nomes das redes: InnovaOpen5GS (config.env, vale após `--deploy-only`) e InnovaFree5GC. Falta: painel “core ativo”.
+  Nomes das redes: InnovaOpen5GS (config.env, vale após `--deploy-only`) e InnovaFree5GC.
+- 2026-10-26: reboot das máquinas (IPs novos: torre2 .77, innovaserver .80; nada do projeto dependia deles). O
+  free5GC subiu sozinho no boot (o `--boot-off` ainda só olhava o namespace do Open5GS) ⇒ decisão 33.
+- 2026-10-26: **painel v2.0 / InnovaNetwork v2.0**: core ativo e troca de core (33), login único (34), aba
+  Documentação (35), ícone com o cubo verde oficial da Innova. Testado com uma cópia do painel ligada ao cluster
+  (senha de teste) e Chrome sem janela: todas as abas sem erro de JavaScript, login/saída em todas as abas, troca
+  nos dois sentidos com os testes dos dois cores passando. Documentação oficial reescrita (README do projeto,
+  operação, rádio; o README antigo virou `docs/open5gs-core.md`).

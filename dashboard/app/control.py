@@ -2,6 +2,10 @@
 #  dashboard/app/control.py — aba Controle: iniciar/parar/reiniciar o core,
 #  o UERANSIM e o gNB OCUDU (este pelo agente gnb-ctl na máquina do core).
 #
+#  InnovaNetwork: dois cores (Open5GS e free5GC), cada um no seu namespace, um
+#  ativo por vez. CoreOps sabe operar UM core (nomes, ordem, checagens no log);
+#  Controller guarda as ações em andamento e faz a troca de core ativo.
+#
 #  Core/UERANSIM: "parar" = escala 0 do Deployment; "iniciar" = escala 1 e espera
 #  ficar pronto; "reiniciar" = apaga o pod (o Deployment recria) e reinicia os
 #  dependentes (UPF -> SMF; AMF -> gNB simulado -> UEs). "Iniciar tudo" sobe em
@@ -45,21 +49,41 @@ class Job:
                 "lines": self.lines[-200:]}
 
 
-class Controller:
-    def __init__(self, k8s, namespace, open5gs_release, ueransim_release, amf_ip, upf_ip, event, gnb=None):
-        self.k8s, self.ns = k8s, namespace
-        self.o5, self.ur = open5gs_release, ueransim_release
-        self.amf_ip, self.upf_ip = amf_ip, upf_ip
-        self.event = event               # callback(level, msg) -> histórico/eventos
-        self.gnb = gnb                   # GnbCtl (OCUDU) ou None
-        self.lock = threading.Lock()
-        self.job = None
-        self.jobs = collections.deque(maxlen=10)
-        self.seq = 0
+UERANSIM_CHECKS = {
+    "gnb-sim": (r"NG Setup procedure is successful", r"ngapIp' is missing|NG Setup procedure is failed", 60, True),
+    "ues-sim": (r"PDU Session establishment is successful", None, 60, False),
+}
+
+
+class CoreOps:
+    """Operações de UM core no seu namespace (Open5GS: chart da Gradiant; free5GC: manifestos próprios)."""
+
+    LABELS = {"mongodb": "MongoDB", "nrf": "NRF", "scp": "SCP", "ausf": "AUSF", "udm": "UDM", "udr": "UDR",
+              "pcf": "PCF", "bsf": "BSF", "nssf": "NSSF", "smf": "SMF", "upf": "UPF", "amf": "AMF",
+              "webui": "WebUI", "populate": "Assinantes (populate)", "gnb-sim": "gNB UERANSIM",
+              "ues-sim": "UEs UERANSIM", "chf": "CHF", "nef": "NEF"}
+    ORDERS = {
+        "open5gs": [["mongodb"], ["nrf"], ["scp"], ["ausf", "udm", "udr", "pcf", "bsf", "nssf"], ["populate", "webui"],
+                    ["upf"], ["smf"], ["amf"], ["gnb-sim"], ["ues-sim"]],
+        "free5gc": [["mongodb"], ["nrf"], ["udr"], ["udm", "ausf", "nssf", "pcf", "chf", "nef"], ["webui"],
+                    ["upf"], ["smf"], ["amf"], ["gnb-sim"], ["ues-sim"]],
+    }
+    GROUP = {"gnb-sim": "ueransim", "ues-sim": "ueransim"}
+    DEPENDENTS = {"upf": ["smf"], "amf": ["gnb-sim", "ues-sim"], "gnb-sim": ["ues-sim"]}
+
+    def __init__(self, k8s, core, ueransim_release):
+        """core: dict com name, label, kind (open5gs|free5gc), namespace, release, amf_ip, upf_ip."""
+        self.k8s, self.core = k8s, core
+        self.ns, self.kind = core["namespace"], core["kind"]
+        self.o5, self.ur = core.get("release") or "", ueransim_release
+        self.amf_ip, self.upf_ip = core.get("amf_ip") or "", core.get("upf_ip") or ""
+        self.ORDER = self.ORDERS[self.kind]
+        if self.kind == "free5gc":
+            self.LABELS = dict(self.LABELS, webui="WebConsole")
 
     # ------------------------------------------------------------------ nomes
     def key(self, dep):
-        if dep.startswith(self.o5 + "-"):
+        if self.o5 and dep.startswith(self.o5 + "-"):
             return dep[len(self.o5) + 1:]
         if dep == self.ur:
             return "gnb-sim"
@@ -67,30 +91,33 @@ class Controller:
             return "ues-sim"
         return dep
 
-    LABELS = {"mongodb": "MongoDB", "nrf": "NRF", "scp": "SCP", "ausf": "AUSF", "udm": "UDM", "udr": "UDR",
-              "pcf": "PCF", "bsf": "BSF", "nssf": "NSSF", "smf": "SMF", "upf": "UPF", "amf": "AMF",
-              "webui": "WebUI", "populate": "Assinantes (populate)", "gnb-sim": "gNB UERANSIM",
-              "ues-sim": "UEs UERANSIM"}
-    ORDER = [["mongodb"], ["nrf"], ["scp"], ["ausf", "udm", "udr", "pcf", "bsf", "nssf"], ["populate", "webui"],
-             ["upf"], ["smf"], ["amf"], ["gnb-sim"], ["ues-sim"]]
-    GROUP = {"gnb-sim": "ueransim", "ues-sim": "ueransim"}
-    DEPENDENTS = {"upf": ["smf"], "amf": ["gnb-sim", "ues-sim"], "gnb-sim": ["ues-sim"]}
-
     def checks(self, key):
         """(regex de sucesso no log, regex de falha, segundos, obrigatório)."""
+        if key in UERANSIM_CHECKS:
+            return UERANSIM_CHECKS[key]
+        amf, upf = re.escape(self.amf_ip), re.escape(self.upf_ip)
+        if self.kind == "free5gc":
+            if key == "upf":
+                return r"UPF started", r"Run Error|version mismatch|\[FATA\]", 60, True
+            if key == "amf":
+                return r"Listen on " + amf, r"Run Error|\[FATA\]", 60, True
+            if key == "smf":
+                return r"setup association", r"Run Error|\[FATA\]", 90, True
+            return None
         if key == "upf":
-            ok = r"gtp_server\(\) \[" + (re.escape(self.upf_ip) if self.upf_ip else "")
-            return ok, r"No upf\.gtpu\.address|FATAL", 60, True
+            return r"gtp_server\(\) \[" + upf, r"No upf\.gtpu\.address|FATAL", 60, True
         if key == "amf":
-            ok = r"ngap_server\(\) \[" + (re.escape(self.amf_ip) if self.amf_ip else "")
-            return ok, r"No amf\.ngap\.address|FATAL", 60, True
+            return r"ngap_server\(\) \[" + amf, r"No amf\.ngap\.address|FATAL", 60, True
         if key == "smf":
             return r"PFCP associated", r"FATAL", 90, True
-        if key == "gnb-sim":
-            return r"NG Setup procedure is successful", r"ngapIp' is missing|NG Setup procedure is failed", 60, True
-        if key == "ues-sim":
-            return r"PDU Session establishment is successful", None, 60, False
         return None
+
+    def installed(self):
+        try:
+            self.k8s.get_json("/apis/apps/v1/namespaces/%s/deployments" % self.ns)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     # ------------------------------------------------------------------ Kubernetes
     def _deps(self):
@@ -156,60 +183,15 @@ class Controller:
         out.sort(key=lambda c: (c["rank"], c["key"]))
         return out
 
-    def view(self):
-        with self.lock:
-            job = self.job.view() if self.job else None
-            hist = [j.view() for j in self.jobs if j is not self.job][:5]
+    def running(self):
+        """True se o AMF deste core está pedido para rodar (réplicas > 0)."""
         try:
-            comps, err = self.components(), None
-        except Exception as e:  # noqa: BLE001
-            comps, err = [], str(e)
-        return {"components": comps, "error": err, "job": job, "recent": hist,
-                "ocudu": self.gnb.view() if self.gnb else None}
-
-    # ------------------------------------------------------------------ ações
-    def submit(self, body, user):
-        target = str(body.get("target") or "")
-        action = str(body.get("action") or "")
-        if action not in ("start", "stop", "restart"):
-            raise ValueError("ação inválida")
-        with self.lock:
-            if self.job and self.job.state == "running":
-                raise RuntimeError("já há uma ação em andamento: " + self.job.title)
-            self.seq += 1
-            names = {"start": "Iniciar", "stop": "Parar", "restart": "Reiniciar"}
-            if target == "ocudu":
-                if not self.gnb:
-                    raise ValueError("controle do gNB OCUDU desligado (GNB_CTL_SSH vazio)")
-                cfg = str(body.get("config") or "")
-                title = "%s gNB OCUDU%s" % (names[action], " (%s)" % cfg if cfg else "")
-                fn = lambda j: self.gnb.run(j, action, cfg)  # noqa: E731
-            elif target in ("core", "all", "ueransim"):
-                what = {"core": "core inteiro", "all": "core + UERANSIM", "ueransim": "UERANSIM"}[target]
-                title = "%s %s" % (names[action], what)
-                fn = lambda j: self._run_group(j, action, target)  # noqa: E731
-            else:
-                title = "%s %s" % (names[action], self.LABELS.get(target, target))
-                fn = lambda j: self._run_one(j, action, target)  # noqa: E731
-            job = Job(self.seq, title, user)
-            self.job = job
-            self.jobs.appendleft(job)
-        threading.Thread(target=self._wrap, args=(job, fn), daemon=True, name="controle").start()
-        return job.view()
-
-    def _wrap(self, job, fn):
-        self.event("info", "controle: %s" % job.title)
-        try:
-            fn(job)
-            w = getattr(job, "_worst", 0)
-            job.state = "error" if w >= 2 else "warn" if w else "ok"
-        except Exception as e:  # noqa: BLE001
-            job.log("falhou: %s" % e, "error")
-            job.state = "error"
-        job.t1 = time.time()
-        lvl = {"ok": "info", "warn": "warning", "error": "warning"}[job.state]
-        self.event(lvl, "controle: %s — %s" % (job.title, {"ok": "concluído", "warn": "concluído com avisos",
-                                                           "error": "falhou"}[job.state]))
+            for name, d in self._deps().items():
+                if self.key(name) == "amf":
+                    return d["spec"].get("replicas", 1) > 0
+        except Exception:  # noqa: BLE001
+            pass
+        return False
 
     def _by_key(self):
         return {self.key(n): (n, d) for n, d in self._deps().items()}
@@ -229,7 +211,7 @@ class Controller:
     def _run_group(self, job, action, target):
         sel = self._targets(target)
         if not sel:
-            raise RuntimeError("nenhum componente encontrado no namespace %s" % self.ns)
+            raise RuntimeError("nenhum componente encontrado no namespace %s (%s instalado?)" % (self.ns, self.core["label"]))
         if action == "stop":
             # ordem inversa: rádio primeiro, banco por último
             have = self._by_key()
@@ -386,6 +368,120 @@ class Controller:
                 return
             time.sleep(2)
         job.log("ainda encerrando após %d s: %s" % (timeout, ", ".join(left)), "warn")
+
+
+class Controller:
+    """Ações da aba Controle (uma por vez) sobre o core ativo, o UERANSIM dele, o gNB OCUDU e a troca de core."""
+
+    def __init__(self, cores, active_fn, set_active_fn, event, gnb=None):
+        self.cores = cores               # nome -> CoreOps (ordem: o primeiro é o padrão)
+        self.active_fn = active_fn       # () -> nome do core ativo
+        self.set_active = set_active_fn  # (nome) -> grava a preferência
+        self.event = event               # callback(level, msg) -> histórico/eventos
+        self.gnb = gnb                   # GnbCtl (OCUDU) ou None
+        self.lock = threading.Lock()
+        self.job = None
+        self.jobs = collections.deque(maxlen=10)
+        self.seq = 0
+
+    def ops(self, name=None):
+        name = name or self.active_fn()
+        if name not in self.cores:
+            raise ValueError("core desconhecido: %s" % name)
+        return self.cores[name]
+
+    def view(self):
+        with self.lock:
+            job = self.job.view() if self.job else None
+            hist = [j.view() for j in self.jobs if j is not self.job][:5]
+        active = self.active_fn()
+        try:
+            comps, err = self.ops(active).components(), None
+        except Exception as e:  # noqa: BLE001
+            comps, err = [], str(e)
+        return {"core": active, "components": comps, "error": err, "job": job, "recent": hist,
+                "ocudu": self.gnb.view() if self.gnb else None}
+
+    # ------------------------------------------------------------------ ações
+    def submit(self, body, user):
+        target = str(body.get("target") or "")
+        action = str(body.get("action") or "")
+        if action not in ("start", "stop", "restart", "switch"):
+            raise ValueError("ação inválida")
+        with self.lock:
+            if self.job and self.job.state == "running":
+                raise RuntimeError("já há uma ação em andamento: " + self.job.title)
+            names = {"start": "Iniciar", "stop": "Parar", "restart": "Reiniciar"}
+            if action == "switch":
+                to = str(body.get("core") or "")
+                if to not in self.cores:
+                    raise ValueError("core desconhecido: %s" % to)
+                cfg = str(body.get("config") or "") if body.get("gnb") else ""
+                if body.get("gnb") and not self.gnb:
+                    raise ValueError("controle do gNB OCUDU desligado")
+                title = "Trocar o core ativo para %s" % self.cores[to].core["label"]
+                fn = lambda j: self._switch(j, to, cfg)  # noqa: E731
+            elif target == "ocudu":
+                if not self.gnb:
+                    raise ValueError("controle do gNB OCUDU desligado (GNB_CTL_SSH vazio)")
+                cfg = str(body.get("config") or "")
+                title = "%s gNB OCUDU%s" % (names[action], " (%s)" % cfg if cfg else "")
+                fn = lambda j: self.gnb.run(j, action, cfg)  # noqa: E731
+            else:
+                ops = self.ops(str(body.get("core") or "") or None)
+                core = ops.core["label"]
+                if target in ("core", "all", "ueransim"):
+                    what = {"core": "core inteiro", "all": "core + UERANSIM", "ueransim": "UERANSIM"}[target]
+                    title = "%s %s (%s)" % (names[action], what, core)
+                    fn = lambda j: ops._run_group(j, action, target)  # noqa: E731
+                else:
+                    title = "%s %s (%s)" % (names[action], ops.LABELS.get(target, target), core)
+                    fn = lambda j: ops._run_one(j, action, target)  # noqa: E731
+            self.seq += 1
+            job = Job(self.seq, title, user)
+            self.job = job
+            self.jobs.appendleft(job)
+        threading.Thread(target=self._wrap, args=(job, fn), daemon=True, name="controle").start()
+        return job.view()
+
+    def _wrap(self, job, fn):
+        self.event("info", "controle: %s" % job.title)
+        try:
+            fn(job)
+            w = getattr(job, "_worst", 0)
+            job.state = "error" if w >= 2 else "warn" if w else "ok"
+        except Exception as e:  # noqa: BLE001
+            job.log("falhou: %s" % e, "error")
+            job.state = "error"
+        job.t1 = time.time()
+        lvl = {"ok": "info", "warn": "warning", "error": "warning"}[job.state]
+        self.event(lvl, "controle: %s — %s" % (job.title, {"ok": "concluído", "warn": "concluído com avisos",
+                                                           "error": "falhou"}[job.state]))
+
+    def _switch(self, job, to, gnb_cfg):
+        """Para o gNB OCUDU (se pedido), para os outros cores, sobe o novo em ordem e religa o gNB."""
+        new = self.cores[to]
+        if not new.installed():
+            raise RuntimeError("%s não está instalado (namespace %s)" % (new.core["label"], new.ns))
+        olds = [o for n, o in self.cores.items() if n != to and o.installed()]
+        job.log("core ativo: %s → %s" % (", ".join(o.core["label"] for o in olds if o.running()) or "nenhum",
+                                         new.core["label"]))
+        if gnb_cfg:
+            st = self.gnb.status or {}
+            if st.get("active"):
+                job.log("parando o gNB OCUDU (%s.yml) antes da troca" % (st["active"].get("config") or "?"))
+                self.gnb.run(job, "stop", "")
+        for o in olds:
+            if o.running() or any(c["replicas"] for c in o.components()):
+                job.log("parando %s (core + UERANSIM)" % o.core["label"])
+                o._run_group(job, "stop", "all")
+        self.set_active(to)
+        job.log("iniciando %s em ordem" % new.core["label"])
+        new._run_group(job, "start", "all")
+        if gnb_cfg:
+            job.log("iniciando o gNB OCUDU com %s.yml" % gnb_cfg)
+            self.gnb.run(job, "start", gnb_cfg)
+        job.log("pronto: core ativo = %s" % new.core["label"])
 
 
 # =============================================================================

@@ -256,3 +256,28 @@ ul.plain li { padding: 3px 0; border-bottom: 1px solid var(--border); }
 .note.err { color: var(--err); background: var(--err-soft); }
 .note.warn { color: var(--warn); background: var(--warn-soft); }
 #ctl-ocudu-card { margin-bottom: 12px; }
+
+/* aba Documentação */
+.docs-layout { display: grid; grid-template-columns: 280px 1fr; gap: 12px; align-items: start; }
+.docs-nav { position: sticky; top: 64px; max-height: calc(100vh - 90px); overflow: auto; }
+.docs-nav input[type=search] { width: 100%; margin-bottom: 8px; }
+.docs-nav .src { width: 100%; text-align: left; }
+.docs-body { min-width: 0; }
+.md { line-height: 1.55; font-size: 14.5px; max-width: 980px; }
+.md h1 { font-size: 24px; margin: 6px 0 12px; } .md h2 { font-size: 19px; margin: 22px 0 8px; border-bottom: 1px solid var(--grid); padding-bottom: 4px; }
+.md h3 { font-size: 16px; margin: 18px 0 6px; } .md h4, .md h5, .md h6 { font-size: 14.5px; margin: 14px 0 4px; }
+.md p, .md ul, .md ol { margin: 6px 0 10px; } .md ul, .md ol { padding-left: 22px; }
+.md code { background: var(--grid); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
+.md pre.code { background: var(--grid); padding: 10px 12px; border-radius: 6px; overflow: auto; font-size: 13px; }
+.md pre.code code { background: none; padding: 0; }
+.md blockquote { border-left: 3px solid var(--accent); margin: 8px 0; padding: 2px 12px; color: var(--muted); }
+.md table { margin: 6px 0 12px; } .md hr { border: 0; border-top: 1px solid var(--grid); margin: 16px 0; }
+@media (max-width: 860px) { .docs-layout { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }
+
+/* login de administrador único (topo) */
+.adminbox { position: relative; }
+button.rec.on#admin-btn { background: rgba(255,255,255,.18); border-color: #91cf50; }
+.adminpop { position: absolute; right: 0; top: calc(100% + 8px); width: 290px; z-index: 50; color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.adminpop input { width: 100%; }
+.adminpop .err { color: var(--err); margin-top: 6px; }

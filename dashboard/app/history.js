@@ -250,7 +250,7 @@ const Hist = {
     Charts.make("hc-nf", nfs.length ? nfs.map((n, i) => ({ label: n.toUpperCase(), color: colorFor(i) })) : [{ label: "sem dados" }], o);
     Charts.set("hc-nf", nfs.length ? [cpu.t, ...nfs.map((n) => cpu[n])] : [[], []]);
     const upf = (S["core:upf"] || {}).data || { t: [] };
-    const tuns = Object.keys(upf).filter((k) => /^ogstun\d*_tx$/.test(k)).map((k) => k.slice(0, -3)).sort();
+    const tuns = Object.keys(upf).filter((k) => /^(ogstun\d*|upfgtp)_tx$/.test(k)).map((k) => k.slice(0, -3)).sort();
     const us = [];
     const uc = [upf.t];
     tuns.forEach((t, i) => {

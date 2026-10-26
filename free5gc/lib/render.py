@@ -258,7 +258,9 @@ def dump(o):
 
 
 def manifests():
-    out = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NS, "labels": {"app.kubernetes.io/part-of": "free5gc"}}},
+    # rótulo innovanetwork/core: no boot (CORE_AUTOSTART=false) o heal.sh para todo namespace com ele
+    out = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NS, "labels": {
+        "app.kubernetes.io/part-of": "free5gc", "innovanetwork/core": "free5gc"}}},
            {"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
             "metadata": {"name": "ran-link", "namespace": NS},
             "spec": {"config": json.dumps({"cniVersion": "0.3.1", "type": "macvlan", "master": env("RAN_LINK_IFACE"),
@@ -337,7 +339,23 @@ def manifests():
             out += deployment(nf, files, ["/sbin/tini", "--", "./" + nf, "-c", "config/" + name],
                               wait_nrf=(nf != "nrf"), wait_mongo=(nf == "nrf"))
             out.append(service(nf, sbi_port))
+    out += dashboard_rbac()
     return {"apiVersion": "v1", "kind": "List", "items": out}
+
+
+def dashboard_rbac():
+    """O painel (ServiceAccount "dashboard" no namespace do Open5GS) lê e controla este core."""
+    dns = env("K8S_NAMESPACE", "open5gs")
+    rules = [{"apiGroups": [""], "resources": ["pods", "pods/log"], "verbs": ["get", "list", "watch"]},
+             {"apiGroups": [""], "resources": ["pods"], "verbs": ["delete"]},
+             {"apiGroups": ["apps"], "resources": ["deployments"], "verbs": ["get", "list", "watch"]},
+             {"apiGroups": ["apps"], "resources": ["deployments/scale"], "verbs": ["get", "patch", "update"]}]
+    return [{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role",
+             "metadata": {"name": "innovanetwork-dashboard", "namespace": NS}, "rules": rules},
+            {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding",
+             "metadata": {"name": "innovanetwork-dashboard", "namespace": NS},
+             "subjects": [{"kind": "ServiceAccount", "name": "dashboard", "namespace": dns}],
+             "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "innovanetwork-dashboard"}}]
 
 
 def ueransim():

@@ -1,7 +1,7 @@
-# Arquitetura
+# Arquitetura do core Open5GS
 
 Este documento detalha **o que** está implantado e **como** as peças se conectam.
-Para operar e modificar, veja o [README](../README.md); para problemas, [troubleshooting.md](troubleshooting.md).
+Visão do projeto completo (RAN, fibra, dois cores): [README](../README.md#2-arquitetura). Para operar e modificar o core, veja [open5gs-core.md](open5gs-core.md); para problemas, [troubleshooting.md](troubleshooting.md).
 
 ## 1. Visão geral
 

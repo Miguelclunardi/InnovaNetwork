@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  dashboard/app/server.py — painel de logs e métricas do open5GK3S.
+#  dashboard/app/server.py — painel de logs e métricas do InnovaNetwork.
+#
+#  Dois cores possíveis no mesmo k3s, cada um no seu namespace: Open5GS (padrão)
+#  e free5GC (opcional, FREE5GC_NAMESPACE). Os dois são acompanhados; as abas
+#  mostram o "core ativo" (o que está rodando; se os dois, o último escolhido).
 #
 #  Só biblioteca padrão do Python (roda na imagem python:*-slim sem pip).
 #  Fontes (todas só leitura):
@@ -63,7 +67,7 @@ CORE_METRICS = _env("CORE_METRICS", "false").lower() in ("1", "true", "yes", "si
 CORE_METRICS_PORT = int(_env("CORE_METRICS_PORT", "9090"))
 CORE_POLL_SECONDS = float(_env("CORE_POLL_SECONDS", "5"))
 OPEN5GS_RELEASE = _env("OPEN5GS_RELEASE", "open5gs")
-VERSION = "1.4"
+VERSION = "2.0"
 PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usuário: admin)
 INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
 # Aba Configuração (editar o config.env). Vazio = aba desligada.
@@ -107,6 +111,14 @@ UERANSIM_RELEASE = _env("UERANSIM_RELEASE", "ueransim")
 RAN_AMF_IP = _env("RAN_AMF_IP")       # IP do AMF na fibra (confere o N2 no log)
 RAN_UPF_IP = _env("RAN_UPF_IP")       # IP do UPF na fibra (confere o N3 no log)
 GNB_CTL_TARGET = _env("GNB_CTL_TARGET")   # usuario@host do gNB OCUDU (vazio = sem controle do gNB)
+# Segundo core (free5GC). Vazio = só Open5GS.
+FREE5GC_NAMESPACE = _env("FREE5GC_NAMESPACE")
+FREE5GC_AMF_IP = _env("FREE5GC_AMF_IP")
+FREE5GC_UPF_IP = _env("FREE5GC_UPF_IP")
+FREE5GC_WEBUI_PORT = _env("FREE5GC_WEBUI_PORT")
+FREE5GC_NETWORK_NAME = _env("FREE5GC_NETWORK_NAME")
+# Pools de IP dos UEs -> DNN ("10.60.0.0/16=internet;10.62.0.0/16=ims"): a DNN de cada sessão sai do IP
+FREE5GC_POOLS = [kv.split("=", 1) for kv in _env("FREE5GC_POOLS").split(";") if "=" in kv]
 UE_INACTIVE_SECONDS = 30
 BLER_WINDOW = 10   # s: BLER "agora" dos cartões/tabelas (1 s com poucos blocos oscila demais)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -479,13 +491,40 @@ RE_SESS_ADD = re.compile(r"UE SUPI\[imsi-(\d+)\] DNN\[([^\]]+)\] IPv4\[([^\]]*)\
 RE_NGAP_IDS = re.compile(r"RAN_UE_NGAP_ID\[(\d+)\] AMF_UE_NGAP_ID\[(\d+)\]")
 RE_IDENT = re.compile(r"\[(?:imsi-(\d{15})|suci-0-(\d{3})-(\d{2,3})-[^-\]]+-0-[^-\]]+-(\d+))[\]:]")
 RE_SESS_DEL = re.compile(r"Removed Session: UE IMSI:\[imsi-(\d+)\] DNN:\[([^:\]]+)")
+# free5GC (formato "[INFO][AMF][Gmm][amf_ue_ngap_id:RU:2,AU:3(3GPP)][supi:SUPI:imsi-...] mensagem")
+RE5_LVL = re.compile(r"^\[(ERRO|WARN|FATA|PANI)\]")
+RE5_HEAD = re.compile(r"^(\[[^\]]*\])+\s*")
+RE5_IDS = re.compile(r"\[amf_ue_ngap_id:RU:\d*,AU:(\d+)\(\w+\)\]\[supi:SUPI:imsi-(\d{15})\]")
+RE5_GNB_ACC = re.compile(r"\[ran_addr:([\d.]+):\d+\] Send NG-Setup response")
+RE5_GNB_GONE = re.compile(r"\[ran_addr:([\d.]+):\d+\] (Remove RAN Context|SCTP_SHUTDOWN_EVENT)")
+RE5_REG_OK = re.compile(r"\[supi:SUPI:imsi-(\d{15})\] Handle Registration Complete")
+RE5_DEREG = re.compile(r"\[supi:SUPI:imsi-(\d{15})\].*Deregistration")
+RE5_REJECT = re.compile(r"\[supi:SUPI:imsi-(\d{15})\] Send Registration Reject")
+RE5_SM_NOK = re.compile(r"\[supi:SUPI:imsi-(\d{15})\] CreateSmContextRequest Error: (\d+)")
+RE5_SESS_ADD = re.compile(r"\[pdu_session_id:(\d+)\]\[supi:imsi-(\d{15})\] Allocated PDUAdress\[([^\]]+)\]")
+RE5_SESS_DNN = re.compile(r"SUPI: imsi-(\d{15}), DNN: (\S+)")
+RE5_SESS_DEL = re.compile(r"\[pdu_session_id:(\d+)\]\[supi:imsi-(\d{15})\] smContext\[[^\]]*\] is deleted from pool")
+
+
+def _pool_dnn(ip, pools):
+    """DNN pelo pool do IP (free5GC: um pool por DNN)."""
+    import ipaddress
+    try:
+        a = ipaddress.ip_address(ip)
+        for cidr, dnn in pools:
+            if a in ipaddress.ip_network(cidr, strict=False):
+                return dnn
+    except ValueError:
+        pass
+    return None
 
 
 class LogFollower:
     """Lê o log de um pod em pedaços (sinceTime) e repassa linhas novas ao parser.
     Se o pod mudar (uid novo), relê desde o início e o parser zera o estado."""
 
-    def __init__(self, component, container, parser):
+    def __init__(self, component, container, parser, namespace=None):
+        self.ns = namespace or NAMESPACE
         self.component = component
         self.container = container
         self.parser = parser
@@ -508,7 +547,7 @@ class LogFollower:
         else:
             params["tailLines"] = "200000"   # 1ª leitura: estado desde o início do pod (limite de segurança)
         try:
-            text = K8S.get_text("/api/v1/namespaces/%s/pods/%s/log" % (NAMESPACE, self.pod), params, timeout=30)
+            text = K8S.get_text("/api/v1/namespaces/%s/pods/%s/log" % (self.ns, self.pod), params, timeout=30)
         except Exception as e:  # noqa: BLE001
             log("log", self.component, e)
             return
@@ -531,9 +570,12 @@ class LogFollower:
 class CoreState:
     """Estado derivado dos logs: gNBs (N2), UEs, sessões PDU e eventos relevantes."""
 
-    def __init__(self):
+    def __init__(self, kind="open5gs", label="Open5GS", pools=()):
+        self.kind, self.label, self.pools = kind, label, list(pools)
         self.lock = threading.Lock()
         self.gnbs = {}         # ip -> {"accepted": ts}
+        self.psi = {}          # free5GC: (imsi, pdu_session_id) -> dnn
+        self.pend = {}         # free5GC: imsi -> (psi, ip, ts) à espera da DNN
         self.nof_gnbs = None
         self.ues = {}          # imsi -> {"event": str, "ts": str, "registered": bool}
         self.sessions = {}     # (imsi, dnn) -> {"ipv4": ..., "ipv6": ..., "ts": ...}
@@ -585,6 +627,8 @@ class CoreState:
                 self.ues.clear()
             elif component == "smf":
                 self.sessions.clear()
+                self.psi.clear()
+                self.pend.clear()
             for k in [k for k, e in self.events.items() if e["src"] == component]:
                 del self.events[k]
 
@@ -595,6 +639,8 @@ class CoreState:
             u["registered"] = registered
 
     def line(self, comp, ts, line):
+        if self.kind == "free5gc":
+            return self._line_f5(comp, ts, line)
         with self.lock:
             lvl = None
             if "] ERROR:" in line or "] FATAL:" in line:
@@ -647,6 +693,68 @@ class CoreState:
                 msg = re.sub(r"^(ERROR|WARNING|FATAL): ", "", msg)
                 self._event(ts, comp, lvl, msg[:300])
 
+    def _sess5(self, imsi, psi, dnn, ip, ts):
+        self.psi[(imsi, psi)] = dnn
+        self.sessions[(imsi, dnn)] = {"ipv4": ip, "ipv6": "", "ts": ts}
+        self._event(ts, "smf", "info", "sessão PDU: %s %s %s" % (imsi, dnn, ip))
+
+    def _line_f5(self, comp, ts, line):
+        """Logs do free5GC: mesmos estados (gNBs, UEs, sessões, eventos) que o Open5GS."""
+        with self.lock:
+            m = RE5_LVL.match(line)
+            lvl = {"ERRO": "error", "FATA": "error", "PANI": "error", "WARN": "warning"}.get(m.group(1)) if m else None
+            if comp == "amf":
+                m = RE5_IDS.search(line)
+                if m:
+                    self._map_amf(int(m.group(1)), m.group(2))
+                m = RE5_GNB_ACC.search(line)
+                if m:
+                    self.gnbs[m.group(1)] = {"accepted": ts}
+                    self.nof_gnbs = len(self.gnbs)
+                    self._event(ts, comp, "info", "gNB conectou (N2) de %s" % m.group(1))
+                m = RE5_GNB_GONE.search(line)
+                if m and m.group(1) in self.gnbs:
+                    self.gnbs.pop(m.group(1), None)
+                    self.nof_gnbs = len(self.gnbs)
+                    self._event(ts, comp, "warning", "gNB desconectou (N2): %s" % m.group(1))
+                m = RE5_REG_OK.search(line)
+                if m:
+                    self._ue(m.group(1), "registrado", ts, True)
+                    self.counters["registrations"] += 1
+                m = RE5_DEREG.search(line)
+                if m:
+                    self._ue(m.group(1), "desregistrado", ts, False)
+                    self._event(ts, comp, "info", "UE %s desregistrou" % m.group(1))
+                m = RE5_SM_NOK.search(line)
+                if m:
+                    # ex.: o celular pede uma DNN sem dizer a slice e o free5GC usa a 1ª slice permitida
+                    self._ue(m.group(1), "sessão recusada pelo SMF (DNN/slice fora da configuração)", ts)
+                    self.counters["dnn_not_subscribed"] += 1
+                m = RE5_REJECT.search(line)
+                if m:
+                    self._ue(m.group(1), "rejeição", ts)
+            elif comp == "smf":
+                m = RE5_SESS_ADD.search(line)
+                if m:
+                    psi, imsi, ip = int(m.group(1)), m.group(2), m.group(3)
+                    dnn = _pool_dnn(ip, self.pools)
+                    if dnn:
+                        self._sess5(imsi, psi, dnn, ip, ts)
+                    else:
+                        self.pend[imsi] = (psi, ip, ts)
+                m = RE5_SESS_DNN.search(line)
+                if m and m.group(1) in self.pend:
+                    psi, ip, t0 = self.pend.pop(m.group(1))
+                    self._sess5(m.group(1), psi, m.group(2), ip, t0)
+                m = RE5_SESS_DEL.search(line)
+                if m:
+                    dnn = self.psi.pop((m.group(2), int(m.group(1))), None)
+                    if dnn:
+                        self.sessions.pop((m.group(2), dnn), None)
+            if lvl:
+                self.counters["%s_%s" % (comp, lvl)] += 1
+                self._event(ts, comp, lvl, RE5_HEAD.sub("", line)[:300])
+
     def _event(self, ts, src, lvl, msg):
         # Mensagens iguais (a menos de números/IDs) viram uma linha com contador
         norm = msg if lvl == "info" else re.sub(r"\d+", "#", re.sub(r"\(\.\./[^)]*\)", "", msg))
@@ -659,7 +767,8 @@ class CoreState:
             e = {"ts": ts, "first": ts, "src": src, "level": lvl, "msg": msg, "count": 1}
         self.events[key] = e
         if HISTORY is not None:
-            HISTORY.event(ts, src, lvl, msg)
+            # no histórico a origem leva o core (os dois cores gravam no mesmo banco)
+            HISTORY.event(ts, src if self.kind == "open5gs" else "%s (%s)" % (src, self.label), lvl, msg)
         while len(self.events) > 400:
             self.events.popitem(last=False)
 
@@ -703,15 +812,16 @@ def parse_prom(text):
 class CoreCollector(threading.Thread):
     METRIC_NFS = ("amf", "smf", "upf", "pcf")
 
-    def __init__(self):
-        super().__init__(daemon=True, name="core")
+    def __init__(self, core):
+        super().__init__(daemon=True, name="core-" + core["name"])
+        self.core = core
+        self.ns = core["namespace"]
         self.lock = threading.Lock()
-        self.state = CoreState()
+        self.state = CoreState(core["kind"], core["label"], core.get("pools") or ())
         self.pods = []
         self.pods_error = None
-        self.followers = [LogFollower("amf", "open5gs-amf", self.state),
-                          LogFollower("smf", "open5gs-smf", self.state),
-                          LogFollower("upf", "open5gs-upf", self.state)]
+        pre = "open5gs-" if core["kind"] == "open5gs" else ""
+        self.followers = [LogFollower(nf, pre + nf, self.state, self.ns) for nf in ("amf", "smf", "upf")]
         self.metrics = {}           # nf -> {"latest": {name: [(labels, v)]}, "types": {}, "error": str}
         self.metric_series = {}     # nf -> Series({nome: soma})
         self.metrics_ts = None
@@ -731,12 +841,19 @@ class CoreCollector(threading.Thread):
                     f.poll(pods)
                 except Exception as e:  # noqa: BLE001
                     log("seguidor", f.component, e)
-            if CORE_METRICS:
+            if CORE_METRICS and self.core["kind"] == "open5gs":
                 self._scrape(pods)
             time.sleep(max(0.5, CORE_POLL_SECONDS - (time.time() - t0)))
 
     def _poll_pods(self):
-        data = K8S.get_json("/api/v1/namespaces/%s/pods" % NAMESPACE)
+        try:
+            data = K8S.get_json("/api/v1/namespaces/%s/pods" % self.ns)
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404):   # core não instalado (ou sem permissão no namespace)
+                with self.lock:
+                    self.pods, self.pods_error = [], "namespace %s indisponível (%s)" % (self.ns, e.code)
+                return
+            raise
         now = time.time()
         pods = []
         for it in data.get("items", []):
@@ -767,6 +884,7 @@ class CoreCollector(threading.Thread):
                 age = now - _parse_rfc3339(started)
             pods.append({
                 "name": md["name"], "uid": md["uid"], "component": comp,
+                "group": "ueransim" if labels.get("app.kubernetes.io/instance") == UERANSIM_RELEASE else "core",
                 "label": labels.get("app.kubernetes.io/component") or comp,
                 "instance": labels.get("app.kubernetes.io/instance", ""),
                 "phase": phase, "reason": reason, "ready": "%d/%d" % (ready, len(cs)),
@@ -806,6 +924,10 @@ class CoreCollector(threading.Thread):
         with self.lock:
             return {"pods": list(self.pods), "pods_error": self.pods_error, **self.state.snapshot()}
 
+    def amf_running(self):
+        with self.lock:
+            return any(p["component"] == "amf" and p["phase"] == "Running" for p in self.pods)
+
     def metrics_snapshot(self, window):
         since = time.time() - window
         with self.lock:
@@ -819,7 +941,7 @@ class CoreCollector(threading.Thread):
                                if not k.startswith(("process_", "go_", "promhttp_"))},
                     "series": s.window(since) if s else {"t": []},
                 }
-            return {"enabled": CORE_METRICS, "ts": self.metrics_ts, "nfs": out}
+            return {"enabled": CORE_METRICS and self.core["kind"] == "open5gs", "ts": self.metrics_ts, "nfs": out}
 
 
 def _parse_rfc3339(s):
@@ -1057,7 +1179,8 @@ def local_host_loop(hosts):
 #  Core sem Prometheus: CPU/memória de cada NF e tráfego do UPF lidos do /proc do host
 #  (o pod monta /proc do host só leitura). Não exige reiniciar nada do core.
 # ----------------------------------------------------------------------------
-NF_PROCS = {"mongod": "mongodb"}   # demais: open5gs-<nf>d -> <nf>
+NF_PROCS = {"mongod": "mongodb"}   # demais: open5gs-<nf>d -> <nf> (Open5GS) ou o próprio nome (free5GC)
+F5_PROCS = {"amf", "smf", "upf", "nrf", "udr", "udm", "ausf", "nssf", "pcf", "chf", "nef", "webui"}
 
 
 class CoreProcs:
@@ -1072,10 +1195,13 @@ class CoreProcs:
         self.error = None
         self.hz = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 
-    @staticmethod
-    def _nf(comm):
+    kind_fn = staticmethod(lambda: "open5gs")   # trocado em main(): dialeto do core ativo
+
+    def _nf(self, comm):
         if comm in NF_PROCS:
             return NF_PROCS[comm]
+        if self.kind_fn() == "free5gc":
+            return comm if comm in F5_PROCS else None
         if comm.startswith("open5gs-") and comm.endswith("d"):
             return comm[8:-1]
         return None
@@ -1150,6 +1276,8 @@ class CoreProcs:
             return "N6 · DNN %s (rx = uplink, tx = downlink)" % UPF_DEVS[name]
         if name.startswith("ogstun"):
             return "N6 · túnel dos UEs (rx = uplink, tx = downlink)"
+        if name == "upfgtp":
+            return "N6 · túnel gtp5g dos UEs, todas as DNNs (rx = uplink, tx = downlink)"
         if name == "net1":
             return "N3 · link com o gNB, GTP-U (rx = uplink, tx = downlink)"
         if name == "eth0":
@@ -1170,7 +1298,8 @@ class CoreProcs:
         with self.lock:
             return {"enabled": True, "error": self.error, "nfs": sorted(self.nfs.values(), key=lambda e: e["nf"]),
                     "ifaces": sorted(self.ifaces.values(), key=lambda e: e["iface"]),
-                    "cpu": self.cpu.window(since), "traffic": self.traffic.window(since), "devs": UPF_DEVS}
+                    "cpu": self.cpu.window(since), "traffic": self.traffic.window(since),
+                    "devs": dict(UPF_DEVS, upfgtp="todas as DNNs")}
 
 
 RE_LOG_CRNTI = re.compile(r"\[(?:RRC|CU-CP) *\] \[\w\] ue=(\d+) c-rnti=0x([0-9a-fA-F]+)")
@@ -1186,11 +1315,12 @@ def ue_identity(rnti):
     amf_id = GNBLOG.amf_id_of(rnti)
     if amf_id is None:
         return {}
-    imsi = CORE.state.imsi_of(amf_id)
+    st = CORES.cur().state
+    imsi = st.imsi_of(amf_id)
     if not imsi:
         return {"amf_ue_id": amf_id}
-    with CORE.state.lock:
-        ips = [{"dnn": d, "ipv4": s.get("ipv4")} for (i, d), s in sorted(CORE.state.sessions.items()) if i == imsi]
+    with st.lock:
+        ips = [{"dnn": d, "ipv4": s.get("ipv4")} for (i, d), s in sorted(st.sessions.items()) if i == imsi]
     return {"amf_ue_id": amf_id, "imsi": imsi, "name": UE_NAMES.get(imsi, ""),
             "kind": "ueransim" if imsi in SIM_IMSIS else "real", "sessions": ips}
 
@@ -1252,8 +1382,71 @@ class GnbLog:
 # ----------------------------------------------------------------------------
 #  HTTP
 # ----------------------------------------------------------------------------
+class CoreSet:
+    """Os cores do projeto e qual está ativo.
+
+    Ativo = o único com o AMF rodando; se os dois (ou nenhum) estiverem, vale a última escolha
+    (troca pela aba Controle), guardada ao lado do histórico para sobreviver a reinícios do painel."""
+
+    def __init__(self):
+        self.defs = collections.OrderedDict()
+        self.defs["open5gs"] = {"name": "open5gs", "label": "Open5GS", "kind": "open5gs", "namespace": NAMESPACE,
+                                "release": OPEN5GS_RELEASE, "amf_ip": RAN_AMF_IP, "upf_ip": RAN_UPF_IP,
+                                "webui_port": WEBUI_PORT, "network_name": NETWORK_NAME, "metrics": CORE_METRICS,
+                                "pools": []}
+        if FREE5GC_NAMESPACE:
+            self.defs["free5gc"] = {"name": "free5gc", "label": "free5GC", "kind": "free5gc",
+                                    "namespace": FREE5GC_NAMESPACE, "release": "", "amf_ip": FREE5GC_AMF_IP,
+                                    "upf_ip": FREE5GC_UPF_IP, "webui_port": FREE5GC_WEBUI_PORT,
+                                    "network_name": FREE5GC_NETWORK_NAME, "metrics": False, "pools": FREE5GC_POOLS}
+        self.col = {n: CoreCollector(d) for n, d in self.defs.items()}
+        self.state_path = os.path.join(os.path.dirname(PERSIST_PATH), "core-ativo.json") if PERSIST_PATH else None
+        self.pref = "open5gs"
+        try:
+            with open(self.state_path) as f:
+                p = json.load(f).get("active")
+            if p in self.defs:
+                self.pref = p
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+
+    def start(self):
+        for c in self.col.values():
+            c.start()
+
+    def active(self):
+        run = [n for n, c in self.col.items() if c.amf_running()]
+        if len(run) == 1:
+            return run[0]
+        return self.pref
+
+    def set_active(self, name):
+        if name not in self.defs:
+            return
+        self.pref = name
+        if self.state_path:
+            try:
+                with open(self.state_path, "w") as f:
+                    json.dump({"active": name, "ts": time.time()}, f)
+            except OSError as e:
+                log("core ativo: não gravou %s: %s" % (self.state_path, e))
+
+    def cur(self):
+        return self.col[self.active()]
+
+    def cur_def(self):
+        return self.defs[self.active()]
+
+    def view(self):
+        a = self.active()
+        return [dict({k: v for k, v in d.items() if k != "pools"}, active=(n == a), running=self.col[n].amf_running(),
+                     installed=not (self.col[n].pods_error or "").startswith("namespace "),
+                     pools=["%s=%s" % (c, dn) for c, dn in d["pools"]])
+                for n, d in self.defs.items()]
+
+
 GNB = GnbCollector(GNB_METRICS_URL)
-CORE = CoreCollector()
+CORES = CoreSet()
 GNBLOG = GnbLog()
 ENERGY = EnergyMeter(ENERGY_METER_URL) if ENERGY_METER_URL else None
 COREPROCS = CoreProcs(HOST_ROOT) if HOST_ROOT else None
@@ -1304,7 +1497,7 @@ CONFIG_LOCK = threading.Lock()
 
 
 def _control_event(level, msg):
-    CORE.state._event(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+    CORES.cur().state._event(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                       "painel", level, msg)
 
 
@@ -1312,9 +1505,9 @@ GNBCTL = control.GnbCtl(GNB_CTL_TARGET) if CONTROL and CONFIG and GNB_CTL_TARGET
 if GNBCTL:
     GNBCTL.ru_ref = RU
     _gnb_host = GNB_CTL_TARGET.rsplit("@", 1)[-1]
-    GNBCTL.n2_ref = lambda: next((g.get("accepted") for g in CORE.snapshot()["gnbs"] if g["addr"] == _gnb_host), None)
-CONTROLLER = (control.Controller(K8S, NAMESPACE, OPEN5GS_RELEASE, UERANSIM_RELEASE, RAN_AMF_IP, RAN_UPF_IP,
-                                 _control_event, GNBCTL) if CONTROL and CONFIG else None)
+    GNBCTL.n2_ref = lambda: next((g.get("accepted") for g in CORES.cur().snapshot()["gnbs"] if g["addr"] == _gnb_host), None)
+CONTROLLER = (control.Controller({n: control.CoreOps(K8S, d, UERANSIM_RELEASE) for n, d in CORES.defs.items()},
+                                 CORES.active, CORES.set_active, _control_event, GNBCTL) if CONTROL and CONFIG else None)
 MASK = "••••••••"
 
 
@@ -1375,9 +1568,100 @@ def experiment_setup():
             cfg = re.sub(r"\b[0-9A-Fa-f]{32}\b", "••••", CONFIG.read()[0])
         except OSError:
             cfg = None
-    return cfg, {"version": VERSION, "gnb_name": GNB_NAME, "network": NETWORK_NAME, "gnb_url": GNB_METRICS_URL,
+    return cfg, {"version": VERSION, "gnb_name": GNB_NAME, "network": CORES.cur_def()["network_name"],
+                 "core": CORES.cur_def()["label"], "core_namespace": CORES.cur_def()["namespace"], "gnb_url": GNB_METRICS_URL,
                  "ues": ues, "hosts": [h["name"] for h in HOSTS_STATE.summary()],
                  "ru": dict(RU.detail(60).get("info") or {}, addr=RU_ADDR, name=RU_NAME) if RU else None}
+
+
+# ----------------------------------------------------------------------------- aba Documentação
+DOC_SKIP = {".git", "helm", "logs", "node_modules", "__pycache__"}
+
+
+def _git_ignored():
+    """Padrões que o git ignora (.git/info/exclude e .gitignore): o que é local não aparece no painel."""
+    pats = []
+    for f in (os.path.join(PROJECT_DIR or "", ".git", "info", "exclude"), os.path.join(PROJECT_DIR or "", ".gitignore")):
+        try:
+            with open(f) as fh:
+                pats += [l.strip().lstrip("/") for l in fh if l.strip() and not l.startswith("#") and not l.startswith("!")]
+        except OSError:
+            pass
+    return pats
+
+
+def _is_ignored(rel, pats):
+    import fnmatch
+    rel = rel.replace(os.sep, "/")
+    return any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(os.path.basename(rel), p) or rel.startswith(p.rstrip("/") + "/")
+               for p in pats)
+
+
+def docs_list():
+    """Arquivos .md do projeto (o mesmo conteúdo do git), README primeiro, depois docs/."""
+    if not PROJECT_DIR or not os.path.isdir(PROJECT_DIR):
+        return []
+    out = []
+    pats = _git_ignored()
+    for root, dirs, files in os.walk(PROJECT_DIR):
+        dirs[:] = sorted(d for d in dirs if d not in DOC_SKIP and not d.startswith("."))
+        rel = os.path.relpath(root, PROJECT_DIR)
+        if rel.count(os.sep) >= 2:
+            dirs[:] = []
+        for f in sorted(files):
+            p = os.path.normpath(os.path.join(rel, f))
+            if f.lower().endswith(".md") and not _is_ignored(p, pats):
+                try:
+                    with open(os.path.join(root, f), encoding="utf-8", errors="replace") as fh:
+                        first = next((l.strip("# \n") for l in fh if l.startswith("#")), f)
+                except OSError:
+                    continue
+                out.append({"path": p, "title": first[:120], "mtime": os.path.getmtime(os.path.join(root, f))})
+    rank = lambda d: (0 if d["path"] == "README.md" else 1 if d["path"].startswith("docs" + os.sep) else 2, d["path"])
+    return sorted(out, key=rank)
+
+
+def doc_read(path):
+    full = os.path.realpath(os.path.join(PROJECT_DIR, path))
+    if (not full.startswith(os.path.realpath(PROJECT_DIR) + os.sep) or not full.lower().endswith(".md")
+            or _is_ignored(os.path.relpath(full, os.path.realpath(PROJECT_DIR)), _git_ignored())):
+        raise ValueError("arquivo inválido")
+    if any(part in DOC_SKIP or part.startswith(".") for part in os.path.relpath(full, PROJECT_DIR).split(os.sep)[:-1]):
+        raise ValueError("arquivo inválido")
+    with open(full, encoding="utf-8", errors="replace") as f:
+        return f.read(2 * 1024 * 1024)
+
+
+def git_info():
+    """Branch e commit do projeto (lidos de .git sem rodar git) e o endereço do repositório."""
+    g = os.path.join(PROJECT_DIR or "", ".git")
+    info = {"branch": None, "commit": None, "remote": None}
+    try:
+        with open(os.path.join(g, "HEAD")) as f:
+            head = f.read().strip()
+        if head.startswith("ref: "):
+            ref = head[5:]
+            info["branch"] = ref.rsplit("/", 1)[-1]
+            try:
+                with open(os.path.join(g, ref)) as f:
+                    info["commit"] = f.read().strip()[:7]
+            except OSError:
+                with open(os.path.join(g, "packed-refs")) as f:
+                    for l in f:
+                        if l.strip().endswith(" " + ref):
+                            info["commit"] = l.split()[0][:7]
+        else:
+            info["commit"] = head[:7]
+        with open(os.path.join(g, "config")) as f:
+            m = re.search(r'\[remote "origin"\][^\[]*?url = (\S+)', f.read())
+        if m:
+            url = m.group(1)
+            mm = re.match(r"^(?:git@|ssh://git@)([^:/]+)[:/](.+?)(?:\.git)?$", url)
+            # apelido SSH (ex.: github-open5gk3s) -> github.com
+            info["remote"] = "https://%s/%s" % ("github.com" if "github" in mm.group(1) else mm.group(1), mm.group(2)) if mm else url
+    except OSError:
+        pass
+    return info
 
 
 def _range(qs):
@@ -1389,7 +1673,7 @@ def _range(qs):
     return t0, min(t1, now + 60)
 
 
-STATIC_FILES = {"control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
+STATIC_FILES = {"docs.js", "control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -1403,7 +1687,7 @@ def _q(qs, name, default=None, cast=str):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "open5gk3s-dashboard/" + VERSION
+    server_version = "innovanetwork-dashboard/" + VERSION
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):  # silencioso (só erros)
@@ -1470,13 +1754,27 @@ class Handler(BaseHTTPRequestHandler):
             if path.lstrip("/") in STATIC_FILES:
                 return self._static(path.lstrip("/"))
             if path == "/api/config":
-                return self._send(200, {"namespace": NAMESPACE, "gnb_name": GNB_NAME, "network_name": NETWORK_NAME, "gnb_url": GNB_METRICS_URL,
-                                        "history_seconds": HISTORY_SECONDS, "core_metrics": CORE_METRICS,
-                                        "gnb_log_ingest": bool(INGEST_TOKEN), "release": OPEN5GS_RELEASE,
+                cd = CORES.cur_def()
+                return self._send(200, {"namespace": cd["namespace"], "gnb_name": GNB_NAME, "network_name": cd["network_name"], "gnb_url": GNB_METRICS_URL,
+                                        "history_seconds": HISTORY_SECONDS, "core_metrics": cd["metrics"],
+                                        "gnb_log_ingest": bool(INGEST_TOKEN), "release": cd["release"],
                                         "config_edit": bool(CONFIG), "version": VERSION,
-                                        "webui_port": WEBUI_PORT, "persist": HISTORY is not None,
+                                        "webui_port": cd["webui_port"], "persist": HISTORY is not None,
                                         "local_host": LOCAL_HOST_NAME, "ru": RU_NAME or None,
-                                        "control": bool(CONTROLLER), "ocudu_ctl": bool(GNBCTL), "amf_ip": RAN_AMF_IP})
+                                        "control": bool(CONTROLLER), "ocudu_ctl": bool(GNBCTL), "amf_ip": cd["amf_ip"],
+                                        "core": cd["name"], "core_name": cd["label"], "core_kind": cd["kind"],
+                                        "cores": CORES.view(), "ueransim_release": UERANSIM_RELEASE})
+            if path == "/api/admin":
+                return self._send(200, {"enabled": bool(CONFIG), "admin": bool(CONFIG) and ADMIN.check(self.headers.get("X-Admin-Token", ""))})
+            if path == "/api/docs":
+                return self._send(200, {"docs": docs_list(), "git": git_info(), "enabled": bool(PROJECT_DIR)})
+            if path == "/api/docs/file":
+                try:
+                    return self._send(200, {"path": _q(qs, "path", ""), "text": doc_read(_q(qs, "path", ""))})
+                except (ValueError, OSError) as e:
+                    return self._send(404, {"error": "documento não encontrado: %s" % e})
+            if path == "/api/cores":
+                return self._send(200, {"active": CORES.active(), "cores": CORES.view()})
             if path.startswith("/api/history"):
                 return self._history_get(path, qs)
             if path == "/api/settings":
@@ -1496,23 +1794,24 @@ class Handler(BaseHTTPRequestHandler):
                     u["ident"] = ue_identity(u["rnti"])
                 snap["ident_source"] = bool(GNBLOG.last_push)
                 snap["ident_stats"] = {"rnti": len(GNBLOG.rnti_cu), "cu_amf": len(GNBLOG.cu_amf),
-                                       "amf_imsi": len(CORE.state.amf_ids)}
+                                       "amf_imsi": len(CORES.cur().state.amf_ids)}
                 return self._send(200, snap)
             if path == "/api/ran.csv":
                 return self._ran_csv(min(_q(qs, "window", HISTORY_SECONDS, int), HISTORY_SECONDS))
             if path == "/api/core":
-                return self._send(200, CORE.snapshot())
+                return self._send(200, CORES.cur().snapshot())
             if path == "/api/core/live":
                 win = min(_q(qs, "window", 300, int), HISTORY_SECONDS)
                 d = COREPROCS.snapshot(win) if COREPROCS else {"enabled": False}
-                core = CORE.snapshot()
+                core = CORES.cur().snapshot()
+                d["core"] = CORES.active()
                 d["log"] = {"nof_gnbs": core["nof_gnbs"], "gnbs": core["gnbs"], "counters": core["counters"],
                             "ues_registered": sum(1 for u in core["ues"] if u.get("registered")),
                             "ues_total": len(core["ues"]), "sessions": len(core["sessions"])}
                 d["prometheus"] = CORE_METRICS
                 return self._send(200, d)
             if path == "/api/core/metrics":
-                return self._send(200, CORE.metrics_snapshot(min(_q(qs, "window", 300, int), HISTORY_SECONDS)))
+                return self._send(200, CORES.cur().metrics_snapshot(min(_q(qs, "window", 300, int), HISTORY_SECONDS)))
             if path == "/api/logs":
                 return self._logs(qs)
             if path == "/api/logs/stream":
@@ -1773,11 +2072,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _overview(self):
         ran = GNB.snapshot(60)
-        core = CORE.snapshot()
+        core = CORES.cur().snapshot()
         cell_last = ran["cells"][0]["last"] if ran["cells"] else {}
         pods = core["pods"]
         return {
             "now": time.time(),
+            "core_active": CORES.active(), "core_name": CORES.cur_def()["label"],
             "gnb": {"status": ran["status"], "cell": cell_last,
                     "ues": [dict({k: u[k] for k in ("id", "pci", "rnti", "active", "last", "first_seen", "last_seen")},
                                  ident=ue_identity(u["rnti"])) for u in ran["ues"]]},
@@ -1816,6 +2116,11 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("container inválido")
         return pod, container
 
+    @staticmethod
+    def _log_ns(qs):
+        c = _q(qs, "core", "")
+        return CORES.defs[c]["namespace"] if c in CORES.defs else CORES.cur_def()["namespace"]
+
     def _logs(self, qs):
         try:
             pod, container = self._pod_container(qs)
@@ -1823,7 +2128,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(e)})
         params = {"timestamps": "true", "tailLines": str(min(_q(qs, "tail", 500, int), 20000)),
                   "container": container, "previous": "true" if _q(qs, "previous") == "1" else ""}
-        text = K8S.get_text("/api/v1/namespaces/%s/pods/%s/log" % (NAMESPACE, pod), params, timeout=30)
+        text = K8S.get_text("/api/v1/namespaces/%s/pods/%s/log" % (self._log_ns(qs), pod), params, timeout=30)
         return self._send(200, {"lines": [ANSI.sub("", l) for l in text.splitlines()]})
 
     def _logs_stream(self, qs):
@@ -1833,7 +2138,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(e)})
         params = {"timestamps": "true", "follow": "true", "container": container,
                   "tailLines": str(min(_q(qs, "tail", 300, int), 5000))}
-        resp = K8S.open("/api/v1/namespaces/%s/pods/%s/log" % (NAMESPACE, pod), params, timeout=None)
+        resp = K8S.open("/api/v1/namespaces/%s/pods/%s/log" % (self._log_ns(qs), pod), params, timeout=None)
         self._sse_start()
         try:
             self._sse("conectado", "status")
@@ -1878,11 +2183,13 @@ def main():
             log("histórico persistente: %s (retenção %d dias, máx. %d MB)" % (PERSIST_PATH, PERSIST_DAYS, PERSIST_MAX_MB))
         except Exception as e:  # noqa: BLE001
             log("histórico persistente DESLIGADO — erro ao abrir %s: %s" % (PERSIST_PATH, e))
-    log("painel: namespace=%s gNB=%s métricas do core=%s porta=%s" % (
-        NAMESPACE, GNB_METRICS_URL or "(desligado)", CORE_METRICS, PORT))
+    log("painel: cores=%s ativo=%s gNB=%s métricas do core=%s porta=%s" % (
+        ",".join("%s(%s)" % (n, d["namespace"]) for n, d in CORES.defs.items()), CORES.active(),
+        GNB_METRICS_URL or "(desligado)", CORE_METRICS, PORT))
     if GNB_METRICS_URL:
         GNB.start()
-    CORE.start()
+    CORES.start()
+    CoreProcs.kind_fn = staticmethod(lambda: CORES.cur_def()["kind"])
     if ENERGY:
         if ENERGY_METER_HOST and ENERGY_METER_HOST not in HOSTS_STATE.h:
             HOSTS_STATE._entry(ENERGY_METER_HOST, "", "medidor")

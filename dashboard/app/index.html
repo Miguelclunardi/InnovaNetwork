@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Innova Center Dashboard</title>
+<title>Innova Center Dashboard · InnovaNetwork</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="uPlot.min.css">
 <link rel="stylesheet" href="style.css">
@@ -24,6 +24,7 @@
     <button role="tab" data-tab="logs">Logs</button>
     <button role="tab" data-tab="hosts">Máquinas</button>
     <button role="tab" data-tab="history">Histórico</button>
+    <button role="tab" data-tab="docs">Documentação</button>
     <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Configuração</button>
   </nav>
   <div class="topright">
@@ -31,6 +32,17 @@
     <span class="pill" id="pill-core" title="Pods do core">core …</span>
     <span class="pill hidden" id="pill-ru" title="Estado da RU">RU …</span>
     <button class="rec hidden" id="rec">● Gravar experimento</button>
+    <div class="adminbox hidden" id="admin-box">
+      <button class="rec" id="admin-btn" title="Login de administrador: vale para todas as abas">🔒 Admin</button>
+      <form class="adminpop card hidden" id="admin-pop">
+        <b>Administrador</b>
+        <p class="muted" style="margin:4px 0 8px">Um login vale para Controle, Configuração e as outras abas do navegador (8 h).</p>
+        <input type="password" id="admin-pass" placeholder="senha de administrador" autocomplete="current-password">
+        <div class="toolbar" style="margin-top:8px"><button class="btn on" type="submit">Entrar</button>
+          <button class="btn" type="button" id="admin-cancel">Cancelar</button></div>
+        <div class="muted err" id="admin-msg"></div>
+      </form>
+    </div>
     <button class="icon" id="theme" title="Tema claro/escuro" aria-label="Alternar tema">◐</button>
   </div>
 </header>
@@ -131,14 +143,14 @@
   <section id="tab-core" class="tab">
     <div class="seg" id="core-seg">
       <button class="btn on" data-view="metrics">Métricas</button>
-      <button class="btn hidden" data-view="webui" id="core-seg-webui">Assinantes (WebUI do Open5GS)</button>
+      <button class="btn hidden" data-view="webui" id="core-seg-webui">Assinantes (<span class="core-name">Open5GS</span>)</button>
     </div>
     <div id="core-webui" class="hidden">
       <div class="toolbar">
-        <span class="muted">WebUI original do Open5GS (usuário <code>admin</code>) — cadastro de assinantes, slices, QoS.</span>
+        <span class="muted">Página original de assinantes do <span class="core-name">Open5GS</span> (usuário <code>admin</code>) — cadastro de assinantes, slices, QoS.</span>
         <button class="btn" id="webui-reload">Recarregar</button>
       </div>
-      <iframe id="webui-frame" title="WebUI do Open5GS" class="webui"></iframe>
+      <iframe id="webui-frame" title="Assinantes do core ativo" class="webui"></iframe>
     </div>
     <div id="core-metrics">
     <div class="toolbar">
@@ -152,7 +164,7 @@
       <div class="chart card"><h4>CPU por função do core <span class="unit">% de 1 núcleo</span></h4><div id="c-nf-cpu"></div></div>
     </div>
     <div class="grid2">
-      <div class="card"><h2>Funções do core <span class="muted">(processos no host)</span></h2><div class="tablewrap"><table id="core-nfs"></table></div></div>
+      <div class="card"><h2>Funções do <span class="core-name">core</span> <span class="muted">(processos no host)</span></h2><div class="tablewrap"><table id="core-nfs"></table></div></div>
       <div class="card"><h2>Interfaces do UPF</h2><div class="tablewrap"><table id="core-ifaces"></table></div></div>
     </div>
     <div id="core-disabled" class="card hidden note-card">
@@ -319,11 +331,8 @@
     <div class="note err hidden" id="ctl-error"></div>
     <div class="card" id="ctl-login">
       <h2>Controle</h2>
-      <p class="muted">Ver o estado é livre; iniciar, parar e reiniciar pedem a senha de administrador (a mesma da aba Configuração).</p>
-      <form id="ctl-login-form" class="toolbar">
-        <input type="password" id="ctl-pass" placeholder="senha de administrador" autocomplete="current-password">
-        <button class="btn on" type="submit">Entrar</button> <span class="muted" id="ctl-login-msg"></span>
-      </form>
+      <p class="muted">Ver o estado é livre; iniciar, parar e reiniciar pedem login de administrador (botão <b>🔒 Admin</b> no topo; vale para todas as abas).</p>
+      <div class="toolbar"><button class="btn on" data-admin-login>🔒 Entrar como administrador</button></div>
     </div>
     <div class="toolbar hidden" id="ctl-logged">
       <button class="btn on" data-act="start" data-target="all">▶ Iniciar tudo (core + UERANSIM, em ordem)</button>
@@ -336,9 +345,28 @@
       <h2 id="ctl-job-title"></h2>
       <div class="events" id="ctl-job-log" style="max-height:260px"></div>
     </div>
+    <div class="card hidden" id="ctl-corecard">
+      <h2>Core ativo <span class="muted">um por vez — trocar para o outro e sobe o novo em ordem</span></h2>
+      <div class="toolbar">
+        <div class="seg" id="ctl-core-seg"></div>
+        <span class="muted" id="ctl-core-info"></span>
+      </div>
+      <div class="hidden" id="ctl-switch">
+        <div class="note" id="ctl-switch-text"></div>
+        <div class="toolbar">
+          <label><input type="checkbox" id="ctl-switch-gnb" checked> religar o gNB OCUDU com</label>
+          <select id="ctl-switch-cfg" style="max-width:420px"></select>
+        </div>
+        <div class="toolbar">
+          <button class="btn on" id="ctl-switch-go">Trocar agora</button>
+          <button class="btn" id="ctl-switch-cancel">Cancelar</button>
+          <span class="muted">quem estiver usando a rede perde a conexão durante a troca (~1 a 5 min)</span>
+        </div>
+      </div>
+    </div>
     <div class="grid2">
       <div class="card">
-        <h2>Core 5G (Open5GS) <span class="muted" id="ctl-core-sub"></span></h2>
+        <h2>Core 5G (<span class="core-name">Open5GS</span>) <span class="muted" id="ctl-core-sub"></span></h2>
         <div class="toolbar">
           <button class="btn small on" data-act="start" data-target="core">▶ Iniciar core</button>
           <button class="btn small" data-act="restart" data-target="core">↻ Reiniciar core</button>
@@ -381,9 +409,28 @@
         <div class="card"><h2>Ações recentes</h2><ul id="ctl-recent" class="plain"></ul></div>
       </div>
     </div>
-    <p class="note">Parar = escala 0 (nada é apagado). Reiniciar recria o pod e também os que dependem dele (UPF → SMF; AMF → gNB e UEs
-      simulados). "Iniciar tudo" sobe em ordem: MongoDB → NRF → SCP → demais → UPF → SMF → AMF → gNB UERANSIM → UEs, conferindo a
-      fibra no AMF/UPF, o PFCP e o NG Setup; um pod que suba sem a fibra é recriado sozinho.</p>
+    <p class="note">Os botões agem sobre o <b>core ativo</b> (<span class="core-name">Open5GS</span>) e o UERANSIM dele. Parar = escala 0
+      (nada é apagado). Reiniciar recria o pod e também os que dependem dele (UPF → SMF; AMF → gNB e UEs simulados). "Iniciar tudo"
+      sobe em ordem: MongoDB → NRF → demais → UPF → SMF → AMF → gNB UERANSIM → UEs, conferindo a fibra no AMF/UPF, o PFCP e o
+      NG Setup; um pod que suba sem a fibra é recriado sozinho. Trocar de core para o gNB OCUDU, para o core atual, sobe o outro
+      e religa o gNB com o arquivo que aponta para o AMF novo.</p>
+  </section>
+
+  <!-- ======================= DOCUMENTAÇÃO ======================= -->
+  <section id="tab-docs" class="tab">
+    <div class="docs-layout">
+      <aside class="card docs-nav">
+        <h2>Documentação</h2>
+        <div class="muted" id="docs-git" style="font-size:12px;margin-bottom:8px"></div>
+        <input type="search" id="docs-filter" placeholder="buscar nos títulos…">
+        <div id="docs-list"></div>
+      </aside>
+      <article class="card docs-body">
+        <div class="toolbar"><span class="muted" id="docs-path"></span>
+          <a class="btn small" id="docs-raw" target="_blank" rel="noopener" style="margin-left:auto">abrir no GitHub</a></div>
+        <div id="docs-view" class="md"></div>
+      </article>
+    </div>
   </section>
 
   <section id="tab-settings" class="tab">
@@ -392,10 +439,7 @@
       <h2>Configuração (config.env)</h2>
       <p class="muted">Edita o <code>config.env</code> da máquina do core. Precisa da senha de administrador
         (mostrada no fim do <code>sudo ./install.sh</code>; também em <code>sudo cat /opt/open5gs-k3s/state/dashboard-admin-password</code>).</p>
-      <form id="cfg-login-form" class="toolbar">
-        <input type="password" id="cfg-pass" placeholder="senha de administrador" autocomplete="current-password">
-        <button class="btn on" type="submit">Entrar</button>
-      </form>
+      <div class="toolbar"><button class="btn on" data-admin-login>🔒 Entrar como administrador</button></div>
     </div>
     <div id="cfg-main" class="hidden">
       <div class="toolbar cfgbar">
@@ -434,6 +478,7 @@
 <script src="hosts.js"></script>
 <script src="ru.js"></script>
 <script src="control.js"></script>
+<script src="docs.js"></script>
 <script src="settings.js"></script>
 <script src="history.js"></script>
 </body>

@@ -45,6 +45,12 @@ dos pools para a internet pelo `eth0` do pod.
   de mesma SST; DNN que o free5GC não tem (ex.: `ims`) fica de fora e é listada.
 - WebConsole: `http://<IP do torre2>:31000`, usuário `admin`, senha padrão `free5gc` — **troque**.
 
+## No painel
+
+Com o free5GC instalado, o `sudo ./install.sh --dashboard-only` faz o painel mostrar o cartão **Core ativo** na
+aba Controle: um clique troca o core (para um, sobe o outro em ordem e religa o gNB OCUDU com o `.yml` certo).
+Todas as abas passam a mostrar o free5GC quando ele é o ativo. Ver [docs/operacao.md](../docs/operacao.md#3-trocar-de-core-open5gs--free5gc).
+
 ## gNB OCUDU
 
 Um `.yml` próprio, cópia do que usa o Open5GS com o AMF trocado (`cu_cp.amf.addr: 10.10.0.30`), por exemplo
