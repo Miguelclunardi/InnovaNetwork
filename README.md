@@ -202,7 +202,7 @@ Toda a documentação também aparece no painel, na aba **Documentação** (lida
   (comportamento do AMF do free5GC). Slice 2 só com UE que informa a S-NSSAI. No Open5GS funciona.
 - **gNB não reconecta sozinho** se o AMF reiniciar: reinicie o gNB pela aba Controle (a troca de core já faz isso).
 - **Um core por vez** no rádio; trocar derruba quem estiver conectado (~1 a 5 min).
-- A preparação do innovaserver (DPDK, XDP `xdp_ptp_pad.o`, PTP) é dos serviços da máquina; o painel só
+- A preparação do innovaserver (DPDK, XDP `ptp-trim.o`, PTP) é dos serviços da máquina; o painel só
   inicia/para o gNB e mostra se o PTP e a VF estão ok.
 - Os nomes técnicos instalados (`open5gs-k3s-*`, `/opt/open5gs-k3s`) ainda são os do projeto original; migram
   numa janela combinada.

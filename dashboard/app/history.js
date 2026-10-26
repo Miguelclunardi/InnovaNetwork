@@ -396,10 +396,9 @@ $("#hist-exps").addEventListener("click", async (e) => {
   }
   if (b.dataset.del) {
     const ex = Hist.exps.find((x) => x.id === +b.dataset.del);
+    if (!Settings.token) { Admin.open(); return; }   // login único (botão Admin do topo)
     if (!confirm(`Apagar o experimento "${ex.name}"? (só o marcador; as métricas do período continuam no histórico)`)) return;
-    let tok = "";
-    try { tok = sessionStorage.getItem("icd.admin") || ""; } catch { /* sem storage */ }
-    try { await postJSON("api/history/experiments", { action: "delete", id: ex.id }, { "X-Admin-Token": tok }); Hist.sel.delete(ex.id); Hist.refresh(); }
+    try { await postJSON("api/history/experiments", { action: "delete", id: ex.id }, { "X-Admin-Token": Settings.token }); Hist.sel.delete(ex.id); Hist.refresh(); }
     catch (err) { alert(err.message); }
   }
 });

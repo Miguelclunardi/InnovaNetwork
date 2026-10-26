@@ -273,7 +273,7 @@ pela aba Controle. Um `sudo ./install.sh` ou `--deploy-only` volta a subir tudo 
 - Depois de iniciar, a aba confere: serviço rodando (e ainda rodando 5 s depois), **RU com DU conectado** (aba RU)
   e **N2 no AMF** deste core. O arquivo que aponta para outro AMF (ex.: `127.0.0.5`, o Open5GS local do
   innovaserver) aparece marcado.
-- **A máquina tem que estar preparada** (interface, VF/DPDK, XDP `xdp_ptp_pad.o`, PTP): o botão não faz isso.
+- **A máquina tem que estar preparada** (interface, VF/DPDK, XDP `ptp-trim.o`, PTP): o botão não faz isso.
 - Remover: `sudo bash setup-gnb-service.sh --remove` no host do gNB.
 
 ### Energia (medidor MiEnergy)

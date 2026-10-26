@@ -55,7 +55,7 @@ Estes serviços são da máquina, não do projeto; sobem sozinhos no boot:
 
 | Serviço | O que faz |
 |---|---|
-| `ocudu-setup` | `/usr/local/sbin/setup-ocudu.sh`: porta do fronthaul com MTU 1500 (só PTP), offloads de VLAN desligados, 1 VF SR-IOV em `vfio-pci` (DPDK) com `trust on`/`spoofchk off`, programa XDP `xdp_ptp_pad.o` na porta (ajuste do PTP para a RU), `ip_forward` |
+| `ocudu-setup` | `/usr/local/sbin/setup-ocudu.sh`: porta do fronthaul com MTU 1500 (só PTP), offloads de VLAN desligados, 1 VF SR-IOV em `vfio-pci` (DPDK) com `trust on`/`spoofchk off`, programa XDP `/usr/local/lib/ocudu/ptp-trim.o` na porta (ajuste do PTP para a RU), `ip_forward` |
 | `dpdk` | ambiente do DPDK (hugepages) |
 | `ts2phc` | relógio da E810 a partir do GNSS |
 | `ptp4l-gm` | PTP grandmaster em `ens4f0np0` (a RU sincroniza por aqui) |

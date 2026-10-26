@@ -1922,7 +1922,7 @@ class Handler(BaseHTTPRequestHandler):
         if act == "delete":
             # Apagar exige a senha de administrador (os dados medidos continuam; some só o marcador)
             if not (CONFIG and ADMIN.check(self.headers.get("X-Admin-Token", ""))):
-                return self._send(403, {"error": "apagar experimento exige entrar como administrador (aba Configuração)"})
+                return self._send(403, {"error": "apagar experimento exige login de administrador (botão Admin no topo)"})
             HISTORY.delete(int(body.get("id", 0)))
             return self._send(200, {"ok": True})
         return self._send(400, {"error": "ação desconhecida"})
