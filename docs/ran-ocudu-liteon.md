@@ -63,6 +63,32 @@ Estes serviços são da máquina, não do projeto; sobem sozinhos no boot:
 
 Se algum falhar, o gNB não sobe ou a RU não sincroniza. Conferir: `systemctl status ocudu-setup ptp4l-gm ts2phc phc2sys`.
 
+### Depois de ligar as máquinas: espere o GPS
+
+Depois de um boot, o GNSS pode levar **até ~30 min** para dar hora válida (`ts2phc` mostra `source ts not valid`).
+Até lá o relógio da E810 — que é o mestre PTP da RU — pode estar **dezenas de segundos errado**. Quando o GPS
+volta, o `ts2phc` corrige com um salto (visto em 2026-10-26: 31,6 s). Consequências:
+
+- a RU que sincronizou no tempo errado **não se acerta sozinha** depois do salto: diz `SYNCHRONIZED`, mas só ~5 %
+  dos pacotes do fronthaul chegam no tempo (o normal é ~91 %, 0 % adiantados/atrasados) e o uplink some
+  ("missed incoming User-Plane uplink"): os celulares fazem PRACH mas a Msg3 nunca chega;
+- o relógio do sistema (`phc2sys`) leva minutos para alcançar.
+
+Regra: **só ligue o gNB quando o `ts2phc` mostrar `offset … s2`** (`journalctl -u ts2phc -f`). Se a RU ligou antes
+disso, **reinicie a RU** depois que o GPS estiver bom. Conferir na aba RU do painel (pacotes no tempo).
+
+### XDP `ptp-trim.o` e as falhas de carimbo de tempo do PTP
+
+- O XDP corta o enchimento dos Delay_Req da LiteOn; sem ele o `ptp4l` rejeita essas mensagens ("bad message", ~30
+  por segundo). **Os celulares funcionam mesmo assim** (a RU segue o PTP pelos Sync), mas a RU não mede o atraso.
+- O XDP **sai da porta** quando o link da RU cai (RU reiniciando) e quando o `ptp4l` reinicia a porta depois de uma
+  falha "timed out while polling for tx timestamp". Carregar o XDP com o `ptp4l` rodando também causa essa falha.
+- Ajustes feitos em 2026-10-26 (fora do projeto, na máquina): `tx_timestamp_timeout 50` em
+  `/etc/linuxptp/ptp4l.cfg` e `ExecStartPre` no `ptp4l-gm` (drop-in `xdp.conf`) que carrega o XDP antes do
+  `ptp4l`. Recolocar à mão: `sudo systemctl restart ptp4l-gm phc2sys` (com o gNB parado).
+- Ainda há falhas esporádicas de carimbo de tempo, e cada uma tira o XDP. Pendente: testar o modo `xdpgeneric`
+  e/ou um vigia que recoloque o XDP.
+
 > Regras: a porta 1 da E810 (fronthaul/PTP) e o PTP **não** são mexidos pelo projeto. Nada de `netplan apply`
 > no innovaserver sem combinar.
 
@@ -106,6 +132,8 @@ root, fora do git) — aba **RU** do painel.
 | Sintoma | Causa provável / o que fazer |
 |---|---|
 | gNB sobe mas não aparece no AMF | `.yml` aponta para o outro core, ou o AMF reiniciou depois do gNB: reinicie o gNB |
+| Celulares fazem PRACH mas não conectam; RU com muitos pacotes adiantados/atrasados | RU sincronizou antes do GPS estar bom (seção 4): reinicie a RU |
+| gNB perde o AMF ("Handling N2 disconnection") | o core foi parado/trocado com o gNB ligado: use a troca de core do painel, que religa o gNB |
 | RU sem "DU conectado" | PTP fora (`ptp4l-gm`, `ts2phc`) ou VF não está em `vfio-pci` (`dpdk-devbind.py --status`) |
 | Serviço recusa iniciar | já existe um `gnb` rodando fora do serviço (Ctrl+C nele) ou outro `ocudu-gnb@` ativo |
 | Celular registra e sai ~1 s depois (free5GC) | falta voz IMS anunciada / DNN `ims` — já configurado no `free5gc.env` |

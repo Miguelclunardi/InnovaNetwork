@@ -179,6 +179,15 @@ Documentação do projeto: **português**.
     `.md` dentro do projeto, fora de pastas ocultas e fora do que o git ignora (`.git/info/exclude`,
     `.gitignore`): arquivos locais não aparecem.
 
+36. **RAN depois de um boot (2026-10-26)**: o gNB só liga depois de o GNSS do innovaserver dar hora válida; se a
+    RU sincronizou antes, reinicia-se a RU. O XDP `ptp-trim.o` não é condição para os celulares (só para a RU
+    medir o atraso); na máquina: `tx_timestamp_timeout 50` e XDP carregado no `ExecStartPre` do `ptp4l-gm`.
+    Detalhes em `docs/ran-ocudu-liteon.md`.
+37. **Mudança de rumo (pedido do usuário, 2026-10-26): o OCUDU passa a rodar no Kubernetes** na versão oficial
+    do InnovaNetwork (antes: "OCUDU nunca em container/k3s"). Dois instaladores separados: um para cores e
+    painel (o atual) e outro para o OCUDU, deixando claro que este depende do setup de cada um (placa, RU, PTP,
+    DPDK, CPUs). Primeiro passo: levantamento do que o OCUDU precisa no Kubernetes, para decisão do usuário.
+
 ## Ruído conhecido
 
 - `journalctl -u k3s`: `127.0.0.1:10250 … use of closed network connection` = conexões locais do kubelet fechando ao fim de `kubectl logs/exec`. Inofensivo.
@@ -254,3 +263,9 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
   (senha de teste) e Chrome sem janela: todas as abas sem erro de JavaScript, login/saída em todas as abas, troca
   nos dois sentidos com os testes dos dois cores passando. Documentação oficial reescrita (README do projeto,
   operação, rádio; o README antigo virou `docs/open5gs-core.md`).
+- 2026-10-26 (tarde): repositório novo https://github.com/Miguelclunardi/InnovaNetwork (público; deploy key do
+  torre2 com escrita; `origin` = InnovaNetwork, `open5gk3s` = repositório antigo). Rede fora depois do reboot:
+  GNSS levou 30 min, a RU (reiniciada às 15:09 por queda de link) sincronizou no tempo errado e não se acertou
+  depois do salto de 31,6 s (5 % dos pacotes no tempo, uplink perdido); resolvido reiniciando a RU (91 %). Depois,
+  o free5GC foi parado com o gNB ligado nele (célula caiu); com a troca pelo cartão Core ativo, celular conectado
+  no free5GC (internet + IMS) e no Open5GS (decisão 36).

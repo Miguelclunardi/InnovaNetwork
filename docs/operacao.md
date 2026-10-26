@@ -22,9 +22,11 @@ O innovaserver sobe sozinho a preparação (DPDK, XDP, PTP), mas **não** o gNB.
 3. **▶ Iniciar tudo** — sobe o core ativo em ordem (MongoDB → NRF → … → UPF → SMF → AMF → UERANSIM) e confere
    cada etapa nos logs (UPF no IP da fibra, SMF associado ao UPF, AMF escutando N2, NG Setup do gNB simulado).
    Pod que sobe sem a interface da fibra é recriado sozinho.
-4. Cartão **gNB OCUDU**: escolha o `.yml` do core ativo (os outros aparecem marcados) e **Iniciar**. A aba confere
+4. **Espere o GPS do innovaserver** (até ~30 min depois de um boot; `journalctl -u ts2phc -f` mostrando
+   `offset … s2`). Se a RU ligou antes disso, reinicie a RU. Ver [ran-ocudu-liteon.md](ran-ocudu-liteon.md#depois-de-ligar-as-máquinas-espere-o-gps).
+5. Cartão **gNB OCUDU**: escolha o `.yml` do core ativo (os outros aparecem marcados) e **Iniciar**. A aba confere
    o serviço, a RU com "DU conectado" e o N2 no AMF.
-5. **Visão geral**: celulares registrados, sessões e tráfego.
+6. **Visão geral**: celulares registrados, sessões e tráfego.
 
 > Os IPs da universidade (DHCP) podem mudar depois de um reboot. O painel continua em
 > `http://<novo IP do torre2>:30998`; nada dentro do projeto depende desses IPs.
@@ -32,6 +34,9 @@ O innovaserver sobe sozinho a preparação (DPDK, XDP, PTP), mas **não** o gNB.
 ## 3. Trocar de core (Open5GS ⇄ free5GC)
 
 Só aparece quando o free5GC está instalado. **Derruba quem estiver conectado** durante a troca.
+
+> Use sempre o cartão **Core ativo**. Parar um core e iniciar o outro pelos botões separados **não** mexe no gNB:
+> ele fica tentando o AMF antigo e a célula some (aconteceu em 2026-10-26).
 
 1. Aba **Controle** → cartão **Core ativo** → clique no outro core.
 2. Na caixa que abre:
