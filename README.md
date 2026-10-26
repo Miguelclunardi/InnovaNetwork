@@ -164,6 +164,7 @@ Toda a documentação também aparece no painel, na aba **Documentação** (lida
 | Documento | Conteúdo |
 |---|---|
 | [docs/operacao.md](docs/operacao.md) | **Comece aqui para operar:** boot, iniciar, trocar de core, gNB, testes, SIMs, problemas comuns |
+| [docs/guia-do-codigo.md](docs/guia-do-codigo.md) | **Para entender e mostrar:** onde cada coisa está no código e roteiros de demonstração |
 | [docs/ran-ocudu-liteon.md](docs/ran-ocudu-liteon.md) | Rádio: innovaserver, OCUDU, LiteOn, fibra, `.yml` por core |
 | [docs/open5gs-core.md](docs/open5gs-core.md) | Core Open5GS: install, `config.env`, operação, modificação, testes, desinstalação |
 | [free5gc/README.md](free5gc/README.md) | Core free5GC: instalação, assinantes, celulares, limitações |

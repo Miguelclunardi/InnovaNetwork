@@ -3,9 +3,9 @@
 Como o gNB real do InnovaNetwork está montado e como ele se liga ao core do torre2.
 Visão geral do projeto: [README](../README.md). Operação: [operacao.md](operacao.md).
 
-> O OCUDU roda **direto no host** (CPU dedicada, DPDK, PTP) e **nunca em container ou no k3s**. O projeto só
-> instala no innovaserver o serviço `ocudu-gnb@` (para o painel iniciar e parar o gNB); a preparação da máquina é
-> dela própria (serviços de boot listados abaixo).
+> Hoje (v2.1) o OCUDU roda **direto no host** (CPU dedicada, DPDK, PTP). O projeto só instala no innovaserver o
+> serviço `ocudu-gnb@` (para o painel iniciar e parar o gNB); a preparação da máquina é dela própria (serviços de
+> boot listados abaixo). **Próximo passo:** o OCUDU no Kubernetes, com instalador próprio (decisão 37).
 
 ## 1. Peças
 
