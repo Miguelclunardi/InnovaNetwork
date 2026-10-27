@@ -188,6 +188,28 @@ Documentação do projeto: **português**.
     painel (o atual) e outro para o OCUDU, deixando claro que este depende do setup de cada um (placa, RU, PTP,
     DPDK, CPUs). Primeiro passo: levantamento do que o OCUDU precisa no Kubernetes, para decisão do usuário.
 
+38. **Arquitetura da v3 (2026-10-27): plataforma + componentes + painel como ferramenta.** Objetivo: projeto
+    replicável em outros setups e aberto a contribuições.
+    - `plataforma/` (k3s, nós, Multus, fibra; PLMN/TAC/slices comuns), `cores/open5gs/`, `cores/free5gc/`,
+      `ran/ocudu/`, `painel/` — cada parte com instalador e `.env` próprios; a plataforma vem primeiro.
+    - Contrato: cada componente publica um **descritor** (ConfigMap com rótulo `innovanetwork/component`: tipo,
+      namespace, ordem de subida, verificações, AMF, pools, WebUI). O painel descobre os componentes por eles e
+      controla tudo pela API do Kubernetes; os componentes não sabem do painel.
+    - Painel em namespace próprio. Partes dependentes de hardware viram **perfis** (ex.: E810 + LiteOn).
+    - O innovaserver entra como **nó** no k3s do torre2 (um cluster só), pela fibra, com taint para o RAN.
+    - Sequência: contrato → OCUDU no formato novo → painel novo em paralelo → cores no formato novo → troca
+      (v3.0). O sistema atual só muda na troca.
+39. **Coleta de métricas não muda por enquanto (2026-10-27).** Os agentes atuais (log do gNB, controle, RU,
+    máquinas) continuam como estão. Numa versão oficial eles podem continuar sendo agentes, **exigindo apenas uma
+    configuração prévia** documentada (acesso SSH, usuário, regra de permissão) em cada setup.
+40. **Roteiro depois da v3.0** (ideias, sem data): v3.1 histórico renovado para monitorar por dias (banco de
+    séries temporais, retenção longa, eventos junto das métricas, análise de período); v3.2 gerador de tráfego
+    no painel (iperf3 no lado N6 para descida nos celulares; subida só com app no celular ou nos UEs
+    simulados; taxa, protocolo, padrão, agenda, por UE/slice); v3.x perfis de outros setups, licença e
+    contribuições; futuro: experimentos descritos em arquivo e agentes de IA usando a mesma API do painel.
+    Regras para quando a coleta for revista: fonte nativa primeiro (WebSocket do OCUDU, Prometheus do Open5GS),
+    leitores de log como adaptadores por versão com testes, e cada série guardando de onde veio.
+
 ## Ruído conhecido
 
 - `journalctl -u k3s`: `127.0.0.1:10250 … use of closed network connection` = conexões locais do kubelet fechando ao fim de `kubectl logs/exec`. Inofensivo.
