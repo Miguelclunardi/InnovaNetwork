@@ -1,13 +1,23 @@
-# Decisões técnicas, estado e próximos passos — open5GK3S
+# Decisões técnicas, estado e próximos passos — InnovaNetwork
 
-Core 5G **Open5GS** em Kubernetes (**k3s**) num único nó Ubuntu 24.04, validado com **UERANSIM**.
-Próxima fase: RAN real com **OCUDU** + O-RU **LiteOn**.
+**InnovaNetwork**: rede 5G SA com RAN real **OCUDU** + O-RU **LiteOn** e core em Kubernetes (**k3s**) no torre2 —
+**Open5GS** (padrão) e **free5GC** (opcional), um por vez, trocados pelo painel **Innova Center Dashboard**.
+O projeto nasceu como **open5GK3S** (só o core Open5GS com UERANSIM, branch `main`, tag `v1.0-ueransim`).
 Documentação do projeto: **português**.
 
 > Regra do projeto: **sempre atualizar este arquivo** quando uma decisão nova for tomada
 > ou uma existente mudar (seções "Decisões", "Estado atual" e "Histórico").
 
-## Estado atual (2026-10-19, fim do dia)
+## Estado atual (2026-10-26)
+
+- **InnovaNetwork v2.0** (branch `innovanetwork`): dois cores no torre2, painel v2.0 com core ativo, troca de core,
+  login de administrador único e aba Documentação. Documentação oficial: `README.md` (visão do projeto),
+  `docs/operacao.md`, `docs/ran-ocudu-liteon.md`, `docs/open5gs-core.md` (antigo README do open5GK3S).
+- Troca de core validada pelo painel nos dois sentidos (free5GC → Open5GS ~5 min, `./test.sh` 7/7;
+  Open5GS → free5GC ~1 min, `./free5gc/test.sh` 6/6).
+- IPs da universidade depois do reboot de 2026-10-26: torre2 `191.4.205.77`, innovaserver `191.4.205.80`.
+
+## Estado anterior (2026-10-19, fim do dia)
 
 - **Funcionando** no desktop de dev: `./test.sh` → **7/7 OK** (16 pods, 9 NFs no NRF, NG Setup, UE `001010000000001`
   registrado, PDU `10.45.0.2`, ping ao UPF `10.45.0.1` e a `8.8.8.8` pela `uesimtun0`).
@@ -29,7 +39,7 @@ Documentação do projeto: **português**.
 3. **Ubuntu Server `torre2`: migrado e validado em 2026-10-20** (`./test.sh` 7/7, ping 8.8.8.8 a ~19 ms; units netif e heal habilitadas):
    - acesso do desktop por SSH com chave: `Host torre2` em `~/.ssh/config` (usuário `torre2`; IP por DHCP,
      hoje 191.4.205.114 — atualizar `HostName` quando mudar);
-   - **o servidor é o ambiente principal** (decisão do usuário, 2026-10-20): edita-se direto em `torre2:~/open5GK3S`,
+   - **o servidor é o ambiente principal** (decisão do usuário, 2026-10-20): edita-se direto em `torre2:~/InnovaNetwork`,
      aplica-se com `sudo ./install.sh`, testa-se com `./test.sh` e **o git vai do servidor para o GitHub**
      (`git commit` + `git push` no servidor). O clone do desktop vira cópia: `git pull` antes de mexer nele;
    - push pelo servidor com **deploy key de leitura e escrita** só deste repositório (`~/.ssh/github-open5gk3s`,
@@ -40,7 +50,11 @@ Documentação do projeto: **português**.
      removido com `k3s-uninstall.sh` (autorizado pelo usuário) antes do `sudo ./install.sh`;
    - o assistente de IA fica no desktop e opera o servidor por SSH (`ssh torre2`); comandos com sudo no servidor
      são rodados pelo usuário (`ssh -t torre2 'sudo …'`).
-4. Dashboard de acompanhamento (pedido do usuário, adiado): pods/NFs, UEs registrados, sessões, tráfego.
+4. **Painel (Innova Center Dashboard) no ar desde 2026-10-21 19:12 UTC** em http://191.4.205.17:30998 (decisão 32;
+   `sudo ./install.sh --dashboard-only`, core sem reinício). **v1.0 em 2026-10-21**: chave SSH torre2 → innovaserver
+   feita, log do gNB (`GNB_LOG_SSH`), aba Máquinas, aba Configuração, UEs do rádio por nome/IMSI/IP. Pendentes:
+   medidor de energia atrás do NAT do Wi‑Fi (docs/dashboard.md, "Energia"); `OPEN5GS_METRICS=true` numa janela
+   livre (reinicia o core); `/tmp/gnb.log` do OCUDU com 9 GB (rotacionar).
 5. Fase RAN real: **OCUDU** (CU/DU) + **LiteOn** (O-RU) — validar `EXPOSE_RAN` com SCTP real ou migrar N2/N3 para
    Multus/macvlan/SR-IOV; alinhar PLMN/TAC/S-NSSAI; cadastrar SIMs em `SUBSCRIBERS`; preparar host do DU (PTP, fronthaul).
 
@@ -91,6 +105,88 @@ Documentação do projeto: **português**.
 27. **Nó do k3s independente da rede física** (`NODE_IP_MODE=stable`, padrão). O `node-ip` ficava preso ao IP do cabo (191.4.204.79/`enp0s31f6`). Ao desligar o cabo e usar o Wi‑Fi, o k3s não subia (`node IP not found`). Agora uma interface dummy `k3s0` com 10.254.254.1/32, criada pela unit `open5gs-k3s-netif.service` e exigida pelo k3s via drop-in, é o node-ip e o flannel-iface. O host continua em DHCP, sem IP fixo; o N6 sai pela rota default do momento; NodePort e ServiceLB respondem em qualquer IP do host. `iface` mantém o comportamento antigo. Com `EXPOSE_RAN`, o IP físico anunciado ainda precisa ser estável. `uninstall --k3s` remove a unit e a interface.
 28. **Recuperação do plano de usuário** (`AUTO_HEAL=true`). Depois de um reboot ou restart do k3s, o UPF passou a rejeitar o SMF (`Cannot find PFCP-Node`): o UE registrava e recebia IP, mas não pingava. `ensure_user_plane` (common.sh) escalona: espera, depois reinicia os UEs, depois UPF → SMF → gNB → UEs. É usado pelo install e por `scripts/heal.sh`. A unit `open5gs-k3s-heal` (`Type=exec`, para não atrasar o boot) roda no boot uma **cópia root** em `/opt/open5gs-k3s/heal`: uma unit root não executa arquivos que o usuário pode editar. `uninstall --k3s` remove a unit.
 29. **Rede instável no servidor** (torre2: DNS e downloads falharam por alguns segundos durante o install): `retry` em `common.sh` (5 tentativas, 5–20 s) no instalador do k3s, clone/fetch dos charts, `helm repo add` e `helm dependency build`; `curl --retry` nos downloads.
+30. **Setor 2 — link direto com o gNB real (`RAN_LINK_ENABLED`)**. Multus (chart `rke2-multus`, pastas do k3s em
+    `helm/multus/values.yaml`; o chart não traz o CRD ⇒ `helm/multus/crd.yaml`) + rede `ran-link` (macvlan sobre
+    `RAN_LINK_IFACE`, MTU do link, IP fixo por anotação). AMF (N2), UPF (N3) **e o gNB simulado** ganham `net1` no link,
+    como na arquitetura de referência (towards5gs-helm): o `test.sh` passa pelo mesmo caminho do gNB real. O chart do
+    AMF fixa `ngap: dev eth0` ⇒ post-renderer `helm/postrender/amf-ngap-net1.sh`. Alternativa `EXPOSE_RAN` (NAT pelo
+    IP do host) fica para quem não tem link dedicado. Limitação: sem sinal no cabo o macvlan fica sem carrier e o gNB
+    simulado também não conecta.
+31. **PFCP (N4) sem NAT: Service `upf-pfcp` headless** (`clusterIP: None`). Com ClusterIP, o SMF falava com o UPF via
+    DNAT e o UPF respondia direto ao pod do SMF; os dois fluxos UDP 8805↔8805 colidiam no conntrack, a porta de origem
+    do SMF era reescrita (ex.: 16098, 1155) e o UPF rejeitava tudo com `Cannot find PFCP-Node` (heartbeats e
+    modificações de sessão). É a causa provável da "dessincronia PFCP" da decisão 28. Apareceu de forma constante com o
+    gNB real (2026-10-21). Limitação: o SMF resolve o nome só ao iniciar; se o UPF reiniciar sozinho (IP novo), é preciso
+    reiniciar o SMF depois (o `heal.sh` já faz UPF → SMF). O install apaga o Service antigo (clusterIP é imutável).
+
+32. **Painel de logs e métricas: Innova Center Dashboard** (`dashboard/`, `docs/dashboard.md`). Pedido do usuário:
+    analisar logs e métricas (gNB, core, tráfego, BLER) num site local, parte do core. Escolhas:
+    - **roda na máquina do core**, como pod no namespace do core (o OCUDU precisa da CPU; nada é instalado no host do gNB):
+      as métricas do gNB são *puxadas* do WebSocket `remote_control` (`GNB_METRICS_URL`) e o log do gNB é lido por SSH
+      (`tail -F`, só leitura) por uma unit na máquina do core (`open5gs-k3s-gnb-log`, usuário do install), que descarta
+      `[PHY] [I]` por padrão (`GNB_LOG_DROP`; ~100 kB/s de log com o gNB parado);
+    - **sem dependências**: backend só com a biblioteca padrão do Python (imagem `python:3.12-slim`, arquivos num
+      ConfigMap), gráficos com uPlot 1.6.31 guardado no repositório (funciona offline);
+    - **só leitura**: ServiceAccount com `get/list/watch` em `pods` e `pods/log`; usuário 65534, raiz só leitura; senha
+      opcional (`DASHBOARD_PASSWORD`); o agente usa token gerado pelo install (só root lê);
+    - estado do core (gNBs N2, registros, sessões DNN→IP, erros) **tirado dos logs** do AMF/SMF/UPF; métricas Prometheus
+      (`OPEN5GS_METRICS`) são opcionais porque ligá-las reinicia o core;
+    - histórico só em memória (15 min); BLER nos cartões em janela de 10 s; MCS/SNR sem transmissão viram lacuna;
+    - `install.sh --dashboard-only` sobe só o painel; com `OPEN5GS_METRICS=false` os values do core ficam idênticos
+      (verificado), então o install completo também não reinicia o core por causa do painel;
+    - visual: branco/azul/cinza (pedido do usuário) com o verde do Centro Innova (#91cf50) só como detalhe;
+    - aba **Máquinas**: a do core lida pelo pod (`/proc`, `/sys` e `/` do host montados só leitura); as outras
+      (`DASHBOARD_HOSTS`) por SSH a partir da máquina do core, enviando o coletor pela entrada padrão — nada instalado
+      no host do gNB; unit `open5gs-k3s-hosts`. Pods com nome curto (AMF…) e assinantes "SIM real" × "UERANSIM";
+    - **aba Configuração**: edita o `config.env` pela web com senha de administrador própria, diff, validação do
+      install, backup/restauração. Salvar não aplica: o painel mostra o `sudo ./install.sh ...` necessário (o
+      pod não ganha root). Pod com o projeto só leitura e só o `config.env` gravável (grupo do dono);
+    - **histórico persistente** (`DASHBOARD_PERSIST`): SQLite no host (`/var/lib/open5gs-k3s/dashboard`), todas as
+      séries em blocos de 60 s comprimidos, eventos do core, **experimentos** (marcadores com nome/notas/setup) e
+      comparação lado a lado. Escolhido SQLite da biblioteca padrão em vez de InfluxDB/Prometheus: nada novo para
+      instalar, um arquivo só, fácil de copiar;
+    - **aba RU** (v1.2): a O-RU LiteOn é lida pela porta de gestão RJ45 (10.101.131.59, mesmo switch do core) por
+      SSH com senha, só comandos `show`, numa unit da máquina do core (`open5gs-k3s-ru`). Senhas num arquivo do root
+      (`state/ru-credentials`), nunca no `config.env`/git. IP extra `/24` na interface do core (nunca `/8`: cobriria a
+      fibra e o k3s). Escolhido CLI em vez de NETCONF (porta 830 aberta) porque a CLI já dá estado, PM e
+      configuração, sem biblioteca nova;
+    - **aba Controle** (v1.3): iniciar/parar/reiniciar por função, "Iniciar tudo" em ordem com conferência e
+      recriação de pod sem `net1`; no boot só o painel (`CORE_AUTOSTART=false`, `heal.sh --boot-off`). gNB OCUDU
+      por serviço `ocudu-gnb@<yml>` + regra polkit só para essas units (o usuário não quer sudo sem senha);
+      escolha do usuário: o serviço roda binário e `.yml` direto da home (sem cópia do root) e não prepara a
+      máquina (interface/DPDK/XDP/PTP continuam manuais);
+    - **energia** do innovaserver pelo medidor MiEnergy: o painel lê `http://IP/Data` direto (sem InfluxDB/Grafana do
+      projeto original). Pendente: o medidor ficar alcançável a partir do torre2 (`ENERGY_METER_URL`).
+
+33. **Dois cores, um ativo (InnovaNetwork v2.0)**. O painel tem um adaptador por core (`CoreOps` em
+    `control.py`, `CoreCollector`/`CoreSet` em `server.py`). **Core ativo** = o único com AMF rodando; com os dois
+    ou nenhum, o último escolhido (`core-ativo.json` ao lado do histórico). A troca pelo painel segue uma ordem
+    fixa: para o gNB OCUDU (se pedido) → para o core atual inteiro → grava o novo ativo → sobe o novo em ordem com
+    as conferências de sempre → religa o gNB com um `.yml` cujo AMF é o do novo core. Não há troca "a quente": quem
+    estiver conectado cai. Escolhas:
+    - o free5GC dá ao painel uma Role própria no namespace dele (`innovanetwork-dashboard`) em vez de ClusterRole;
+    - o namespace do free5GC leva o rótulo `innovanetwork/core`, e o `heal.sh --boot-off` para todo namespace com
+      ele (um core futuro só precisa do rótulo);
+    - os dados do free5GC chegam ao painel pelo `render_dashboard` (lê `free5gc/free5gc.env` num subshell); sem o
+      arquivo, o painel fica igual ao de um core só.
+34. **Login de administrador único** (pedido do usuário): botão **Admin** no topo; o token vai para o
+    `localStorage` (antes `sessionStorage`, uma aba do navegador por vez) e é sincronizado entre abas pelo evento
+    `storage`. Ao abrir a página, `GET /api/admin` confere se o token ainda vale (o painel guarda as sessões em
+    memória; reiniciar o pod derruba todas).
+35. **Aba Documentação** (pedido do usuário: "pode ser o git mesmo"): o painel lê os `.md` da pasta do projeto
+    (já montada só leitura para a aba Configuração), renderiza com um leitor de Markdown próprio (sem
+    bibliotecas, âncoras como no GitHub) e mostra branch/commit lidos de `.git` (sem rodar `git`). Só arquivos
+    `.md` dentro do projeto, fora de pastas ocultas e fora do que o git ignora (`.git/info/exclude`,
+    `.gitignore`): arquivos locais não aparecem.
+
+36. **RAN depois de um boot (2026-10-26)**: o gNB só liga depois de o GNSS do innovaserver dar hora válida; se a
+    RU sincronizou antes, reinicia-se a RU. O XDP `ptp-trim.o` não é condição para os celulares (só para a RU
+    medir o atraso); na máquina: `tx_timestamp_timeout 50` e XDP carregado no `ExecStartPre` do `ptp4l-gm`.
+    Detalhes em `docs/ran-ocudu-liteon.md`.
+37. **Mudança de rumo (pedido do usuário, 2026-10-26): o OCUDU passa a rodar no Kubernetes** na versão oficial
+    do InnovaNetwork (antes: "OCUDU nunca em container/k3s"). Dois instaladores separados: um para cores e
+    painel (o atual) e outro para o OCUDU, deixando claro que este depende do setup de cada um (placa, RU, PTP,
+    DPDK, CPUs). Primeiro passo: levantamento do que o OCUDU precisa no Kubernetes, para decisão do usuário.
 
 ## Ruído conhecido
 
@@ -111,3 +207,65 @@ Docker ativo, **firewalld ativo**, NetworkManager, tailscale e zerotier, `kubect
 - 2026-10-19: publicado em https://github.com/Miguelclunardi/open5GK3S (privado).
 - 2026-10-19: cabo desligado ⇒ k3s não subia (node-ip preso ao IP físico). Criado `NODE_IP_MODE=stable` com interface
   dummy `k3s0` (27); o host continua em DHCP. Reboot revelou dessincronia PFCP ⇒ `heal.sh` + unit de boot (28).
+- 2026-10-21: Setor 2 no torre2: Multus + link direto com o OCUDU (30), PFCP headless (31), rede InnovaSplit, UEs reais
+  conectados. Painel Innova Center Dashboard (32) escrito e testado fora do cluster (só leitura); instalação adiada
+  porque havia pessoas testando a rede.
+- 2026-10-21 (noite): painel **v1.0** — aba Configuração (edita o `config.env` com senha de administrador, diff,
+  validação e backup; aplicar continua sendo `sudo ./install.sh`), UEs do rádio identificados (RNTI → IMSI/IP pelos
+  logs do gNB, AMF e SMF), log do gNB ligado. Medidor MiEnergy integrado mas desligado: está atrás do NAT do Wi‑Fi.
+- 2026-10-21 (fim do dia): painel com aba Core sem Prometheus (CPU/memória dos NFs e tráfego do UPF pelo /proc do
+  host), WebUI do Open5GS embutida na aba Core (Assinantes), install do painel com server-side apply. Pendentes:
+  pool para a DNN `ims` (SMF/UPF reiniciam: janela sem usuários), medidor de energia atrás do NAT do Wi-Fi,
+  temperatura do innovaserver (ver IPMI), rotação do `/tmp/gnb.log` (9 GB).
+- 2026-10-22: reboot com troca de IP (torre2 .17 → .117, innovaserver .77 → .122). Os agentes do painel (log do gNB e
+  aba Máquinas) enviavam para o IP físico gravado no install ⇒ passaram a usar o IP fixo do nó (`k3s0`
+  10.254.254.1). Depois do boot, AMF/UPF/UERANSIM subiram sem `net1` (Multus ainda não estava pronto) e o `heal.sh`
+  reiniciou gNB e UEs ao mesmo tempo (o UE pegou o IP do gNB antigo). Decidido: o core **não** sobe sozinho no boot;
+  só o painel. O painel ganha iniciar/parar/reiniciar por função e "iniciar core inteiro" em ordem (em andamento).
+- 2026-10-22: RU LiteOn ligada no switch (gestão 10.101.131.59). Painel **v1.2** com a aba RU (estado, potência,
+  temperatura, fronthaul, configuração; só leitura) e a RU no histórico/experimentos.
+- 2026-10-22: painel **v1.3** com a aba Controle (core, UERANSIM e gNB OCUDU). Testado o "Iniciar tudo" com tudo
+  rodando (só confere, nada reiniciado). Validado em uso pelo usuário: Parar tudo → Iniciar core (~4 min, UPF/SMF/AMF
+  conferidos) → gNB OCUDU pelo serviço (RU "DU conectado" e N2 em ~14 s) → UERANSIM. O serviço passa
+  `configs/metricas.yml` como 2º `-c` (como o usuário rodava à mão; liga as métricas na porta 8001 do painel; o
+  arquivo não é alterado). Abas: Visão geral, Controle, Rádio, Core, RU, Logs, Máquinas, Histórico, Configuração.
+  Tags `v1.2-dashboard` (8b8c9ed, aba RU) e `v1.3-dashboard` (aba Controle).
+- 2026-10-22 (noite): painel **v1.4** — logotipo oficial da Innova, abas na ordem Visão geral, Controle, Rádio, Core,
+  RU, Logs, Máquinas, Histórico, Configuração; título maior sem o nome da rede. Tag `v1.4-dashboard` = estado
+  estável de referência (Open5GS + OCUDU + RU + painel).
+- **Próxima fase (decidida em 2026-10-22):**
+  - o projeto completo passa a se chamar **InnovaNetwork** (repositório novo); **Open5GK3S** fica sendo só o
+    core Open5GS + UERANSIM (setor 1, `v1.0-ueransim`);
+  - segundo core: **free5GC** (versão mais nova) no mesmo k3s do torre2, namespace próprio, pasta e config
+    próprios; **um core por vez**, trocado pela aba Controle; também com o OCUDU (`.yml` próprio, AMF na fibra);
+  - painel com o conceito de **core ativo** (adaptador por core; as abas mostram só o core ativo; Rádio, RU,
+    Máquinas e Histórico não mudam; cada experimento registra o core). Protótipo aprovado pelo usuário;
+  - nomes técnicos instalados (`open5gs-k3s-*`, `/opt/open5gs-k3s`) só migram numa janela combinada.
+  - 2026-10-22: a pasta do projeto no torre2 passou a ser `~/InnovaNetwork` (era `~/open5GK3S`).
+  - **padrão do InnovaNetwork = OCUDU + Open5GS**; o free5GC é **opcional** (instalado à parte com `free5gc/install.sh`;
+    sem ele tudo funciona como hoje). O painel só mostra a troca de core quando o free5GC estiver instalado.
+- 2026-10-22: **free5GC — fase 1** (branch `innovanetwork` = projeto completo, pasta `free5gc/`, ver `free5gc/README.md`): v4.3.0 com
+  manifestos gerados pelo nosso `render.py` a partir dos configs oficiais (o chart free5gc-helm 4.2.2 fixa PLMN,
+  slices e IPs nos templates e o modo multus dele põe rota padrão na fibra). Mesmo desenho de rede do Open5GS:
+  só N2 (AMF 10.10.0.30) e N3 (UPF 10.10.0.31) na fibra; pools 10.60/16 e 10.61/16; WebConsole NodePort 31000;
+  PKI de teste própria fora do git. Instala como usuário comum; só o `gtp5g` (DKMS, v0.10.3) pede sudo.
+  Validado no cluster: as 11 funções do plano de controle sobem, AMF escuta em 10.10.0.30:38412, cadastro pela
+  API ok. **Validado ponta a ponta (2026-10-22)**: gtp5g **0.10.2** (o UPF 4.3.0 só aceita 0.9.3 ≤ v < 0.10.3),
+  PFCP SMF↔UPF, NG Setup do gNB simulado, sessão PDU (10.60.0.1) e ping 8.8.8.8 — `free5gc/test.sh` 6/6.
+  SIMs do Open5GS importados (`--importar-open5gs`, 7 IMSIs). Celulares reais com OCUDU + LiteOn (`configs/gnb_ru_liteon_FREE5GC.yml` no innovaserver, só o AMF muda):
+  slice 1 ok com internet, depois de anunciar voz IMS e criar a DNN `ims`. Slice 2: limitação do free5GC
+  (sem S-NSSAI no pedido usa a 1ª slice permitida) — **decisão do usuário: deixar como está** (ver free5gc/README.md).
+  Nomes das redes: InnovaOpen5GS (config.env, vale após `--deploy-only`) e InnovaFree5GC.
+- 2026-10-26: reboot das máquinas (IPs novos: torre2 .77, innovaserver .80; nada do projeto dependia deles). O
+  free5GC subiu sozinho no boot (o `--boot-off` ainda só olhava o namespace do Open5GS) ⇒ decisão 33.
+- 2026-10-26: **painel v2.0 / InnovaNetwork v2.0**: core ativo e troca de core (33), login único (34), aba
+  Documentação (35), ícone com o cubo verde oficial da Innova. Testado com uma cópia do painel ligada ao cluster
+  (senha de teste) e Chrome sem janela: todas as abas sem erro de JavaScript, login/saída em todas as abas, troca
+  nos dois sentidos com os testes dos dois cores passando. Documentação oficial reescrita (README do projeto,
+  operação, rádio; o README antigo virou `docs/open5gs-core.md`).
+- 2026-10-26 (tarde): repositório novo https://github.com/Miguelclunardi/InnovaNetwork (público; deploy key do
+  torre2 com escrita; `origin` = InnovaNetwork, `open5gk3s` = repositório antigo). Rede fora depois do reboot:
+  GNSS levou 30 min, a RU (reiniciada às 15:09 por queda de link) sincronizou no tempo errado e não se acertou
+  depois do salto de 31,6 s (5 % dos pacotes no tempo, uplink perdido); resolvido reiniciando a RU (91 %). Depois,
+  o free5GC foi parado com o gNB ligado nele (célula caiu); com a troca pelo cartão Core ativo, celular conectado
+  no free5GC (internet + IMS) e no Open5GS (decisão 36).
