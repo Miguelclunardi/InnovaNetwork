@@ -57,6 +57,14 @@ do_image() {
   # Contexto limpo = só o commit (sem build/ nativo de ~2 GB, que quebraria o cmake da imagem)
   rm -rf "${ctx}"; mkdir -p "${ctx}"
   sudo -u "${OWNER}" git -C "${OCUDU_SRC_DIR}" archive HEAD | tar x -C "${ctx}"
+  if [[ "${OCUDU_IMAGE_ROHC:-false}" != "true" ]]; then
+    # Sem ROHC (igual ao gnb nativo): o Dockerfile copia /opt/rohc, então criamos a pasta vazia
+    # em vez de baixar e compilar a biblioteca. Só a cópia temporária muda; o OCUDU_SRC_DIR não.
+    info "sem ROHC (OCUDU_IMAGE_ROHC=false): build_rohc.sh substituído na cópia temporária"
+    printf '#!/bin/sh\nmkdir -p /opt/rohc/lib /opt/rohc/include\necho "ROHC desligado (InnovaNetwork)"\n' \
+      > "${ctx}/docker/scripts/build_rohc.sh"
+    chmod 755 "${ctx}/docker/scripts/build_rohc.sh"
+  fi
   say "compilando (demora ~20-40 min; usa ${OCUDU_BUILD_JOBS} jobs nas CPUs não isoladas)"
   docker build -f "${ctx}/docker/Dockerfile" --target runtime-dpdk \
     --build-arg COMPONENT=gnb \
