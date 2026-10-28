@@ -160,6 +160,20 @@ com 1 réplica, então o Kubernetes recriaria o pod quando o innovaserver voltas
 Funciona tanto se só o innovaserver reiniciar quanto se as duas máquinas reiniciarem. `install.sh` preserva o
 pedido em vigor (não derruba nem trava um gNB ligado).
 
+### 3.11 Reboot de validação (2026-10-28, innovaserver)
+
+| Verificação | Resultado |
+|---|---|
+| nó volta ao cluster sozinho | `innovaserver Ready` ~2 min depois do boot |
+| rota `10.254.254.1 via 10.10.0.2` | ativa (unit `innovanetwork-k3s-route`) |
+| MicroK8s | continua desligado |
+| gNB não liga sozinho | o pod subiu e ficou esperando ("o gNB NÃO liga sozinho"); nenhum `gnb` no host |
+| GPS | válido 8 min depois do boot, com salto de −36,8 s |
+| depois de `restart ptp4l-gm phc2sys` + reiniciar a RU + `gnb.sh iniciar` | N2 ok; celulares registrados em ~25 s; RU 92,4 % no tempo, 0 atrasados |
+
+Sequência depois de um boot: esperar `ts2phc … s2` → `sudo systemctl restart ptp4l-gm phc2sys` (com o gNB
+parado) → reiniciar a RU → `./ran/ocudu/gnb.sh iniciar <yml>`.
+
 ### 3.9 Editar o `.yml` x mudar o código do OCUDU
 
 - **`.yml`** (`~/ocudu/configs/` no nó): o pod lê a pasta do host, sem cópia. Vale no próximo início do gNB
