@@ -133,7 +133,7 @@ deployment = {
     },
 }
 
-# Descritor do componente (contrato da v3, decisão 38): o painel novo lerá daqui.
+# Descritor do componente (contrato da v3): ferramentas como o painel descobrem o que está instalado.
 descriptor = {
     "apiVersion": "v1", "kind": "ConfigMap",
     "metadata": {"name": "innovanetwork-component", "namespace": NS,

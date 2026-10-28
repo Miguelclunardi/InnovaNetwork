@@ -1,88 +1,12 @@
-# free5GC — segundo core (InnovaNetwork)
+# free5GC — core opcional
 
-> **Opcional.** O padrão do InnovaNetwork é OCUDU + Open5GS (o `install.sh` da raiz). O free5GC só existe se
-> você rodar `free5gc/install.sh`; sem ele nada muda.
+Instalador do core **free5GC** do InnovaNetwork (namespace `free5gc`).
 
-Core **free5GC v4.3.0** no mesmo k3s do torre2, separado do Open5GS: namespace `free5gc`, configuração
-própria (`free5gc/free5gc.env`), instalador e desinstalador próprios. **Um core por vez** em operação
-(o gNB OCUDU aponta para um AMF de cada vez), mas os IPs não colidem, então os dois podem coexistir instalados.
+```bash
+sudo ./free5gc/setup-gtp5g.sh     # uma vez: módulo do kernel do UPF
+./free5gc/install.sh              # instala (sem sudo)
+./free5gc/test.sh                 # testa com o UERANSIM
+```
 
-## O que é comum e o que é próprio
-
-| Vem do `config.env` (igual nos dois cores) | Vem do `free5gc/free5gc.env` |
-|---|---|
-| PLMN (MCC/MNC), TAC | versão e imagens (`F5_VERSION`); nome da rede `F5_NETWORK_NAME` (InnovaFree5GC) |
-| slices: SST, SD, DNN (`SLICES`) | pool de IPs dos UEs por slice (`F5_UE_POOLS`: 10.60/16, 10.61/16) |
-| link da fibra (`RAN_LINK_*`) | IPs na fibra: AMF `10.10.0.30`, UPF `10.10.0.31`, gNB simulado `10.10.0.32` |
-| UEs do UERANSIM e `SUBSCRIBERS` | WebConsole NodePort `31000` |
-
-## Rede
-
-Igual ao desenho do Open5GS: tudo pela rede dos pods, **só N2 (AMF) e N3 (UPF) na fibra** (macvlan `ran-link`
-em `RAN_LINK_IFACE`). N4 (PFCP) pela rede dos pods: o SMF descobre o IP do UPF na partida (serviço headless
-`upf`), por isso **o SMF precisa ser reiniciado depois de um UPF novo** (o painel já faz isso). N6: o UPF faz NAT
-dos pools para a internet pelo `eth0` do pod.
-
-## Instalar
-
-1. Uma vez, com sudo, o módulo do kernel do UPF (DKMS; recompila sozinho quando o kernel atualizar; não afeta o Open5GS):
-   ```bash
-   sudo ./free5gc/setup-gtp5g.sh
-   ```
-2. Como usuário comum (não precisa de sudo):
-   ```bash
-   ./free5gc/install.sh --dry-run    # gera e valida, não aplica
-   ./free5gc/install.sh              # instala e sobe em ordem; cadastra os assinantes do config.env
-   ./free5gc/test.sh                 # pods, PFCP, NG Setup, registro, sessão e ping do UE simulado
-   ```
-   `--parado` instala e deixa tudo em 0 réplicas; `--sem-ueransim` não sobe o UERANSIM deste core.
-
-## Assinantes
-
-- `./free5gc/install.sh --assinantes`: cadastra os do `config.env` (UEs do UERANSIM + `SUBSCRIBERS`).
-- `./free5gc/install.sh --importar-open5gs`: copia os SIMs cadastrados na WebUI do Open5GS (o Open5GS precisa
-  estar no ar). As chaves passam direto de um banco para o outro, sem aparecer na tela. Slice sem SD vira a slice
-  de mesma SST; DNN que o free5GC não tem (ex.: `ims`) fica de fora e é listada.
-- WebConsole: `http://<IP do torre2>:31000`, usuário `admin`, senha padrão `free5gc` — **troque**.
-
-## No painel
-
-Com o free5GC instalado, o `sudo ./install.sh --dashboard-only` faz o painel mostrar o cartão **Core ativo** na
-aba Controle: um clique troca o core (para um, sobe o outro em ordem e religa o gNB OCUDU com o `.yml` certo).
-Todas as abas passam a mostrar o free5GC quando ele é o ativo. Ver [docs/operacao.md](../docs/operacao.md#3-trocar-de-core-open5gs--free5gc).
-
-## gNB OCUDU
-
-Um `.yml` próprio, cópia do que usa o Open5GS com o AMF trocado (`cu_cp.amf.addr: 10.10.0.30`), por exemplo
-`configs/gnb_ru_liteon_FREE5GC.yml`. O N3 do gNB continua `10.10.0.1`. Iniciar pela aba Controle.
-
-## Celulares comerciais (validado 2026-10-22, OCUDU + LiteOn)
-
-- Funciona na **slice 1**: registro, sessões `internet` (10.60/16) e `ims` (10.62/16), internet ok.
-- Precisa de **voz IMS anunciada** (`imsVoPS: 1`) e da DNN **`ims`** (`F5_EXTRA_DNNS`): sem isso o celular
-  registra e sai da célula ~1 s depois (celular de voz desliga o 5G quando a rede diz que não tem voz).
-- **Limitação do free5GC (slice 2):** quando o celular pede sessão **sem informar a S-NSSAI**, o AMF usa sempre a
-  primeira slice permitida (`allowedNssai[0]`, `internal/gmm/handler.go`), sem olhar a DNN. Um celular que pede
-  `internet2` sem slice cai na slice 1 e é recusado (403 / "DNN not matched"). O Open5GS escolhe a slice pela DNN,
-  por isso lá funciona. Decisão: manter o free5GC original; slice 2 só com UE que informa a slice (UERANSIM,
-  celular com URSP/slice configurada).
-- O gNB OCUDU não reconecta sozinho se o AMF reiniciar: reinicie o gNB (aba Controle).
-- O nome da rede só aparece no celular depois do registro; na busca manual aparece o nome antigo/do chip.
-
-## Remover
-
-`./free5gc/uninstall.sh` apaga só o namespace `free5gc` (inclusive os assinantes dele). O módulo:
-`sudo ./free5gc/setup-gtp5g.sh --remove`.
-
-## Arquivos
-
-| Arquivo | Para quê |
-|---|---|
-| `free5gc.env` | configuração própria do free5GC |
-| `install.sh` / `uninstall.sh` / `test.sh` | instalar, remover, conferir |
-| `setup-gtp5g.sh` | módulo do kernel (sudo, uma vez) |
-| `lib/render.py` | gera os manifestos e a configuração de cada função a partir dos dois arquivos de config |
-| `lib/subscribers.py` | cadastro pela API do WebConsole (e importação do Open5GS) |
-
-Certificados: PKI de teste gerada no primeiro install em `~/.config/innovanetwork/free5gc/cert` (fora do git).
-O free5GC exige os arquivos mesmo com a SBI em http.
+Documentação completa: [docs/componentes/free5gc.md](../docs/componentes/free5gc.md). Troca de core:
+[tutorial 5](../docs/tutoriais/05-trocar-de-core.md).

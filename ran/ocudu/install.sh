@@ -3,7 +3,7 @@
 #  ran/ocudu/install.sh — gNB OCUDU no Kubernetes (componente RAN do InnovaNetwork).
 #
 #  Roda no torre2 (servidor do k3s). Separado do install.sh dos cores e do painel.
-#  DEPENDE DO SEU SETUP: veja ran/ocudu/ocudu.env e docs/ocudu-k8s.md.
+#  DEPENDE DO SEU SETUP: veja ran/ocudu/ocudu.env e docs/componentes/ocudu.md.
 #
 #  Ordem, na primeira vez:
 #    1. ./ran/ocudu/install.sh copiar          copia no-ran.sh + ocudu.env para o nó (~/innovanetwork-ran)

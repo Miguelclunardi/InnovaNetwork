@@ -1,108 +1,144 @@
-# Operação do InnovaNetwork
+# Operação
 
-O dia a dia da rede: ligar, trocar de core, testar, cadastrar SIMs e resolver problemas. Quase tudo é feito pelo
-**painel** (`http://<IP do torre2>:30998`). Visão geral: [README](../README.md).
+O dia a dia da rede. Quase tudo é feito pelo **painel** (`http://<IP da máquina do core>:30998`).
+
+- [1. Login de administrador](#1-login-de-administrador)
+- [2. Depois de ligar as máquinas](#2-depois-de-ligar-as-máquinas)
+- [3. Ligar e parar](#3-ligar-e-parar)
+- [4. Trocar de core](#4-trocar-de-core)
+- [5. O gNB OCUDU](#5-o-gnb-ocudu)
+- [6. Assinantes (SIMs)](#6-assinantes-sims)
+- [7. Mudar a configuração](#7-mudar-a-configuração)
+- [8. Testar](#8-testar)
+- [9. Comandos úteis](#9-comandos-úteis)
+
+---
 
 ## 1. Login de administrador
 
-Ver o estado é livre. Ações (iniciar, parar, trocar core, editar o `config.env`) pedem a senha de administrador:
+Ver o estado é livre. Ações (iniciar, parar, trocar core, editar a configuração) pedem a senha de administrador:
 
-- clique em **🔒 Admin** no topo do painel; **um login vale para todas as abas** (Controle, Configuração) e para
-  as outras abas/janelas do mesmo navegador, por 8 h;
-- **🔓 Admin · Sair** encerra a sessão em todas elas;
-- a senha aparece no fim do `sudo ./install.sh` e fica em `sudo cat /opt/open5gs-k3s/state/dashboard-admin-password`.
+- **🔒 Admin**, no topo: um login vale para todas as abas e janelas do mesmo navegador, por 8 h;
+- **🔓 Admin · Sair** encerra a sessão;
+- a senha está em `sudo cat /opt/open5gs-k3s/state/dashboard-admin-password` (máquina do core).
 
 ## 2. Depois de ligar as máquinas
 
-Com `CORE_AUTOSTART=false` (padrão) **só o painel sobe** no boot; os cores ficam parados (Open5GS e free5GC).
-O innovaserver sobe sozinho a preparação (DPDK, XDP, PTP), mas **não** o gNB.
+Por segurança, **só o painel sobe sozinho** (`CORE_AUTOSTART=false`). Core e gNB são ligados pelo operador.
 
-1. Painel → **🔒 Admin**.
-2. Aba **Controle** → cartão **Core ativo**: confira qual core vai usar (o último escolhido fica marcado).
-3. **▶ Iniciar tudo** — sobe o core ativo em ordem (MongoDB → NRF → … → UPF → SMF → AMF → UERANSIM) e confere
-   cada etapa nos logs (UPF no IP da fibra, SMF associado ao UPF, AMF escutando N2, NG Setup do gNB simulado).
-   Pod que sobe sem a interface da fibra é recriado sozinho.
-4. **Espere o GPS do innovaserver** (até ~30 min depois de um boot; `journalctl -u ts2phc -f` mostrando
-   `offset … s2`). Se a RU ligou antes disso, reinicie a RU. Ver [ran-ocudu-liteon.md](ran-ocudu-liteon.md#depois-de-ligar-as-máquinas-espere-o-gps).
-5. Cartão **gNB OCUDU**: escolha o `.yml` do core ativo (os outros aparecem marcados) e **Iniciar**. A aba confere
-   o serviço, a RU com "DU conectado" e o N2 no AMF.
-6. **Visão geral**: celulares registrados, sessões e tráfego.
+| # | Onde | O que fazer | Pronto quando |
+|---|---|---|---|
+| 1 | painel | **🔒 Admin** → aba **Controle** → confira o **Core ativo** → **▶ Iniciar tudo** | todas as etapas ✓ (AMF escutando N2, SMF associado ao UPF) |
+| 2 | máquina do RAN | esperar o GNSS: `journalctl -u ts2phc -f` | linhas com `offset … s2` (até ~30 min após o boot) |
+| 3 | máquina do RAN | se o relógio deu salto (o normal após o boot): `sudo systemctl restart ptp4l-gm phc2sys` | `phc2sys` com offset de poucos ns |
+| 4 | O-RU | reiniciar a O-RU (ela sincronizou com o relógio antigo) | aba **RU**: `SYNCHRONIZED` |
+| 5 | painel | cartão **gNB (Kubernetes)**: escolher o `.yml` do core ativo → **▶ Iniciar** | a aba confere pod rodando, DU conectado e N2 no AMF |
+| 6 | painel | **Visão geral** | celulares registrados com IP |
 
-> Os IPs da universidade (DHCP) podem mudar depois de um reboot. O painel continua em
-> `http://<novo IP do torre2>:30998`; nada dentro do projeto depende desses IPs.
+> Se a máquina do RAN reiniciar, o pod do gNB volta **sem ligar o gNB** e mostra "parado (nó reiniciou)". É a
+> proteção de boot: ligue de novo pelo painel depois dos passos 2–4. Ver [componentes/ocudu.md](componentes/ocudu.md#proteção-de-boot).
 
-## 3. Trocar de core (Open5GS ⇄ free5GC)
+Os IPs da rede local (DHCP) podem mudar após um reboot. Só o endereço para abrir o painel muda; o cluster e a
+fibra usam IPs fixos.
 
-Só aparece quando o free5GC está instalado. **Derruba quem estiver conectado** durante a troca.
+## 3. Ligar e parar
 
-> Use sempre o cartão **Core ativo**. Parar um core e iniciar o outro pelos botões separados **não** mexe no gNB:
-> ele fica tentando o AMF antigo e a célula some (aconteceu em 2026-10-26).
+Aba **Controle**:
+
+| Ação | O que acontece |
+|---|---|
+| **▶ Iniciar tudo** | sobe o core ativo em ordem (MongoDB → NRF → … → UPF → SMF → AMF → UERANSIM) conferindo cada etapa nos logs |
+| **■ Parar tudo** | escala o core e o UERANSIM para 0 (nada é apagado: configuração e assinantes ficam) |
+| botões por função | iniciar / parar / reiniciar uma função; reiniciar UPF também reinicia o SMF, e AMF reinicia o gNB do UERANSIM |
+| cartão do gNB | iniciar com um `.yml` / reiniciar / parar o gNB OCUDU |
+
+Antes de desligar as máquinas, pare o gNB e depois o core.
+
+## 4. Trocar de core
+
+Disponível com o free5GC instalado. **Derruba quem estiver conectado** durante a troca.
 
 1. Aba **Controle** → cartão **Core ativo** → clique no outro core.
-2. Na caixa que abre:
-   - **religar o gNB OCUDU com** — marcado se o gNB estiver rodando; escolha o `.yml` que aponta para o AMF do
-     core novo (o painel só lista esses);
-   - **Trocar agora**.
-3. O painel, em ordem: para o gNB OCUDU → para o core atual e o UERANSIM dele → marca o novo core como ativo →
-   sobe o novo core inteiro conferindo cada etapa → religa o gNB com o `.yml` escolhido.
-4. O andamento aparece no topo da aba Controle e vai para os eventos e o histórico.
+2. Deixe **religar o gNB OCUDU com** marcado e escolha o `.yml` que aponta para o AMF do novo core (o painel só
+   lista esses).
+3. **Trocar agora.** O painel para o gNB → para o core atual → marca o novo → sobe o novo conferindo cada etapa →
+   religa o gNB.
 
-Tempos medidos (2026-10-26, sem gNB): free5GC → Open5GS ~5 min (o Open5GS tem mais funções e espera o NRF/SCP);
-Open5GS → free5GC ~1 min. Com o gNB, some ~15 s para o N2.
+Tempos típicos: Open5GS → free5GC ~1 min; free5GC → Open5GS ~5 min. Todas as abas passam a seguir o core ativo
+(funções, logs, assinantes, sessões, tráfego).
 
-Depois da troca, **todas as abas seguem o core ativo**: nomes das funções, logs, assinantes (WebUI do Open5GS ou
-WebConsole do free5GC), sessões e tráfego. Rádio, RU, Máquinas e Histórico não mudam; cada experimento gravado
-registra o core em uso.
+> Use sempre o cartão **Core ativo**. Parar um core e iniciar o outro pelos botões separados não mexe no gNB, que
+> fica apontando para o AMF antigo.
 
-Prefira sempre o painel para trocar: ele segue a ordem certa e confere cada etapa. Escalar Deployments à mão
-no namespace `open5gs` também para o painel, que mora lá.
+Tutorial: [Trocar de core](tutoriais/05-trocar-de-core.md).
 
-## 4. Parar tudo
+## 5. O gNB OCUDU
 
-Aba **Controle** → **■ Parar tudo** (escala para 0; nada é apagado: configuração e assinantes ficam).
-O gNB OCUDU tem botão próprio. Antes de desligar as máquinas, pare o gNB primeiro.
+Pelo painel (cartão **gNB (Kubernetes)**) ou pela linha de comando, na máquina do core:
 
-## 5. Testar
+```bash
+./ran/ocudu/gnb.sh configs                 # .yml disponíveis e o AMF de cada um
+./ran/ocudu/gnb.sh iniciar <yml>           # liga (sem extensão; padrão: o atual)
+./ran/ocudu/gnb.sh parar                   # SIGINT ao gNB, como Ctrl+C
+./ran/ocudu/gnb.sh estado                  # réplicas, .yml, pod, nó, reinícios
+./ran/ocudu/gnb.sh log -f                  # saída do gNB (log completo: /tmp/gnb.log no nó)
+```
 
-| Teste | Comando (no torre2, `~/InnovaNetwork`) | Esperado |
-|---|---|---|
-| Open5GS + UERANSIM | `./test.sh` | `7 verificações OK` |
-| free5GC + UERANSIM | `./free5gc/test.sh` | `6 ok, 0 falha(s)` |
-| Celular real | Visão geral do painel | registrado, sessão com IP do pool do core ativo, tráfego |
-
-Os testes só leem o estado (e usam o UE simulado); não reiniciam nada. O core testado precisa estar ligado.
+| Mudou… | Faça |
+|---|---|
+| um `.yml` em `~/ocudu/configs/` (nó do RAN) | reinicie o gNB. O pod lê a pasta do host; não precisa recompilar |
+| o código do OCUDU | commit → recompilar a imagem → `./ran/ocudu/install.sh` → reiniciar. Ver [tutorial 7](tutoriais/07-alterar-o-gnb.md) |
+| o AMF do core reiniciou | reinicie o gNB (ele não refaz o N2 sozinho) |
 
 ## 6. Assinantes (SIMs)
 
-| Core | Onde cadastrar |
+| Core | Onde |
 |---|---|
-| Open5GS | painel → aba **Core** → **Assinantes** (WebUI, `:30999`), ou `SUBSCRIBERS` no `config.env` + `sudo ./install.sh --deploy-only` |
-| free5GC | painel → aba **Core** → **Assinantes** (WebConsole, `:31000`, usuário `admin`), ou `./free5gc/install.sh --importar-open5gs` para copiar os do Open5GS |
+| Open5GS | painel → **Core** → **Assinantes** (WebUI `:30999`); ou `SUBSCRIBERS` no `config.env` + `sudo ./install.sh --deploy-only`; ou `./scripts/subscribers.sh` |
+| free5GC | painel → **Core** → **Assinantes** (WebConsole `:31000`); ou `./free5gc/install.sh --importar-open5gs` |
 
-As chaves (K/OPc) passam direto de um banco para o outro na importação; não aparecem na tela nem vão para o git.
+As chaves (K/OPc) nunca vão para o git nem aparecem na tela na importação. Tutorial:
+[Celular na rede](tutoriais/04-celular-na-rede.md).
 
 ## 7. Mudar a configuração
 
-- Pelo painel: aba **Configuração** (edita o `config.env`, mostra o diff e valida). Salvar **não aplica**: o
-  painel mostra o comando `sudo ./install.sh …` necessário.
-- Core Open5GS: `sudo ./install.sh --deploy-only`. Painel: `sudo ./install.sh --dashboard-only`.
-- free5GC: editar `free5gc/free5gc.env` e rodar `./free5gc/install.sh`.
-- Mudou o AMF de um core? Reinicie o gNB depois (ele não reconecta sozinho).
+| Onde | Aplicar com | Efeito |
+|---|---|---|
+| painel → aba **Configuração** (edita o `config.env` com diff e validação) | o comando que o painel indicar | salvar **não aplica** |
+| `config.env` — core/UERANSIM | `sudo ./install.sh --deploy-only` | recria as funções que mudaram (derruba usuários) |
+| `config.env` — painel | `sudo ./install.sh --dashboard-only` | só o painel reinicia |
+| `config.env` — host/k3s | `sudo ./install.sh` | pode reiniciar o k3s |
+| `free5gc/free5gc.env` | `./free5gc/install.sh` | recria o free5GC |
+| `ran/ocudu/ocudu.env` | `./ran/ocudu/install.sh` | atualiza o Deployment (preserva `.yml` e estado ligado/desligado) |
 
-## 8. Documentação no painel
+Cuidados:
 
-A aba **Documentação** mostra estes arquivos `.md` direto da pasta do projeto no torre2 (o mesmo conteúdo do
-git), com a branch e o commit em uso e um link para abrir o arquivo no GitHub.
+- rode `--deploy-only` **com o Open5GS como core ativo**: o Helm volta as réplicas do Open5GS para 1;
+- não rode instalador e troca de core ao mesmo tempo;
+- depois de recriar o AMF, reinicie o gNB.
 
-## 9. Problemas comuns
+Tutorial: [Mudar PLMN, slices e IPs](tutoriais/06-mudar-configuracao.md).
 
-| Sintoma | O que fazer |
-|---|---|
-| Painel não abre | `kubectl -n open5gs get pods -l app=dashboard`; `sudo ./install.sh --dashboard-only` |
-| "Iniciar tudo" para numa etapa | leia a linha de erro no topo da aba Controle e o log da função na aba Logs |
-| UE registra mas não navega (Open5GS) | reinicie UPF e depois SMF (o painel faz em ordem: botão Reiniciar do UPF) |
-| gNB não aparece no AMF | `.yml` do outro core, ou AMF reiniciou: reinicie o gNB |
-| Celular na slice 2 recusado (free5GC) | limitação do free5GC — ver [free5gc/README.md](../free5gc/README.md) |
-| Depois do boot nada responde | normal: só o painel sobe; use **▶ Iniciar tudo** |
+## 8. Testar
 
-Mais casos: [troubleshooting.md](troubleshooting.md) (core) e [ran-ocudu-liteon.md](ran-ocudu-liteon.md#7-problemas-comuns) (rádio).
+| Teste | Comando (máquina do core) | Esperado |
+|---|---|---|
+| Open5GS + UERANSIM | `./test.sh` (`-v` mostra logs em caso de falha) | `7 verificações OK` |
+| free5GC + UERANSIM | `./free5gc/test.sh` | `6 ok, 0 falha(s)` |
+| gNB real | painel → **RU** e **Rádio** | `SYNCHRONIZED`, DU `Ready`, ~90 % no tempo; UEs com vazão |
+| celular | painel → **Visão geral** | registrado, sessão com IP do pool do core ativo |
+
+Os testes só leem o estado e usam o UE simulado; o core testado precisa estar ligado.
+
+## 9. Comandos úteis
+
+```bash
+kubectl get nodes -o wide                         # as duas máquinas Ready?
+kubectl get pods -A -o wide                       # tudo, com o nó de cada pod
+kubectl -n open5gs logs deploy/open5gs-amf -f     # AMF ao vivo
+kubectl -n ocudu logs deploy/ocudu-gnb -f         # gNB
+journalctl -u open5gs-k3s-gnb-ctl -f              # agente de controle do gNB (máquina do core)
+less logs/install.log                             # histórico do instalador
+```
+
+Problemas: [troubleshooting.md](troubleshooting.md).

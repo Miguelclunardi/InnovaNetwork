@@ -1,17 +1,19 @@
-# Painel — Innova Center Dashboard (v2.0)
+# Painel — Innova Center Dashboard
 
 Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar o InnovaNetwork
 inteiro: rádio, RU, máquinas e **o core ativo** (Open5GS ou free5GC — ver [Core ativo](#core-ativo-open5gs--free5gc)).
 
+> Guia de uso passo a passo: [tutorial 2 — Conhecer o painel](../tutoriais/02-conhecer-o-painel.md).
+> Experimentos: [tutorial 8](../tutoriais/08-experimentos.md).
+
 | Aba | O que mostra | De onde vem |
 |---|---|---|
 | **Documentação** | os documentos `.md` do projeto (README, `docs/`, `free5gc/`), com busca, a branch e o commit em uso e link para o GitHub | pasta do projeto montada só leitura no pod |
-
 | **Visão geral** | UEs no rádio (vazão, MCS, CQI, RI, BLER, SNR), assinantes vistos pelo core (registro, sessões DNN → IP), pods (estado, reinícios, IP, IP no link RAN), eventos do core (avisos/erros iguais agrupados com contador) | métricas do gNB + API do Kubernetes + logs do AMF/SMF/UPF |
 | **Rádio (gNB)** | UEs identificados por **nome, IMSI, IP e tipo** (SIM real / UERANSIM), não só RNTI; RNTIs parados há mais de 2 min ficam escondidos (botão "Mostrar antigos"); vazão e PRBs da célula; vazão DL/UL por UE; do UE escolhido: BLER, MCS, CQI/rank, SNR/RSRP do PUSCH, buffers, TA/PHR; latência do escalonador e falhas (HARQ atrasado, PDCCH, UCI). Janela de 1/5/15 min, pausa, exportação CSV | WebSocket de métricas do gNB (OCUDU `remote_control`) |
 | **Logs** | log de qualquer pod/contêiner do namespace (core e UERANSIM) e do **gNB real**; ao vivo, filtro por texto ou `/regex/`, filtro por nível, cores, download | API do Kubernetes; agente do log do gNB |
 | **RU** | O-RU LiteOn FlexFi: sincronismo PTP, RF, DPD, DU conectado; potência e temperatura (rádio e CPU); pacotes U-plane do fronthaul (recebidos, adiantados, atrasados); portas de gestão; firmware; configuração de rádio (frequência/NR-ARFCN, banda, SCS, 4T4R, potência, compressão, VLAN, MAC do DU); mudanças de estado | SSH na porta de gestão (RJ45) da RU, só comandos `show` |
-| **Controle** | iniciar / parar / reiniciar cada função do core e o UERANSIM; "Iniciar tudo" em ordem com conferência (fibra, PFCP, NG Setup); gNB OCUDU: escolher o `.yml`, iniciar, parar, reiniciar, ver PTP, VF do DPDK e a saída do serviço. Ações pedem a senha de administrador | API do Kubernetes (escala/pods) + agente `gnb-ctl` (SSH ao host do gNB) |
+| **Controle** | iniciar / parar / reiniciar cada função do core e o UERANSIM; "Iniciar tudo" em ordem com conferência (fibra, PFCP, NG Setup); gNB OCUDU: escolher o `.yml`, iniciar, parar, reiniciar, ver PTP, VF do DPDK e a saída do pod. Ações pedem a senha de administrador | API do Kubernetes (escala/pods) + agente `gnb-ctl` |
 | **Máquinas** | lista das máquinas (core e gNB) com CPU, memória e temperatura; ao clicar: CPU por núcleo (isolados destacados), carga, hugepages, gráficos de CPU/temperatura/memória/rede, processos que mais usam CPU, temperaturas, discos e interfaces | `/proc` e `/sys` (core: montados no pod; outras: SSH) |
 | **Histórico** | métricas **persistentes** (rádio 1 s, core, máquinas, energia, eventos) de qualquer período; **experimentos** (botão "● Gravar experimento" no topo) com nome, notas e retrato do setup; **comparação** lado a lado de 2+ experimentos (KPIs com o melhor em destaque + gráficos sobrepostos); exportação CSV | SQLite em `/var/lib/open5gs-k3s/dashboard` (`DASHBOARD_PERSIST=true`) |
 | **Configuração** | edita o `config.env` (senha de administrador): campos por seção com a explicação do próprio arquivo, diff antes de salvar, validação do install, backup e restauração, e o comando para aplicar | `config.env` da máquina do core |
@@ -44,13 +46,13 @@ estiverem, vale o último escolhido (guardado em `core-ativo.json`, ao lado do h
   `free5gc/install.sh`) para a ServiceAccount do painel — ler pods/logs, escalar Deployments, apagar pods.
 - Boot: `heal.sh --boot-off` também para todo namespace com o rótulo `innovanetwork/core`.
 
-**Nada roda na máquina do gNB.** O painel *puxa* as métricas do gNB pelo WebSocket, e o agente do log
-(também na máquina do core) lê o arquivo do gNB por SSH (`tail -F`, só leitura).
+**Nada do painel roda na máquina do gNB.** O painel *puxa* as métricas do gNB pelo WebSocket, e os agentes (na
+máquina do core) leem o log por SSH (`tail -F`, só leitura) e controlam o gNB pelo Kubernetes.
 
 ## Arquitetura
 
 ```
- máquina do core (torre2)                                         máquina do gNB (innovaserver)
+ máquina do core                                                  máquina do RAN
 ┌──────────────────────────────────────────────────────────┐     ┌─────────────────────────────┐
 │ k3s, namespace open5gs                                   │     │ OCUDU gNB                   │
 │  ┌──────────────────────┐  API k8s (só leitura)          │     │  remote_control :8001 (WS) ◄──── métricas (1/s)
@@ -60,7 +62,7 @@ estiverem, vale o último escolhido (guardado em `core-ativo.json`, ao lado do h
 │  └──────────▲───────────┘                                │                                    │
 │      NodePort 30998  ▲ POST /api/ingest/gnb-log (token)  │                                    │
 │                      │                                   │                                    │
-│  unit open5gs-k3s-gnb-log (usuário do install) ──── ssh innovaserver@10.10.0.1 tail -F ───────┘
+│  unit open5gs-k3s-gnb-log (usuário do install) ──── ssh usuario@10.10.0.1 tail -F ────────────┘
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -105,14 +107,22 @@ pod, que reinicia sozinho.
 | `GNB_LOG_SSH` | vazio | `usuario@host` do gNB para o agente do log; vazio = sem log do gNB |
 | `GNB_LOG_FILE` | `/tmp/gnb.log` | arquivo `log: filename:` da config do gNB |
 | `DASHBOARD_LOCAL_ROLE` | `Core 5G (k3s)` | papel desta máquina na aba Máquinas |
-| `DASHBOARD_HOSTS` | `innovaserver\|innovaserver@10.10.0.1\|gNB OCUDU + LiteOn` | outras máquinas (lidas por SSH) |
+| `DASHBOARD_HOSTS` | `nome\|usuario@host\|papel` | outras máquinas (lidas por SSH) |
 | `DASHBOARD_UE_NAMES` | `001010000000022:Modem Telit FN990` | apelidos dos SIMs; os do UERANSIM são marcados sozinhos |
 | `GNB_LOG_DROP` | `\[PHY *\] \[I\]` | regex de linhas descartadas; vazio = envia tudo |
 | `OPEN5GS_METRICS` | `false` | Prometheus nos NFs (aba Core). **Mudar reinicia o core** no próximo install |
+| `DASHBOARD_CONFIG_EDIT` | `true` | aba Configuração e senha de administrador |
+| `DASHBOARD_CONTROL` | `true` | aba Controle (precisa de `DASHBOARD_CONFIG_EDIT`) |
+| `CORE_AUTOSTART` | `false` | `false` = no boot só o painel sobe; o core é ligado pela aba Controle |
+| `GNB_CTL_MODE` | `k8s` | como o cartão do gNB controla o OCUDU: `k8s` (pod) ou `systemd` (serviço nativo) |
+| `GNB_CTL_SSH`, `GNB_CTL_DIR` | `usuario@10.10.0.1`, pasta do OCUDU | acesso ao nó do gNB e pasta dos `configs/*.yml` |
+| `DASHBOARD_PERSIST`, `…_DAYS`, `…_MAX_GB` | `true`, `365`, `50` | histórico persistente (aba Histórico) |
+| `RU_MGMT_IP`, `RU_SSH_USER`, `RU_MGMT_LOCAL_CIDR`, `RU_POLL_SECONDS` | `10.101.131.59`, `user`, `10.101.131.10/24`, `10` | aba RU |
+| `ENERGY_METER_URL`, `ENERGY_METER_HOST` | vazio | medidor de energia (opcional) |
 
 ### Métricas do gNB (OCUDU)
 
-O gNB precisa do `remote_control` ligado (já está no `metricas.yml` usado no innovaserver):
+O gNB precisa do `remote_control` ligado (é o que o `metricas.yml` faz):
 
 ```yaml
 metrics:
@@ -156,18 +166,18 @@ log do SMF   UE SUPI[imsi-001010000000040] DNN[internet] IPv4[10.45.0.5]
 1. Chave SSH do usuário do install (na máquina do core) para o gNB, **sem senha**:
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''          # se ainda não tiver
-   ssh-copy-id innovaserver@10.10.0.1                         # pede a senha uma vez
-   ssh -o BatchMode=yes innovaserver@10.10.0.1 test -r /tmp/gnb.log && echo ok
+   ssh-copy-id usuario@10.10.0.1                              # pede a senha uma vez
+   ssh -o BatchMode=yes usuario@10.10.0.1 test -r /tmp/gnb.log && echo ok
    ```
-2. `GNB_LOG_SSH="innovaserver@10.10.0.1"` no `config.env` e `sudo ./install.sh --dashboard-only`.
+2. `GNB_LOG_SSH="usuario@10.10.0.1"` no `config.env` e `sudo ./install.sh --dashboard-only`.
 3. Aba **Logs → gNB (real)**. Estado do agente: `journalctl -u open5gs-k3s-gnb-log -f`.
 
 Volume: com `all_level: info` o OCUDU escreve ~100 kB/s **parado** (≈600 linhas/s, quase tudo
 `[PHY] [I]`), e muito mais com tráfego. O filtro padrão deixa passar MAC, RRC, NGAP, avisos e erros. O
 painel guarda as últimas 20 000 linhas do gNB.
 
-> O arquivo `/tmp/gnb.log` do OCUDU cresce sem limite (1,7 GB em 2026-10-21). Isso é do gNB, não do
-> painel — vale rotacionar ou reduzir `all_level`.
+> O arquivo `/tmp/gnb.log` do OCUDU cresce sem limite (GBs por dia em nível `info`). Isso é do gNB, não do
+> painel: rotacione ou reduza `all_level`.
 
 ### WebUI do Open5GS dentro do painel (aba Core → Assinantes)
 
@@ -255,26 +265,22 @@ todos os Deployments do namespace menos o painel. Depois de ligar a máquina, s�
 pela aba Controle. Um `sudo ./install.sh` ou `--deploy-only` volta a subir tudo (o Helm põe as réplicas em 1).
 `CORE_AUTOSTART=true` volta ao comportamento antigo (sobe tudo + recuperação automática).
 
-**gNB OCUDU** (`GNB_CTL_SSH`, `GNB_CTL_DIR`):
-- No host do gNB, **uma vez, com sudo**: `scripts/ocudu/setup-gnb-service.sh` cria
-  `ocudu-gnb@<arquivo>.service` (roda `taskset -c 0-17 build/apps/gnb/gnb -c configs/<arquivo>.yml -c configs/metricas.yml`
-  — o 2º só se existir; é ele que liga as métricas na porta 8001 que o painel lê — a partir da
-  pasta do OCUDU do usuário; parar = SIGINT, como Ctrl+C) e uma regra do **polkit** que deixa só esse usuário
-  iniciar/parar/reiniciar essas units — sem sudo sem senha.
-  ```bash
-  scp scripts/ocudu/setup-gnb-service.sh innovaserver@10.10.0.1:/tmp/
-  ssh -t innovaserver@10.10.0.1 sudo bash /tmp/setup-gnb-service.sh   # --cpus 0-17 --dir /home/innovaserver/ocudu
-  ```
-- Na máquina do core, a unit `open5gs-k3s-gnb-ctl` (usuário do install, mesma chave SSH do log) lê a cada 3 s o
-  estado (serviço, PID, saída, arquivos `.yml` com o AMF de cada um, PTP, driver da VF do DPDK) e executa os
-  comandos do painel com `systemctl` (sem sudo).
-- Um gNB por vez: iniciar com outro arquivo para o atual antes. Se houver um `gnb` aberto no terminal, o serviço
-  recusa e a aba avisa (pare-o com Ctrl+C).
-- Depois de iniciar, a aba confere: serviço rodando (e ainda rodando 5 s depois), **RU com DU conectado** (aba RU)
-  e **N2 no AMF** deste core. O arquivo que aponta para outro AMF (ex.: `127.0.0.5`, o Open5GS local do
-  innovaserver) aparece marcado.
-- **A máquina tem que estar preparada** (interface, VF/DPDK, XDP `ptp-trim.o`, PTP): o botão não faz isso.
-- Remover: `sudo bash setup-gnb-service.sh --remove` no host do gNB.
+**gNB OCUDU** (`GNB_CTL_MODE`, `GNB_CTL_SSH`, `GNB_CTL_DIR`):
+
+| `GNB_CTL_MODE` | O cartão controla | Como |
+|---|---|---|
+| `k8s` (padrão da v3) | o pod `ocudu-gnb` (namespace `ocudu`) | o agente `open5gs-k3s-gnb-ctl` roda `ran/ocudu/gnb.sh` com o kubectl do usuário do install |
+| `systemd` (legado) | o serviço `ocudu-gnb@<yml>` no host do gNB | o agente roda `systemctl` por SSH, autorizado por uma regra do polkit (`scripts/ocudu/setup-gnb-service.sh`) |
+
+- O agente lê a cada 3 s: estado do pod (ou serviço), PID do `gnb`, últimas linhas da saída, os `.yml` com o AMF
+  de cada um, serviços PTP e o driver da VF do DPDK (por SSH ao nó, mesma chave do log).
+- Um gNB por vez. Se houver um `gnb` aberto fora do painel (terminal ou serviço nativo), a aba avisa e não inicia
+  outro.
+- Depois de iniciar, a aba confere: gNB rodando (e ainda rodando 5 s depois), **RU com DU conectado** e **N2 no
+  AMF** do core ativo. O arquivo que aponta para outro AMF aparece marcado.
+- Depois de um reboot do nó, o cartão mostra **"parado (nó reiniciou)"**: a [proteção de boot](ocudu.md#proteção-de-boot)
+  impede o gNB de ligar sozinho.
+- **A máquina tem que estar preparada** (VF/DPDK, PTP, XDP): o botão não faz isso.
 
 ### Energia (medidor MiEnergy)
 
@@ -287,16 +293,8 @@ painel iniciou, gráficos e a tabela com todas as grandezas.
 - `ENERGY_METER_URL="http://IP/Data"` + `sudo ./install.sh --dashboard-only`.
 - O pod do painel (na máquina do core) precisa **alcançar o IP do medidor**. Teste na máquina do core:
   `curl -s http://IP/Data | head -c 200`.
-- **Situação em 2026-10-21: desligado (`ENERGY_METER_URL=""`).** O medidor está no Wi‑Fi do laboratório
-  (roteador TP‑Link, rede 192.168.68.0/22), que faz **NAT**: os computadores do switch (rede 191.4.204.0/23)
-  não alcançam 192.168.68.105 (ping sem resposta; a porta 80 "conecta" com qualquer IP por causa do proxy
-  transparente do campus, mas o HTTP não responde). Caminhos, do mais simples ao mais trabalhoso:
-  1. **Redirecionamento de porta** no roteador Wi‑Fi (NAT Forwarding): porta externa (ex.: 8080) →
-     192.168.68.105:80, com IP fixo (reserva DHCP) para o medidor. Depois: `ENERGY_METER_URL="http://<IP WAN do
-     roteador>:8080/Data"`.
-  2. **Roteador em modo Access Point (bridge)**: o medidor passa a pegar IP da rede do switch.
-  3. Cabo de uma porta LAN do roteador numa porta livre do torre2 (`enp5s0f0`), com DHCP **sem rota padrão**
-     (`dhcp4-overrides: {use-routes: false}` no netplan) — senão a internet do core passaria pelo Wi‑Fi.
+- O medidor precisa estar numa rede alcançável pela máquina do core (sem NAT no caminho). Se estiver atrás de um
+  roteador Wi-Fi, use redirecionamento de porta ou o roteador em modo *access point*.
 
 ## Histórico persistente e experimentos (aba Histórico)
 
@@ -406,5 +404,5 @@ Rodar fora do cluster, na máquina do core, sem instalar nada:
 kubectl proxy --port=18001 &
 K8S_API=http://127.0.0.1:18001 NAMESPACE=open5gs GNB_METRICS_URL=ws://10.10.0.1:8001 \
   PORT=18080 BIND=127.0.0.1 python3 dashboard/app/server.py
-# no seu PC: ssh -L 18080:127.0.0.1:18080 torre2  e abra http://127.0.0.1:18080
+# no seu PC: ssh -L 18080:127.0.0.1:18080 <máquina do core>  e abra http://127.0.0.1:18080
 ```

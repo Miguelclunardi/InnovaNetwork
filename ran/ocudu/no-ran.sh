@@ -84,7 +84,7 @@ do_join() {
   ip -br addr show "${OCUDU_NODE_IFACE}" | grep -q "${OCUDU_NODE_IP}/" \
     || die "${OCUDU_NODE_IFACE} não tem ${OCUDU_NODE_IP}"
 
-  # Lições de 2026-10-28 (docs/ocudu-k8s.md, "Problemas encontrados"):
+  # Problemas conhecidos (docs/troubleshooting.md, seção 6):
   # 1) outro Kubernetes na máquina (ex.: MicroK8s) ocupa as portas do kubelet e o k3s não sobe
   local busy
   busy="$(ss -ltnpH '( sport = :10250 or sport = :10248 or sport = :6443 )' 2>/dev/null | grep -v '"k3s' || true)"

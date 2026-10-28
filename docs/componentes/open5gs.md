@@ -1,164 +1,35 @@
-# open5GK3S — Core 5G Open5GS em Kubernetes (k3s) num único nó
+# Open5GS — core padrão
 
-> **Parte do InnovaNetwork.** Este documento descreve o core **Open5GS** (o padrão do projeto) e o
-> instalador da raiz (`install.sh`). Visão geral do projeto completo: [README](../README.md).
+Core **5G Standalone Open5GS 2.7.5** no namespace `open5gs`, instalado pelo `install.sh` da raiz com os Helm
+charts da [Gradiant](https://github.com/Gradiant/5g-charts) (commit fixo) e values gerados a partir do
+`config.env`. Validado com UERANSIM e com celulares comerciais pelo gNB OCUDU.
 
-Core **5G Standalone Open5GS** rodando em **k3s** num único nó **Ubuntu 24.04** (desktop ou server),
-implantado com os Helm charts da [Gradiant](https://github.com/Gradiant/5g-charts) e validado de ponta
-a ponta com **UERANSIM** (gNB + UE simulados): registro do UE, sessão PDU e tráfego pela interface do UE.
+| | |
+|---|---|
+| Funções | NRF, SCP, AMF, SMF, UPF, AUSF, UDM, UDR, PCF, BSF, NSSF + MongoDB + WebUI (4G e SEPP desligados) |
+| Configuração | `config.env` → `helm/generated/open5gs-values.yaml` |
+| N2 / N3 | `10.10.0.10` / `10.10.0.11` na fibra (Multus) |
+| Pools | `internet` 10.45.0.0/16 · `internet2` 10.46.0.0/16 |
+| Assinantes | WebUI `http://<máquina do core>:30999` (`admin` / `1423` — troque) ou `scripts/subscribers.sh` |
+| Teste | `./test.sh` → `7 verificações OK` |
 
-Tudo é parametrizado em **`config.env`** (PLMN, TAC, slices, DNN, pools de IP, interface, versões).
-Um único comando instala do zero ou aplica mudanças (idempotente).
-
-> **Estado (2026-10-19)**: instalado e validado no Ubuntu 24.04.5 desktop (kernel 7.0, 8 vCPU, 32 GiB).
-> `./test.sh` → **7/7 verificações OK**: 16 pods prontos, 9 NFs no NRF, NG Setup, UE
-> `001010000000001` registrado, sessão PDU `10.45.0.2`, ping ao UPF e à internet (≈15 ms) pela `uesimtun0`.
-
----
+Arquitetura geral: [../arquitetura.md](../arquitetura.md). Instalação: [../instalacao.md](../instalacao.md).
 
 ## Sumário
 
-1. [O que foi feito](#1-o-que-foi-feito)
-2. [Arquitetura em 1 minuto](#2-arquitetura-em-1-minuto)
-3. [Requisitos](#3-requisitos)
-4. [Início rápido](#4-início-rápido)
-5. [Estrutura do repositório](#5-estrutura-do-repositório)
-6. [O que o install.sh faz](#6-o-que-o-installsh-faz)
-7. [**Operação** (dia a dia)](#7-operação-dia-a-dia)
-8. [**Modificação** (PLMN, slices, IPs, assinantes, versões, NFs)](#8-modificação)
-9. [Desktop × Server](#9-desktop--server)
-10. [Testes](#10-testes)
-11. [Desinstalação](#11-desinstalação)
-12. [Troubleshooting](#12-troubleshooting)
-13. [Limitações conhecidas](#13-limitações-conhecidas)
-14. [Roadmap: OCUDU + LiteOn](#14-roadmap-ocudu--liteon)
-15. [Referências](#15-referências)
+1. [O que o install.sh faz](#1-o-que-o-installsh-faz)
+2. [Operação](#2-operação-dia-a-dia)
+3. [Modificação](#3-modificação): referência do `config.env`, PLMN, slices, IPs, assinantes, versões, fibra
+4. [Desktop × Server](#4-desktop--server)
+5. [Testes](#5-testes)
+6. [Desinstalação](#6-desinstalação)
+7. [Problemas comuns](#7-problemas-comuns)
+8. [Limitações](#8-limitações-conhecidas)
+9. [Referências](#9-referências)
 
 ---
 
-## 1. O que foi feito
-
-| Entrega | Arquivo |
-|---------|---------|
-| Instalador idempotente: deps, SCTP, sysctl, firewall, k3s, Helm, charts, Open5GS, assinantes, UERANSIM, kubeconfig do usuário | `install.sh` |
-| Configuração única, sem nada fixo no código | `config.env` |
-| Teste ponta a ponta (pods → NRF → N2 → registro → PDU → ping) | `test.sh` |
-| Desinstalação em 3 níveis | `uninstall.sh` |
-| Gestão de assinantes (sync/list/add/remove/reset) | `scripts/subscribers.sh` |
-| Biblioteca: validação, detecção de ambiente, geração dos values Helm | `scripts/lib/common.sh` |
-| Correção de bug do chart (HPA do gNB) via post-renderer | `helm/postrender/drop-gnb-hpa.sh` |
-| Documentação: arquitetura e troubleshooting | `docs/` |
-| Decisões técnicas, estado e próximos passos | `docs/decisoes.md` |
-
-Configuração padrão: **PLMN 001-01**, **TAC 1**, slice **SST 1 / SD 111111**, DNN **internet**,
-pool **10.45.0.0/16**, 1 UE simulado (IMSI `001010000000001`).
-
-Problemas reais encontrados na primeira instalação e já corrigidos no código (firewalld, PLMN servido
-pelo NRF, cache de NFs antigos, corrida do UERANSIM, HPA do chart, kubeconfig do usuário…) estão em
-[docs/troubleshooting.md](troubleshooting.md#2-problemas-encontrados-e-corrigidos).
-
----
-
-## 2. Arquitetura em 1 minuto
-
-```
- UE (UERANSIM) ──RLS/UDP 4997──► gNB (UERANSIM) ──N2 NGAP/SCTP 38412──► AMF ◄─SBI─► SCP ◄─► NRF
-   uesimtun0                         │                                   │            AUSF UDM UDR
-   10.45.0.x                         │                                   │ N11        PCF BSF NSSF
-                                     │                                  SMF            MongoDB ◄─ WebUI :30999
-                                     │                                   │ N4 PFCP 8805
-                                     └──────────N3 GTP-U/UDP 2152──────► UPF ──ogstun 10.45.0.1 + NAT──► N6 / Internet
-```
-
-- Todos os componentes são pods no namespace `open5gs` do k3s; cada NF usa só `eth0` (rede flannel).
-- Core 5G SA puro: NRF, SCP, AMF, SMF, UPF, AUSF, UDM, UDR, PCF, BSF, NSSF + MongoDB + WebUI.
-  Componentes 4G e SEPP desligados.
-- [towards5gs-helm](https://github.com/Orange-OpenSource/towards5gs-helm) (free5GC) serviu **só como
-  referência de arquitetura** — nenhum componente free5GC é usado.
-
-Detalhes (papel de cada NF, interfaces, fluxo de registro, rede do k8s, decisões):
-**[docs/arquitetura.md](arquitetura.md)**.
-
----
-
-## 3. Requisitos
-
-| Item | Mínimo |
-|------|--------|
-| SO | Ubuntu 24.04 LTS (desktop ou server), x86_64 ou arm64 |
-| CPU | 2 vCPU (4+ recomendado), **com AVX** (MongoDB 8) |
-| RAM | 4 GiB (o conjunto usa ~1,5–2 GiB) |
-| Disco | ~10 GiB livres |
-| Rede | Internet (apt, get.k3s.io, get.helm.sh, GitHub, Docker Hub) |
-| Kernel | módulo `sctp` (o script instala `linux-modules-extra` se faltar) |
-| Acesso | `sudo` |
-
----
-
-## 4. Início rápido
-
-```bash
-git clone <url-deste-repo> open5GK3S && cd open5GK3S
-vim config.env            # opcional: os padrões funcionam (PLMN 001-01, TAC 1)
-sudo ./install.sh         # 5–15 min na 1ª vez (download de imagens); log em logs/install.log
-./test.sh                 # deve terminar com "7 verificações OK, 0 falhas"
-kubectl -n open5gs get pods   # funciona sem sudo (o install configura ~/.kube/config)
-```
-
-WebUI: `http://<IP-do-nó>:30999` — usuário `admin`, senha `1423`.
-
-> Não use `sudo ./install.sh | tee …`: o log já é gravado em `logs/install.log`.
-
----
-
-## 5. Estrutura do repositório
-
-```
-open5GK3S/
-├── install.sh               # instala / aplica mudanças (idempotente)
-├── uninstall.sh             # remove (níveis: padrão, --k3s, --purge)
-├── test.sh                  # validação ponta a ponta
-├── config.env               # TODA a configuração
-├── README.md                # este arquivo
-├── .gitignore
-├── scripts/
-│   ├── subscribers.sh       # assinantes no MongoDB
-│   ├── heal.sh              # recupera o plano de usuário (após reboot; roda sozinho no boot)
-│   └── lib/
-│       └── common.sh        # funções compartilhadas (não executar direto)
-├── helm/
-│   ├── postrender/
-│   │   └── drop-gnb-hpa.sh  # remove HPA bugado do chart ueransim-gnb
-│   └── generated/           # values gerados do config.env (ignorado no git)
-├── dashboard/               # painel de logs e métricas (docs/dashboard.md)
-│   ├── app/                 # server.py (stdlib) + página (uPlot)
-│   └── agent/               # gnb-log-agent.py: log do gNB real via SSH
-├── docs/
-│   ├── arquitetura.md
-│   ├── dashboard.md         # painel: abas, config, log do gNB, API
-│   ├── decisoes.md          # decisões técnicas, estado e próximos passos
-│   └── troubleshooting.md
-└── logs/                    # install.log (ignorado no git)
-```
-
-Fora do repositório (criados pelo install):
-
-| Caminho | Conteúdo |
-|---------|----------|
-| `/opt/open5gs-k3s/5g-charts` | clone dos charts da Gradiant no commit fixado |
-| `/opt/open5gs-k3s/bin/helm` | Helm fixado (link em `/usr/local/bin/helm`) |
-| `/etc/rancher/k3s/config.yaml` | config do k3s (gerado) |
-| `/etc/rancher/k3s/k3s.yaml` | kubeconfig de admin (0600, root) |
-| `~/.kube/config`, `~/.kube/open5gs-k3s.yaml` | kubeconfig do seu usuário (contexto `open5gs-k3s`) |
-| `/etc/sysctl.d/90-open5gs-k3s.conf`, `/etc/modules-load.d/open5gs-k3s.conf` | sysctl e módulos |
-| `/etc/NetworkManager/conf.d/90-open5gs-k3s-unmanaged.conf` | só se o NetworkManager estiver ativo |
-| `/etc/systemd/system/open5gs-k3s-netif.service` + drop-in `k3s.service.d/10-open5gs-k3s-netif.conf` | cria a interface `k3s0` (10.254.254.1) antes do k3s (`NODE_IP_MODE=stable`) |
-| `/etc/systemd/system/open5gs-k3s-heal.service`, `/opt/open5gs-k3s/heal/` | recuperação no boot (`AUTO_HEAL`); roda uma cópia root do `heal.sh` |
-| bloco `# >>> open5gs-k3s >>>` no `~/.bashrc` | alias `k` e autocomplete do kubectl |
-
----
-
-## 6. O que o install.sh faz
+## 1. O que o install.sh faz
 
 Cada passo só age se algo mudou — rodar de novo é seguro.
 
@@ -178,15 +49,17 @@ Cada passo só age se algo mudou — rodar de novo é seguro.
 14. **Recuperação no boot** (`AUTO_HEAL`): instala a unit `open5gs-k3s-heal`.
 15. **kubeconfig do usuário real** (`$SUDO_USER`): cria/mescla `~/.kube/config` (0600), alias `k` + autocomplete, e testa `kubectl get nodes` como esse usuário.
 
-Opções: `--deploy-only` (pula 3–9; só values, deploy, assinantes e kubeconfig), `-h`.
+Depois do UERANSIM vêm o **painel e os agentes** ([painel.md](painel.md)) e as units de boot.
+
+Opções: `--deploy-only` (pula 3–9: só values, deploy, assinantes, painel e kubeconfig), `--dashboard-only` (só o painel e os agentes), `-h`.
 
 ---
 
-## 7. Operação (dia a dia)
+## 2. Operação (dia a dia)
 
 Todos os comandos abaixo rodam **sem sudo**, exceto onde indicado.
 
-### 7.1 Ver o estado
+### 2.1 Ver o estado
 
 ```bash
 kubectl get nodes                                  # nó Ready
@@ -197,7 +70,7 @@ kubectl -n open5gs get svc                         # services (amf-ngap 38412/SC
 
 `k` é um alias para `kubectl` (com autocomplete) em terminais novos.
 
-### 7.2 Logs
+### 2.2 Logs
 
 ```bash
 kubectl -n open5gs logs deploy/open5gs-amf -f      # AMF ao vivo (registros, gNBs)
@@ -210,7 +83,7 @@ sudo journalctl -u k3s -f                          # k3s (sudo)
 less logs/install.log                              # histórico do instalador
 ```
 
-### 7.3 Usar o UE simulado
+### 2.3 Usar o UE simulado
 
 ```bash
 kubectl -n open5gs exec -it deploy/ueransim-ues -- bash
@@ -227,22 +100,12 @@ nr-cli imsi-001010000000001 --exec "deregister normal"   # desregistrar
 
 gNB: `kubectl -n open5gs exec deploy/ueransim -- sh -c 'nr-cli $(nr-cli -d) --exec status'`.
 
-### 7.4 WebUI
+### 2.4 WebUI
 
 `http://<NODE_IP>:30999` (`admin` / `1423`; troque a senha no primeiro acesso). Permite criar/editar
 assinantes, AMBR, QoS (5QI/ARP), IP fixo e múltiplas slices por assinante.
 
-### 7.4b Painel (Innova Center Dashboard)
-
-`http://<NODE_IP>:30998` (**v1.3**) — logs de todos os pods e do gNB real, métricas de rádio (vazão DL/UL, BLER,
-MCS, CQI, SNR por UE, com cada UE identificado por nome/IMSI/IP), UEs, sessões e eventos do core, estado da RU
-LiteOn (sincronismo, potência, temperatura, fronthaul, configuração; aba RU, só leitura), **iniciar/parar/
-reiniciar** o core, o UERANSIM e o gNB OCUDU (aba Controle; no boot só o painel sobe), CPU/temperatura
-das máquinas, edição do `config.env` pela web (aba Configuração, senha de administrador) e **histórico persistente
-com experimentos** para comparar setups (`DASHBOARD_PERSIST=true`, aba Histórico). Só o painel: `sudo ./install.sh --dashboard-only` (não
-toca no core). Detalhes em **[docs/dashboard.md](dashboard.md)**.
-
-### 7.5 Assinantes
+### 2.5 Assinantes
 
 ```bash
 ./scripts/subscribers.sh list                                   # IMSI, K, OPc, DNN, IP
@@ -253,9 +116,9 @@ toca no core). Detalhes em **[docs/dashboard.md](dashboard.md)**.
 ./scripts/subscribers.sh reset                                  # APAGA todos (pede confirmação)
 ```
 
-`add`/`remove` não ficam no `config.env`; para persistir, use `SUBSCRIBERS` (ver §8.5).
+`add`/`remove` não ficam no `config.env`; para persistir, use `SUBSCRIBERS` (ver §3.5).
 
-### 7.6 Reiniciar componentes
+### 2.6 Reiniciar componentes
 
 ```bash
 kubectl -n open5gs rollout restart deploy/open5gs-amf          # um NF
@@ -264,27 +127,33 @@ kubectl -n open5gs rollout restart deploy                       # tudo (core + R
 ```
 
 > Reinicie **todos os NFs juntos** em vez de um a um quando houver erros de SBI com IPs antigos
-> (cache de descoberta — ver troubleshooting #7).
+> (cache de descoberta — ver [troubleshooting](../troubleshooting.md)).
 
-### 7.7 Parar, iniciar e reboot
+### 2.7 Parar, iniciar e reboot
+
+O jeito normal é a aba **Controle** do painel (**▶ Iniciar tudo** / **■ Parar tudo**), que segue a ordem certa e
+confere cada etapa. Ver [../operacao.md](../operacao.md).
+
+**No boot**, o comportamento depende de `CORE_AUTOSTART`:
+
+| `CORE_AUTOSTART` | Depois de ligar a máquina |
+|---|---|
+| `false` (padrão) | a unit `open5gs-k3s-heal` roda `heal.sh --boot-off`: **só o painel fica no ar**; o core (e o free5GC) começam parados e são ligados pelo painel |
+| `true` | tudo sobe, e a mesma unit confere se o UE simulado pinga o UPF; se não, reinicia UEs e depois UPF → SMF → gNB → UEs (depois de um reboot os pods voltam em ordem qualquer e o UPF pode não reconhecer o SMF: `Cannot find PFCP-Node`) |
 
 ```bash
-sudo systemctl stop k3s && sudo /usr/local/bin/k3s-killall.sh   # para tudo (libera CPU/RAM)
-sudo systemctl start k3s                                        # sobe de novo (pods voltam sozinhos)
+journalctl -u open5gs-k3s-heal -b      # o que a unit fez neste boot
+./scripts/heal.sh                      # recuperação manual do plano de usuário
 ```
 
-Após reboot tudo volta sozinho: a `k3s0` é criada, o k3s sobe e a unit `open5gs-k3s-heal` espera
-os pods e confere se o UE pinga o UPF. Se não pingar, ela reinicia os UEs e, se ainda falhar,
-UPF → SMF → gNB → UEs. Isso acontece porque, depois de um reboot, os pods voltam em ordem qualquer e
-o UPF pode não reconhecer mais o SMF (`Cannot find PFCP-Node`).
+Parar o k3s inteiro (libera CPU/RAM; o nó do RAN perde o servidor enquanto isso):
 
 ```bash
-journalctl -u open5gs-k3s-heal -b      # o que a recuperação fez neste boot
-./test.sh                              # ~3–5 min após o boot
-./scripts/heal.sh                      # mesma recuperação, manual (também após 'systemctl restart k3s')
+sudo systemctl stop k3s && sudo /usr/local/bin/k3s-killall.sh
+sudo systemctl start k3s
 ```
 
-### 7.8 Backup e restauração dos assinantes
+### 2.8 Backup e restauração dos assinantes
 
 ```bash
 # backup
@@ -296,7 +165,7 @@ kubectl -n open5gs exec -i deploy/open5gs-mongodb -- mongorestore --drop --archi
 O volume do MongoDB (PVC `local-path`) fica em `/var/lib/rancher/k3s/storage/` e sobrevive a reboots
 e a `helm upgrade`; é apagado por `./uninstall.sh`.
 
-### 7.9 Aplicar uma mudança de configuração
+### 2.9 Aplicar uma mudança de configuração
 
 ```bash
 vim config.env
@@ -308,7 +177,7 @@ Use o `sudo ./install.sh` completo quando mudar algo do host/k3s (interface, IP 
 
 ---
 
-## 8. Modificação
+## 3. Modificação
 
 **Regra geral**: edite `config.env` → `sudo ./install.sh --deploy-only` (ou o completo) → `./test.sh`.
 
@@ -316,11 +185,11 @@ Como as mudanças são aplicadas: os values em `helm/generated/` são regenerado
 configuração vai como anotação em cada pod (`open5gs-k3s/config-hash`). Se mudou, os NFs são
 recriados (estratégia `Recreate`, todos juntos) e o gNB/UEs também; os assinantes são re-sincronizados.
 
-### 8.1 Referência do config.env
+### 3.1 Referência do config.env
 
 | Variável | Padrão | Função |
 |----------|--------|--------|
-| `ENV_PROFILE` | `auto` | `auto`/`desktop`/`server` (ver §9) |
+| `ENV_PROFILE` | `auto` | `auto`/`desktop`/`server` (ver §4) |
 | `NODE_IP_MODE` | `stable` | `stable`: o k3s usa a interface virtual `STABLE_IFACE` com `STABLE_IP` (padrão `k3s0` / `10.254.254.1`), recriada a cada boot. Assim o cluster não depende do IP do host (DHCP, troca entre Wi‑Fi e cabo, outra rede). `iface`: usa a placa física, e se o IP mudar é preciso rodar o install de novo |
 | `STABLE_IFACE`, `STABLE_IP` | `k3s0`, `10.254.254.1` | interface e IP virtuais do nó (o IP deve ser privado e fora da LAN e de `K3S_*_CIDR`) |
 | `NODE_IFACE`, `NODE_IP` | vazio (rota default) | interface e IP físicos do host. No modo `stable` servem só para a URL da WebUI e para o anúncio do N3 externo (`EXPOSE_RAN`); no modo `iface` também são o nó do k3s |
@@ -339,21 +208,21 @@ recriados (estratégia `Recreate`, todos juntos) e o gNB/UEs também; os assinan
 | `MCC`, `MNC` | `001`, `01` | PLMN |
 | `TAC` | `1` | Tracking Area Code (decimal) |
 | `AMF_REGION_ID`, `AMF_SET_ID` | `2`, `1` | GUAMI |
-| `NETWORK_NAME` | `Open5GS-K3S` | nome da rede exibido no UE |
-| `SLICES` | `("1:111111:internet:10.45.0.0/16")` | slices/DNN/pools (ver §8.3) |
+| `NETWORK_NAME` | `InnovaOpen5GS` | nome da rede exibido no UE |
+| `SLICES` | `internet` 10.45/16 e `internet2` 10.46/16 | slices/DNN/pools (ver §3.3) |
 | `DNS_SERVERS`, `UE_MTU` | `8.8.8.8 8.8.4.4`, `1400` | entregues ao UE |
 | `WEBUI_ENABLED`, `WEBUI_NODEPORT` | `true`, `30999` | WebUI |
-| `DASHBOARD_*`, `GNB_METRICS_URL`, `GNB_LOG_*`, `OPEN5GS_METRICS` | ver docs/dashboard.md | painel de logs e métricas |
+| `DASHBOARD_*`, `GNB_METRICS_URL`, `GNB_LOG_*`, `OPEN5GS_METRICS` | ver [painel.md](painel.md) | painel de logs e métricas |
 | `MONGODB_PERSISTENCE`, `MONGODB_PERSISTENCE_SIZE` | `true`, `2Gi` | volume do banco |
 | `MONGODB_IMAGE_REGISTRY/REPOSITORY/TAG` | vazio (Bitnami latest) | imagem alternativa (ex.: CPU sem AVX) |
 | `DEPLOY_UERANSIM` | `true` | `false` remove gNB/UEs simulados (para RAN real) |
 | `AUTO_HEAL` | `true` | unit `open5gs-k3s-heal`: no boot, confere o plano de usuário e reinicia UEs/UPF/SMF/gNB se preciso |
-| `EXPOSE_RAN` | `false` | expõe N2/N3 no `NODE_IP` para gNB externo (ver §8.7) |
+| `EXPOSE_RAN` | `false` | expõe N2/N3 no `NODE_IP` para gNB externo (ver §3.7) |
 | `UE_COUNT`, `UE_MSIN_START`, `UE_KEY`, `UE_OPC` | `1`, `0000000001`, chaves de teste | UEs simulados (cadastrados automaticamente) |
 | `SUBSCRIBERS` | `()` | assinantes extras (SIMs reais) |
 | `TEST_*` | ping 4×, 8.8.8.8, 180 s | parâmetros do `test.sh` |
 
-### 8.2 PLMN e TAC
+### 3.2 PLMN e TAC
 
 ```bash
 MCC="001"; MNC="01"          # MNC de 2 ou 3 dígitos: "01" ≠ "001"
@@ -367,7 +236,7 @@ Assinantes do PLMN anterior ficam no banco — remova com `./scripts/subscribers
 > Use PLMNs de teste (`001-01`, `999-70`). Com rádio real, nunca irradie com PLMN de operadora e
 > respeite a regulamentação de espectro.
 
-### 8.3 Slices, DNN e pools de IP
+### 3.3 Slices, DNN e pools de IP
 
 ```bash
 SLICES=(
@@ -381,7 +250,7 @@ NAT no UPF (`ogstun`, `ogstun2`, …). Regras: **SD obrigatório** (6 hex, sem `
 pools sem sobreposição entre si nem com as redes do cluster (validado). A **1ª slice** é a do gNB/UEs
 do UERANSIM — para testar outra, coloque-a em primeiro.
 
-### 8.4 IPs e rede
+### 3.4 IPs e rede
 
 | O que mudar | Como |
 |-------------|------|
@@ -391,7 +260,7 @@ do UERANSIM — para testar outra, coloque-a em primeiro.
 | Redes do cluster | `K3S_CLUSTER_CIDR`, `K3S_SERVICE_CIDR` → **exige** `sudo ./uninstall.sh --k3s` antes |
 | Porta da WebUI | `WEBUI_NODEPORT` (30000–32767) |
 
-### 8.5 Assinantes persistentes
+### 3.5 Assinantes persistentes
 
 ```bash
 UE_COUNT="3"                     # UEs simulados 001010000000001..003, cadastrados sozinhos
@@ -404,25 +273,29 @@ SUBSCRIBERS=(
 O sync faz *remove + add* de cada IMSI listado (mudanças feitas na WebUI nesses IMSIs são
 sobrescritas); IMSIs fora do `config.env` não são tocados.
 
-### 8.6 Versões
+### 3.6 Versões
 
 Mude `K3S_VERSION`, `HELM_VERSION`, `GRADIANT_CHARTS_REF` (commit/tag), `OPEN5GS_IMAGE_TAG`,
-`UERANSIM_IMAGE_TAG` e rode `sudo ./install.sh`. Mantenha os mesmos valores no desktop e no servidor.
-Ao subir o `GRADIANT_CHARTS_REF`, confira se o bug do HPA (`helm/postrender/`) e o `servingList` do NRF
-continuam iguais (`helm template` ajuda — ver §8.8).
+`UERANSIM_IMAGE_TAG` e rode `sudo ./install.sh`. Ao subir o `GRADIANT_CHARTS_REF`, confira se o bug do HPA (`helm/postrender/`) e o `servingList` do NRF
+continuam iguais (`helm template` ajuda — ver §3.8).
 
-### 8.7 RAN externa (gNB real) — experimental
+### 3.7 Ligação com o gNB real (fibra N2/N3)
 
 ```bash
-EXPOSE_RAN=true          # AMF N2 = NODE_IP:38412/SCTP ; UPF N3 = NODE_IP:2152/UDP (ServiceLB do k3s)
-DEPLOY_UERANSIM=false    # opcional: remove o gNB/UE simulados
+RAN_LINK_ENABLED=true
+RAN_LINK_IFACE="enp5s0f1"      # porta da máquina do core ligada ao gNB
+RAN_LINK_CIDR="10.10.0.0/24"   # a máquina do core usa .2, o gNB .1
+RAN_LINK_MTU="9000"
+AMF_N2_IP="10.10.0.10"         # = cu_cp.amf.addr no .yml do gNB
+UPF_N3_IP="10.10.0.11"         # endereço N3 anunciado pelo UPF
+GNB_SIM_IP="10.10.0.20"        # gNB do UERANSIM na mesma rede
 ```
 
-No gNB: endereço do AMF = `NODE_IP`, mesmo PLMN/TAC/S-NSSAI do `config.env`. O UPF passa a anunciar
-`NODE_IP` como endereço GTP-U. Limitações: depende do ServiceLB encaminhar SCTP; o N3 passa por NAT do
-kube-proxy (desempenho limitado). Validado só por renderização — ainda não com rádio real.
+O instalador cria o NetworkAttachmentDefinition `ran-link` (macvlan) e dá ao AMF, ao UPF e ao gNB do UERANSIM
+uma 2ª interface (`net1`) com esses IPs. O post-renderer `helm/postrender/amf-ngap-net1.sh` faz o AMF escutar o
+N2 em `net1`. Alternativa sem porta dedicada (experimental): `EXPOSE_RAN=true` expõe N2/N3 no IP do nó.
 
-### 8.8 Modificar além do config.env
+### 3.8 Modificar além do config.env
 
 | Quero… | Onde |
 |--------|------|
@@ -435,11 +308,11 @@ kube-proxy (desempenho limitado). Validado só por renderização — ainda não
 | Ver o que está aplicado | `helm -n open5gs get values open5gs`, `kubectl -n open5gs get cm open5gs-amf -o yaml` |
 
 Depois de editar scripts: `bash -n *.sh scripts/*.sh scripts/lib/*.sh helm/postrender/*.sh` e, se
-possível, `shellcheck`. Registre decisões novas em `docs/decisoes.md`.
+possível, `shellcheck`.
 
 ---
 
-## 9. Desktop × Server
+## 4. Desktop × Server
 
 O mesmo `config.env` serve aos dois; as diferenças de host são detectadas (`ENV_PROFILE=auto`).
 
@@ -460,7 +333,7 @@ A saída para a internet (N6) segue sempre a rota default do momento. Com mais d
 
 ---
 
-## 10. Testes
+## 5. Testes
 
 `./test.sh` (ou `./test.sh -v` para logs do AMF/SMF/UPF/gNB/UE em caso de falha). Saída da validação:
 
@@ -484,7 +357,7 @@ testa N6/NAT. Código de saída 0/1 (serve para automação).
 
 ---
 
-## 11. Desinstalação
+## 6. Desinstalação
 
 ```bash
 sudo ./uninstall.sh            # releases + PVC do MongoDB + namespace (k3s continua)
@@ -498,9 +371,9 @@ Outros contextos do seu `~/.kube/config` são preservados. Pacotes apt não são
 
 ---
 
-## 12. Troubleshooting
+## 7. Problemas comuns
 
-Guia completo: **[docs/troubleshooting.md](troubleshooting.md)**. Os mais comuns:
+Guia completo: **[troubleshooting.md](../troubleshooting.md)**. Os mais comuns:
 
 | Sintoma | Solução rápida |
 |---------|----------------|
@@ -513,36 +386,16 @@ Guia completo: **[docs/troubleshooting.md](troubleshooting.md)**. Os mais comuns
 
 ---
 
-## 13. Limitações conhecidas
+## 8. Limitações conhecidas
 
 - Single node, sem alta disponibilidade; MongoDB standalone.
-- Uma interface por pod (sem Multus): N2/N3/N4/N6 compartilham a rede de pods.
+- N4, SBI e N6 pela rede dos pods; só N2 e N3 na fibra (Multus/macvlan).
 - UERANSIM testa só a 1ª slice por instalação.
 - Somente IPv4 nos pools de UE; SBI em HTTP (sem TLS), como nos charts padrão.
-- `EXPOSE_RAN` ainda não validado com rádio real.
 
 ---
 
-## 14. Roadmap: OCUDU + LiteOn
-
-O objetivo seguinte é substituir a RAN simulada (UERANSIM) por uma **RAN real**:
-
-- **OCUDU** como gNB (CU/DU de código aberto), conectado a este core pelo N2 (NGAP/SCTP) e N3 (GTP-U);
-- uma **unidade de rádio (O-RU) LiteOn** ligada ao DU via fronthaul O-RAN.
-
-O que este projeto já entrega para essa etapa: core validado ponta a ponta, PLMN/TAC/slices/assinantes
-parametrizados, cadastro de SIMs reais via `SUBSCRIBERS`, e o modo `EXPOSE_RAN` para expor N2/N3 no IP
-do nó. Pontos a tratar quando o hardware entrar (ainda não feito):
-
-1. Validar `EXPOSE_RAN` com o gNB real (SCTP pelo ServiceLB e GTP-U anunciado no `NODE_IP`), ou migrar
-   N2/N3 para interfaces dedicadas (Multus/macvlan ou SR-IOV, como no towards5gs) por desempenho.
-2. Alinhar PLMN, TAC e S-NSSAI entre o `config.env` e a configuração do OCUDU.
-3. Cadastrar os SIMs programados (IMSI, K, OPc) em `SUBSCRIBERS`.
-4. Preparar o host do DU (rede de fronthaul, sincronismo PTP/SyncE, isolamento de CPU) — fora do escopo atual.
-
----
-
-## 15. Referências
+## 9. Referências
 
 - Open5GS — https://open5gs.org · https://github.com/open5gs/open5gs
 - Gradiant 5g-charts — https://github.com/Gradiant/5g-charts

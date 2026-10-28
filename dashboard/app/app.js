@@ -520,7 +520,7 @@ const Logs = {
     if (src.kind === "gnb") {
       if (!CONFIG.gnb_log_ingest) {
         this.sys("O log do gNB real chega por um agente no servidor do gNB (dashboard/agent/gnb-log-agent.py).");
-        this.sys("Ingestão desligada: defina DASHBOARD_INGEST_TOKEN no config.env e instale o agente (ver docs/dashboard.md).");
+        this.sys("Ingestão desligada: defina DASHBOARD_INGEST_TOKEN no config.env e instale o agente (ver docs/componentes/painel.md).");
         return;
       }
       if ($("#log-follow").checked) return this.follow("api/gnb-log/stream?tail=" + tail);

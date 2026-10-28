@@ -438,7 +438,7 @@ step_deploy_ueransim() {
 }
 
 # ----------------------------------------------------------------------------
-#  8a. Painel (Innova Center Dashboard) — docs/dashboard.md
+#  8a. Painel (Innova Center Dashboard) — docs/componentes/painel.md
 #  Pod só leitura no namespace do core + (opcional) agente do log do gNB, que
 #  roda NESTA máquina como o usuário do install e lê o log por SSH (tail -F).
 # ----------------------------------------------------------------------------
@@ -571,7 +571,7 @@ EOU
     if su - "${TARGET_USER}" -s /bin/bash -c "KUBECONFIG=${TARGET_HOME}/.kube/config kubectl -n ocudu get deploy ocudu-gnb" &>/dev/null; then
       ok "aba Controle: gNB OCUDU no Kubernetes (pod ocudu-gnb; journalctl -u open5gs-k3s-gnb-ctl)"
     else
-      warn "aba Controle: o Deployment ocudu-gnb não existe: instale o OCUDU (docs/ocudu-k8s.md, ran/ocudu/install.sh)"
+      warn "aba Controle: o Deployment ocudu-gnb não existe: instale o OCUDU (docs/instalacao.md, ran/ocudu/install.sh)"
     fi
   elif su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${GNB_CTL_SSH} test -f /etc/systemd/system/ocudu-gnb@.service" &>/dev/null; then
     ok "aba Controle: gNB OCUDU controlável (${GNB_CTL_SSH}; journalctl -u open5gs-k3s-gnb-ctl)"
@@ -697,7 +697,7 @@ EOU
     su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${tg} true" &>/dev/null || bad+=("${hn} (${tg})")
   done
   if (( ${#bad[@]} )); then
-    warn "aba Máquinas: ${TARGET_USER} ainda não acessa por SSH sem senha: ${bad[*]} (ver docs/dashboard.md)"
+    warn "aba Máquinas: ${TARGET_USER} ainda não acessa por SSH sem senha: ${bad[*]} (ver docs/componentes/painel.md)"
   else
     ok "aba Máquinas: ${#DASHBOARD_HOSTS[@]} máquina(s) remota(s) + esta (journalctl -u open5gs-k3s-hosts)"
   fi
@@ -758,7 +758,7 @@ EOU
     ok "agente do log do gNB ativo (${GNB_LOG_SSH}:${GNB_LOG_FILE}; journalctl -u open5gs-k3s-gnb-log)"
   else
     warn "agente instalado, mas ${TARGET_USER} ainda não acessa ${GNB_LOG_SSH} por SSH sem senha (ou o arquivo não existe)"
-    warn "  configure a chave (docs/dashboard.md) — o agente tenta de novo sozinho"
+    warn "  configure a chave (docs/componentes/painel.md) — o agente tenta de novo sozinho"
   fi
 }
 
