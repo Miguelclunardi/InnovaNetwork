@@ -110,14 +110,19 @@ const Control = {
       ? (s.error ? `<span class="tag err">sem SSH</span> ${esc(s.error)}` : `atualizado há ${ago(Date.now() / 1000 - o.age)}`)
       : '<span class="tag err">agente sem contato</span> (journalctl -u open5gs-k3s-gnb-ctl na máquina do core)');
     const a = s.active, f = s.failed;
+    const k8s = s.mode === "k8s", kw = (s.k8s || {}).waiting_boot;
+    $("#ctl-ocudu-jlabel").textContent = k8s ? "Saída do pod (kubectl logs)" : "Saída do serviço (journal)";
+    $("#ctl-ocudu-how").innerHTML = k8s
+      ? "gNB no Kubernetes: o botão liga o pod <code>ocudu-gnb</code> (namespace ocudu) no nó do rádio com o <code>.yml</code> escolhido. Depois de um reboot do nó o gNB não liga sozinho: espere o GPS, ajuste PTP/RU e clique Iniciar."
+      : "A máquina já deve estar preparada (interface, VF do DPDK, XDP, PTP): o botão só roda <code>taskset … ./gnb -c configs/&lt;arquivo&gt;.yml</code> como serviço. Parar = Ctrl+C no gNB.";
     const setup = s.unit_installed === false || s.polkit === false;
     $("#ctl-ocudu-setup").classList.toggle("hidden", !setup);
     const ptp = s.ptp || {};
     const nics = s.nics || {};
     const k = [
-      { l: "gNB", v: a ? (a.sub === "running" ? "rodando" : a.sub) : (s.manual || []).length ? "rodando fora do painel" : "parado",
-        s: a ? `${a.config}.yml · PID ${a.pid}` : (s.manual || []).length ? `PID ${(s.manual || []).map((m) => m.pid).join(", ")} (pare no terminal)` : f ? `última vez: falhou (${f.config})` : "",
-        c: a && a.sub === "running" ? "ok" : (s.manual || []).length ? "warn" : f ? "err" : "" },
+      { l: k8s ? "gNB (Kubernetes)" : "gNB", v: a ? (a.sub === "running" ? "rodando" : a.sub === "activating" ? "iniciando" : a.sub) : (s.manual || []).length ? "rodando fora do painel" : kw ? "parado (nó reiniciou)" : "parado",
+        s: a ? `${a.config}.yml · PID ${a.pid || "–"}` : (s.manual || []).length ? `PID ${(s.manual || []).map((m) => m.pid).join(", ")} (pare no terminal)` : f ? `falhou: ${f.sub || ""} (${f.config})` : kw ? "confira GPS/RU e clique Iniciar" : "",
+        c: a && a.sub === "running" ? "ok" : (s.manual || []).length || kw ? "warn" : f ? "err" : "" },
       { l: "Ligado desde", v: a && a.since ? a.since.replace(/^\w+ /, "").replace(/ [A-Z-]+\d*$/, "") : "–", s: "" },
       { l: "PTP (ptp4l / ts2phc / phc2sys)", v: ["ptp4l-gm", "ts2phc", "phc2sys"].map((x) => ptp[x] === "active" ? "✓" : "✗").join(" "),
         s: Object.values(ptp).every((x) => x === "active") ? "todos ativos" : "algum serviço PTP parado", c: Object.values(ptp).every((x) => x === "active") ? "ok" : "err" },

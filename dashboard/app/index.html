@@ -392,9 +392,9 @@
             <button class="btn" data-act="restart" data-target="ocudu">↻ Reiniciar</button>
             <button class="btn danger" data-act="stop" data-target="ocudu">■ Parar gNB</button>
           </div>
-          <details style="margin-top:8px"><summary class="muted">Saída do serviço (journal)</summary>
+          <details style="margin-top:8px"><summary class="muted" id="ctl-ocudu-jlabel">Saída do serviço (journal)</summary>
             <pre class="cfgout" id="ctl-ocudu-journal"></pre></details>
-          <p class="muted" style="font-size:12px">A máquina já deve estar preparada (interface, VF do DPDK, XDP, PTP): o botão só roda
+          <p class="muted" style="font-size:12px" id="ctl-ocudu-how">A máquina já deve estar preparada (interface, VF do DPDK, XDP, PTP): o botão só roda
             <code>taskset … ./gnb -c configs/&lt;arquivo&gt;.yml</code> como serviço. Parar = Ctrl+C no gNB.</p>
         </div>
         <div class="card">

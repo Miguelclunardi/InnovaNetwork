@@ -8,6 +8,10 @@
 #  "systemctl" SEM sudo: no host do gNB uma regra do polkit deixa este usuário
 #  mexer só nas units ocudu-gnb@*.service (scripts/ocudu/setup-gnb-service.sh).
 #
+#  Modo k8s (GNB_CTL_MODE=k8s, InnovaNetwork v3): o gNB é o pod "ocudu-gnb" (namespace
+#  ocudu) no nó do rádio. Iniciar/parar = ran/ocudu/gnb.sh (GNB_CTL_GNBSH) aqui, com o
+#  kubectl do usuário; o estado vem do Kubernetes + processo gnb no nó (por SSH).
+#
 #  Uso:
 #    DASHBOARD_URL=http://10.254.254.1:30998 INGEST_TOKEN=... \
 #    GNB_CTL_SSH=innovaserver@10.10.0.1 GNB_CTL_DIR=/home/innovaserver/ocudu python3 gnb-ctl-agent.py
@@ -26,6 +30,9 @@ URL = os.environ.get("DASHBOARD_URL", "").rstrip("/")
 TOKEN = os.environ.get("INGEST_TOKEN", "")
 TARGET = os.environ.get("GNB_CTL_SSH", "")
 DIR = os.environ.get("GNB_CTL_DIR", "")
+MODE = os.environ.get("GNB_CTL_MODE", "systemd")
+GNBSH = os.environ.get("GNB_CTL_GNBSH", "")
+NS = os.environ.get("GNB_CTL_NAMESPACE", "ocudu")
 INTERVAL = float(os.environ.get("GNB_CTL_INTERVAL", "3"))
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=10",
        "-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/gnbctl-%C", "-o", "ControlPersist=120"]
@@ -154,13 +161,83 @@ def status():
     rc, out, err = remote("python3 - %s" % shlex.quote(DIR), STATUS, 20)
     if rc != 0:
         raise OSError((err or out or "ssh código %d" % rc).strip()[-300:])
-    return json.loads(out)
+    st = json.loads(out)
+    return k8s_status(st) if MODE == "k8s" else st
+
+
+def kubectl(*a, timeout=15):
+    p = subprocess.run(["kubectl", "-n", NS] + list(a), capture_output=True, text=True, timeout=timeout)
+    if p.returncode != 0:
+        raise OSError("kubectl: " + (p.stderr or p.stdout).strip()[-200:])
+    return p.stdout
+
+
+def _since(iso):
+    try:
+        t = time.mktime(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
+        return time.strftime("%a %Y-%m-%d %H:%M:%S %Z", time.localtime(t))
+    except (TypeError, ValueError):
+        return None
+
+
+def k8s_status(st):
+    """Troca a parte "serviço systemd" do estado pela do Deployment/pod ocudu-gnb (mesmo formato p/ o painel)."""
+    st["mode"] = "k8s"
+    st["unit_installed"] = None   # sem unit/polkit no modo k8s: o aviso de instalação não se aplica
+    st["polkit"] = None
+    dep = json.loads(kubectl("get", "deploy", "ocudu-gnb", "-o", "json"))
+    env = {e["name"]: e.get("value") for e in dep["spec"]["template"]["spec"]["containers"][0].get("env", [])}
+    cfg, reps = env.get("GNB_CONFIG") or "", dep["spec"].get("replicas") or 0
+    pods = json.loads(kubectl("get", "pods", "-l", "app.kubernetes.io/name=ocudu-gnb", "-o", "json"))["items"]
+    pods = [p for p in pods if not p["metadata"].get("deletionTimestamp")]
+    # gnb do pod: "-c /configs/…" (o nativo usa o caminho completo da pasta do OCUDU)
+    mine = [x for x in st.get("gnb_pids", []) if " -c /configs/" in " " + x["cmd"]]
+    st["manual"] = [x for x in st.get("gnb_pids", []) if x not in mine]
+    st["active"] = st["failed"] = None
+    st["k8s"] = {"replicas": reps, "config": cfg, "pod": None, "waiting_boot": False}
+    if not pods:
+        return st
+    pod = pods[0]
+    name = pod["metadata"]["name"]
+    cs = (pod["status"].get("containerStatuses") or [{}])[0]
+    state = cs.get("state") or {}
+    try:
+        journal = kubectl("logs", name, "--tail=25", timeout=10).splitlines()[-25:]
+    except (OSError, subprocess.TimeoutExpired):
+        journal = []
+    waiting = any("NÃO liga sozinho" in l for l in journal) and not mine
+    st["k8s"].update(pod=name, phase=pod["status"].get("phase"), restarts=cs.get("restartCount", 0),
+                     waiting_boot=waiting, node=pod["spec"].get("nodeName"))
+    info = {"unit": "pod/" + name, "config": cfg, "pid": mine[0]["pid"] if mine else 0,
+            "since": _since((state.get("running") or {}).get("startedAt")), "journal": journal}
+    bad = (state.get("waiting") or {}).get("reason") in ("CrashLoopBackOff", "Error", "ErrImageNeverPull",
+                                                         "CreateContainerError", "CreateContainerConfigError")
+    if reps and (bad or pod["status"].get("phase") in ("Failed", "Succeeded") or state.get("terminated")):
+        reason = (state.get("waiting") or state.get("terminated") or {}).get("reason") or pod["status"].get("phase")
+        st["failed"] = dict(info, state="failed", sub=reason, result=reason)
+    elif state.get("running") and not waiting:
+        st["active"] = dict(info, state="active", sub="running" if mine else "activating")
+    return st
+
+
+def execute_k8s(cmd):
+    action, name = cmd.get("action"), cmd.get("config") or ""
+    args = {"start": ["iniciar", name], "stop": ["parar"], "restart": ["iniciar"]}[action]
+    if action == "start" and not name:
+        return {"id": cmd.get("id"), "ok": False, "output": "falta o arquivo .yml"}
+    try:
+        p = subprocess.run([GNBSH] + args, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return {"id": cmd.get("id"), "ok": False, "output": "tempo esgotado (180 s)"}
+    return {"id": cmd.get("id"), "ok": p.returncode == 0, "output": (p.stdout + p.stderr).strip()[-3000:]}
 
 
 def execute(cmd):
     action, name = cmd.get("action"), cmd.get("config") or ""
     if action not in ("start", "stop", "restart") or (name and not NAME.match(name)):
         return {"id": cmd.get("id"), "ok": False, "output": "comando recusado pelo agente"}
+    if MODE == "k8s":
+        return execute_k8s(cmd)
     try:
         rc, out, err = remote("bash -s -- %s %s %s" % (action, shlex.quote(name or "-"), shlex.quote(DIR)),
                               COMMAND, 120)
@@ -173,6 +250,9 @@ def execute(cmd):
 
 
 def main():
+    if MODE == "k8s" and not os.access(GNBSH, os.X_OK):
+        print("modo k8s: GNB_CTL_GNBSH deve apontar para ran/ocudu/gnb.sh", file=sys.stderr)
+        sys.exit(2)
     if not URL or not TOKEN or not TARGET or not DIR:
         print("uso: DASHBOARD_URL=... INGEST_TOKEN=... GNB_CTL_SSH=usuario@host GNB_CTL_DIR=/caminho/ocudu gnb-ctl-agent.py",
               file=sys.stderr)
@@ -186,7 +266,7 @@ def main():
             if last_err:
                 log("conectado de novo a", TARGET)
                 last_err = None
-        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as e:
             st = {"error": str(e)[-300:]}
             if str(e) != last_err:
                 log("estado do gNB:", e)

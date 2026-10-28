@@ -536,6 +536,11 @@ setup_gnb_ctl_agent() {
     echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
     echo "GNB_CTL_SSH=${GNB_CTL_SSH}"
     echo "GNB_CTL_DIR=${GNB_CTL_DIR}"
+    echo "GNB_CTL_MODE=${GNB_CTL_MODE}"
+    if [[ "${GNB_CTL_MODE}" == k8s ]]; then
+      echo "GNB_CTL_GNBSH=${PROJECT_DIR}/ran/ocudu/gnb.sh"
+      echo "KUBECONFIG=${TARGET_HOME}/.kube/config"
+    fi
   } >"${dst}/gnb-ctl.env"
   unit=$(cat <<EOU
 # Gerado por open5GK3S/install.sh
@@ -562,7 +567,13 @@ EOU
   fi
   systemctl enable open5gs-k3s-gnb-ctl.service >/dev/null 2>&1
   systemctl restart open5gs-k3s-gnb-ctl.service
-  if su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${GNB_CTL_SSH} test -f /etc/systemd/system/ocudu-gnb@.service" &>/dev/null; then
+  if [[ "${GNB_CTL_MODE}" == k8s ]]; then
+    if su - "${TARGET_USER}" -s /bin/bash -c "KUBECONFIG=${TARGET_HOME}/.kube/config kubectl -n ocudu get deploy ocudu-gnb" &>/dev/null; then
+      ok "aba Controle: gNB OCUDU no Kubernetes (pod ocudu-gnb; journalctl -u open5gs-k3s-gnb-ctl)"
+    else
+      warn "aba Controle: o Deployment ocudu-gnb não existe: instale o OCUDU (docs/ocudu-k8s.md, ran/ocudu/install.sh)"
+    fi
+  elif su - "${TARGET_USER}" -s /bin/bash -c "ssh -o BatchMode=yes -o ConnectTimeout=5 ${GNB_CTL_SSH} test -f /etc/systemd/system/ocudu-gnb@.service" &>/dev/null; then
     ok "aba Controle: gNB OCUDU controlável (${GNB_CTL_SSH}; journalctl -u open5gs-k3s-gnb-ctl)"
   else
     warn "aba Controle: falta instalar o serviço do gNB no host do gNB (uma vez, com sudo lá):"

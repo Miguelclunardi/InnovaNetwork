@@ -106,7 +106,7 @@ load_config() {
   : "${DASHBOARD_PERSIST:=false}" "${DASHBOARD_PERSIST_DAYS:=365}" "${DASHBOARD_PERSIST_MAX_GB:=50}"
   : "${DASHBOARD_CONFIG_EDIT:=false}" "${DASHBOARD_ADMIN_PASSWORD:=}" "${DASHBOARD_CONFIG_GID:=}"
   : "${DASHBOARD_LOCAL_ROLE:=Core 5G (k3s)}" "${ENERGY_METER_URL:=}" "${ENERGY_METER_HOST:=}"
-  : "${DASHBOARD_CONTROL:=false}" "${GNB_CTL_SSH:=}" "${GNB_CTL_DIR:=}" "${CORE_AUTOSTART:=true}"
+  : "${DASHBOARD_CONTROL:=false}" "${GNB_CTL_SSH:=}" "${GNB_CTL_DIR:=}" "${GNB_CTL_MODE:=systemd}" "${CORE_AUTOSTART:=true}"
   : "${RU_MGMT_IP:=}" "${RU_NAME:=RU}" "${RU_SSH_USER:=user}" "${RU_MGMT_IFACE:=}" "${RU_MGMT_LOCAL_CIDR:=}" "${RU_POLL_SECONDS:=10}"
 
   CHARTS_DIR="${INSTALL_DIR}/5g-charts"
@@ -258,6 +258,7 @@ validate_config() {
     if [[ -n "${GNB_CTL_SSH}" ]]; then
       [[ "${GNB_CTL_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_CTL_SSH: use usuario@host"
       [[ "${GNB_CTL_DIR}" =~ ^/[A-Za-z0-9/_.-]+$ ]] || bad "GNB_CTL_DIR deve ser um caminho absoluto (pasta do OCUDU)"
+      [[ "${GNB_CTL_MODE}" == k8s || "${GNB_CTL_MODE}" == systemd ]] || bad "GNB_CTL_MODE: use k8s ou systemd"
     fi
     if [[ -n "${RU_MGMT_IP}" ]]; then
       valid_ipv4 "${RU_MGMT_IP}" || bad "RU_MGMT_IP inválido"
@@ -664,7 +665,7 @@ render_dashboard() {
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
   # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
-         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_CONTROL}" "${GNB_CTL_SSH}" "${AMF_N2_IP}" "${UPF_N3_IP}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" "${f5env}" | sha256sum | cut -c1-16)
+         "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_CONTROL}" "${GNB_CTL_SSH}" "${GNB_CTL_MODE}" "${AMF_N2_IP}" "${UPF_N3_IP}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" "${f5env}" | sha256sum | cut -c1-16)
   {
     echo "# GERADO automaticamente a partir de config.env — não edite à mão."
     # só o campo vazio gerado pelo kubectl (não linhas dos arquivos do painel que citem a palavra)
