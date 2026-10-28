@@ -84,6 +84,21 @@ do_join() {
   ip -br addr show "${OCUDU_NODE_IFACE}" | grep -q "${OCUDU_NODE_IP}/" \
     || die "${OCUDU_NODE_IFACE} não tem ${OCUDU_NODE_IP}"
 
+  # Lições de 2026-10-28 (docs/ocudu-k8s.md, "Problemas encontrados"):
+  # 1) outro Kubernetes na máquina (ex.: MicroK8s) ocupa as portas do kubelet e o k3s não sobe
+  local busy
+  busy="$(ss -ltnpH '( sport = :10250 or sport = :10248 or sport = :6443 )' 2>/dev/null | grep -v '"k3s' || true)"
+  if [[ -n "${busy}" ]]; then
+    echo "${busy}" | sed 's/^/    /'
+    die "há outro Kubernetes usando as portas do kubelet (10250/10248). MicroK8s? 'sudo microk8s stop' (não apaga nada; volta com 'sudo microk8s start')"
+  fi
+  # 2) restos de uma tentativa que falhou: certificados antigos fazem o servidor recusar o nó
+  if [[ -d /var/lib/rancher/k3s/agent ]] && ! systemctl is-active -q k3s-agent; then
+    say "limpando restos de uma tentativa anterior (/var/lib/rancher/k3s/agent)"
+    systemctl stop k3s-agent 2>/dev/null || true
+    rm -rf /var/lib/rancher/k3s/agent
+  fi
+
   say "rota até o servidor do k3s (${STABLE_IP} via ${OCUDU_SERVER_VIA}) — unit ${ROUTE_UNIT}"
   cat > "/etc/systemd/system/${ROUTE_UNIT}" <<EOF
 # InnovaNetwork: rota até o servidor do k3s (torre2) pela fibra. Gerado por ran/ocudu/no-ran.sh
