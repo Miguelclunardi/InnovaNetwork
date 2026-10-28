@@ -47,6 +47,12 @@ for c in /proc/[0-9]*/comm; do
     exit 1
   fi
 done
+# log do .yml (log.filename) no /tmp do host: se ficou de outro dono (ex.: uid 1001 da imagem), o root
+# não consegue reabrir por causa do fs.protected_regular; remove só nesse caso
+logf=$(awk '/^log:/{l=1;next} l&&/^[^ #]/{l=0} l&&/filename:/{print $2; exit}' "$cfg")
+if [ -n "$logf" ] && [ -e "$logf" ] && [ "$(stat -c %u "$logf")" != 0 ]; then
+  echo "ocudu-gnb: removendo $logf (dono $(stat -c %u "$logf"), não root)"; rm -f "$logf"
+fi
 command -v taskset >/dev/null || { echo "ocudu-gnb: a imagem não tem taskset (util-linux)"; exit 1; }
 echo "ocudu-gnb: taskset -c ${GNB_CPUS} gnb -c $cfg $extra"
 taskset -c "${GNB_CPUS}" gnb -c "$cfg" $extra &
@@ -85,8 +91,16 @@ deployment = {
                     "name": "gnb",
                     "image": IMAGE,
                     "imagePullPolicy": "Never",   # imagem local, importada no containerd do k3s
-                    "securityContext": {"privileged": True},   # DPDK/vfio, hugepages, RT
+                    # privileged + root: DPDK/vfio, hugepages, /proc/self/pagemap, RT. A imagem oficial
+                    # roda como USER 1001; o serviço nativo ocudu-gnb@ roda como root (igual aqui).
+                    "securityContext": {"privileged": True, "runAsUser": 0, "runAsGroup": 0},
                     "command": ["/bin/bash", "-c", RUN],
+                    # O Kubernetes limita as hugepages do pod ao que ele pede (sem pedido = 0 e o DPDK
+                    # falha com "Cannot init memory"). Memória: só pedido, sem limite.
+                    "resources": {
+                        "requests": {"hugepages-1Gi": env("OCUDU_HUGEPAGES_1G"), "memory": env("OCUDU_MEMORY_REQUEST")},
+                        "limits": {"hugepages-1Gi": env("OCUDU_HUGEPAGES_1G")},
+                    },
                     "env": [
                         {"name": "GNB_CONFIG", "value": env("OCUDU_GNB_CONFIG", env("OCUDU_DEFAULT_CONFIG"))},
                         {"name": "GNB_EXTRA_CONFIG", "value": env("OCUDU_EXTRA_CONFIG", "")},

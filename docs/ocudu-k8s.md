@@ -129,7 +129,13 @@ derruba um gNB ligado). Resultado (2026-10-28): criado, gNB parado.
 ./ran/ocudu/gnb.sh log -f
 ./ran/ocudu/gnb.sh parar                            # SIGINT ao gNB, como Ctrl+C
 ```
-*(Pendente.)*
+Antes: core ligado (painel → Iniciar tudo), GPS/RU prontos (3.0), **nenhum gNB rodando no nó** (nem o nativo,
+nem de outra pessoa). O pod recusa iniciar se houver um processo `gnb` no host.
+
+Resultado (2026-10-28, 14:46 local, Open5GS): `N2: Connection to AMF on 10.10.0.10:38412 completed`,
+`gNB started`; celular registrado com sessão `internet` (`10.45.0.2`); RU `SYNCHRONIZED`, DU `Ready`;
+fronthaul **92,3 % dos pacotes no tempo, 3 adiantados, 0 atrasados** em 30 s (nativo: ~91 %); gNB nas CPUs
+reservadas (DPDK em 2–5, como no nativo); log em `/tmp/gnb.log` do host (o painel continua lendo).
 
 ## 4. Verificações feitas
 
@@ -148,6 +154,9 @@ derruba um gNB ligado). Resultado (2026-10-28): criado, gNB parado.
 | 2 | `entrar` rodado no torre2: `command not found` | comando do nó executado na máquina errada | nenhuma mudança; a regra de "em qual máquina" está em cada passo |
 | 3 | k3s instala mas não sobe: `listen tcp 0.0.0.0:10250: bind: address already in use` | **MicroK8s** instalado no nó (snap, desde 2026-08-04, com namespaces do RIC O-RAN) ocupando as portas | `sudo microk8s stop` (desliga e não volta no boot; **não apaga nada**). O `entrar` agora detecta isso antes de instalar |
 | 4 | depois de liberar as portas, o agente fica em ciclo: `Node authorization rejected` + `ContentLength=… with Body length 0` | certificados da tentativa que falhou (o nó nunca se registrou) + defeito conhecido do k3s na nova tentativa | `sudo systemctl stop k3s-agent; sudo rm -rf /var/lib/rancher/k3s/agent; sudo systemctl start k3s-agent`. O `entrar` agora limpa isso sozinho |
+| 6 | pod: `EAL: … /dev/hugepages/rtemap_0 failed: Permission denied`, `cannot open /proc/self/pagemap` | a imagem oficial roda como `USER 1001` (boa prática), mas o DPDK no nosso modo precisa de root, como o serviço nativo | `securityContext: runAsUser: 0, runAsGroup: 0` (além de `privileged`) |
+| 7 | como root: `Unable to create log file "/tmp/gnb.log": Permission denied` | o `/tmp/gnb.log` ficou com dono 1001 (tentativa 6); o `fs.protected_regular=2` impede até o root de reabrir arquivo de outro dono no `/tmp` | o pod remove o log do `.yml` (`log.filename`) antes de ligar, **só** se o dono não for root |
+| 8 | `EAL: Cannot init memory` (hugepages livres no host) | o Kubernetes limita as hugepages do pod ao que ele **pede**; sem pedido, o limite é 0 | o pod pede `hugepages-1Gi: 2Gi` (`OCUDU_HUGEPAGES_1G`, igual ao `--socket-mem 2048`) e 2Gi de memória, sem limite de memória |
 | 5 | a 1ª execução do `importar` não deixou a imagem no k3s | não identificada (saída não guardada) | rodar de novo com `tee` funcionou. Sempre guardar a saída dos comandos com `2>&1 \| tee arquivo.log` |
 
 Observação: a rede de pods ficou com MTU diferente nos dois nós (8950 no innovaserver, fibra 9000; 1450 no
