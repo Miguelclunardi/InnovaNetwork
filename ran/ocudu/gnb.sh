@@ -40,9 +40,8 @@ case "${1:-}" in
     if ssh -o BatchMode=yes "${OCUDU_NODE_SSH}" "systemctl list-units --no-legend --state=active 'ocudu-gnb@*' | grep -q ."; then
       die "o serviço nativo ocudu-gnb@ está ligado no nó: pare-o antes"
     fi
-    if [[ "${cfg}" != "$(cur_cfg)" ]]; then
-      k set env deploy/ocudu-gnb GNB_CONFIG="${cfg}" >/dev/null
-    fi
+    # .yml + hora do pedido (o pod só liga o gNB se o pedido for posterior ao boot do nó)
+    k set env deploy/ocudu-gnb GNB_CONFIG="${cfg}" GNB_START_REQUEST="$(date +%s)" >/dev/null
     k scale deploy/ocudu-gnb --replicas=1 >/dev/null
     echo "ligando com ${cfg}.yml; esperando o pod…"
     k rollout status deploy/ocudu-gnb --timeout=120s >/dev/null || true

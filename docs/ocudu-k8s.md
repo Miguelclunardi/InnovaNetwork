@@ -147,6 +147,19 @@ O cartão **Core ativo** do painel ainda controla só o gNB **nativo**. Com o gN
 Resultado (2026-10-28, free5GC): `N2: Connection to AMF on 10.10.0.30:38412 completed`; celular com
 `internet` (`10.60.0.2`) e `ims` (`10.62.0.1`); RU 90,7 % no tempo, 0 atrasados.
 
+### 3.10 O gNB não liga sozinho depois de um reboot
+
+Regra do projeto: depois de um boot nada de rádio sobe sozinho (o GPS pode levar ~30 min). O Deployment fica
+com 1 réplica, então o Kubernetes recriaria o pod quando o innovaserver voltasse. Proteção no próprio pod:
+
+- `gnb.sh iniciar` grava a hora do pedido (`GNB_START_REQUEST`, epoch) no Deployment;
+- ao iniciar, o pod compara com a hora de boot do nó (`btime` do `/proc/stat`, que é do host);
+- pedido **anterior** ao boot → o pod fica rodando **sem ligar o gNB**, com a mensagem "o gNB NÃO liga
+  sozinho… rode ./ran/ocudu/gnb.sh iniciar". Depois do GPS válido e da RU pronta: `gnb.sh iniciar`.
+
+Funciona tanto se só o innovaserver reiniciar quanto se as duas máquinas reiniciarem. `install.sh` preserva o
+pedido em vigor (não derruba nem trava um gNB ligado).
+
 ### 3.9 Editar o `.yml` x mudar o código do OCUDU
 
 - **`.yml`** (`~/ocudu/configs/` no nó): o pod lê a pasta do host, sem cópia. Vale no próximo início do gNB
@@ -175,6 +188,8 @@ Resultado (2026-10-28, free5GC): `N2: Connection to AMF on 10.10.0.30:38412 comp
 | 6 | pod: `EAL: … /dev/hugepages/rtemap_0 failed: Permission denied`, `cannot open /proc/self/pagemap` | a imagem oficial roda como `USER 1001` (boa prática), mas o DPDK no nosso modo precisa de root, como o serviço nativo | `securityContext: runAsUser: 0, runAsGroup: 0` (além de `privileged`) |
 | 7 | como root: `Unable to create log file "/tmp/gnb.log": Permission denied` | o `/tmp/gnb.log` ficou com dono 1001 (tentativa 6); o `fs.protected_regular=2` impede até o root de reabrir arquivo de outro dono no `/tmp` | o pod remove o log do `.yml` (`log.filename`) antes de ligar, **só** se o dono não for root |
 | 8 | `EAL: Cannot init memory` (hugepages livres no host) | o Kubernetes limita as hugepages do pod ao que ele **pede**; sem pedido, o limite é 0 | o pod pede `hugepages-1Gi: 2Gi` (`OCUDU_HUGEPAGES_1G`, igual ao `--socket-mem 2048`) e 2Gi de memória, sem limite de memória |
+| 9 | `install.sh --deploy-only` (cores) com o free5GC ativo ligou também o Open5GS (dois cores ao mesmo tempo) | o Helm aplica as réplicas do Open5GS sem saber do "core ativo" | rodar o `--deploy-only` **só com o Open5GS ativo** (ou trocar de core logo depois) |
+| 10 | `--deploy-only` falhou em "Assinantes" (`timed out waiting for the condition`) | rodado ao mesmo tempo que a troca de core do painel, que parava/religava o pod `populate` | não rodar install e troca de core juntos; rodar o install de novo depois (os assinantes já estavam no banco) |
 | 5 | a 1ª execução do `importar` não deixou a imagem no k3s | não identificada (saída não guardada) | rodar de novo com `tee` funcionou. Sempre guardar a saída dos comandos com `2>&1 \| tee arquivo.log` |
 
 Observação: a rede de pods ficou com MTU diferente nos dois nós (8950 no innovaserver, fibra 9000; 1450 no

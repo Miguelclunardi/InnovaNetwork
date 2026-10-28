@@ -35,6 +35,16 @@ LABELS = {"app.kubernetes.io/name": "ocudu-gnb", "app.kubernetes.io/part-of": "i
 # nativo, por exemplo) e repassa o TERM do Kubernetes como INT ao gNB.
 RUN = r'''
 set -u
+# Depois de um reboot do nó o gNB NÃO liga sozinho (o GPS pode levar até ~30 min e a RU precisa do relógio
+# certo): só liga se o último "gnb.sh iniciar" (GNB_START_REQUEST, epoch) for posterior ao boot do nó.
+# /proc/stat não é isolado por contêiner: btime é a hora de boot do host.
+btime=$(awk '/^btime/{print $2}' /proc/stat)
+if [ "${GNB_START_REQUEST:-0}" -lt "$btime" ]; then
+  echo "ocudu-gnb: o nó reiniciou depois do último pedido de início ($(date -d @"${GNB_START_REQUEST:-0}" '+%F %T' 2>/dev/null))."
+  echo "ocudu-gnb: o gNB NÃO liga sozinho. Confira o GPS (ts2phc 's2') e a RU e rode: ./ran/ocudu/gnb.sh iniciar"
+  trap 'exit 0' TERM INT
+  while :; do sleep 3600 & wait $!; done
+fi
 cfg="/configs/${GNB_CONFIG}.yml"
 [ -r "$cfg" ] || { echo "ocudu-gnb: não achei $cfg"; exit 1; }
 extra=""
@@ -105,6 +115,7 @@ deployment = {
                         {"name": "GNB_CONFIG", "value": env("OCUDU_GNB_CONFIG", env("OCUDU_DEFAULT_CONFIG"))},
                         {"name": "GNB_EXTRA_CONFIG", "value": env("OCUDU_EXTRA_CONFIG", "")},
                         {"name": "GNB_CPUS", "value": env("OCUDU_CPUS")},
+                        {"name": "GNB_START_REQUEST", "value": env("OCUDU_START_REQUEST", "0")},
                     ],
                     "volumeMounts": [
                         {"name": "configs", "mountPath": "/configs", "readOnly": True},

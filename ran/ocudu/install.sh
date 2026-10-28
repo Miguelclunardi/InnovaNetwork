@@ -78,8 +78,8 @@ image_tag() {
   as_owner ssh -o BatchMode=yes "${OCUDU_NODE_SSH}" "git -C '${OCUDU_SRC_DIR}' rev-parse --short=7 HEAD"
 }
 
-render() {  # $1 = tag da imagem; $2 = .yml em uso; $3 = réplicas
-  OCUDU_IMAGE_TAG="$1" OCUDU_GNB_CONFIG="$2" OCUDU_REPLICAS="$3" OCUDU_NAMESPACE="${OCUDU_NAMESPACE}" OCUDU_NODE="${OCUDU_NODE}" \
+render() {  # $1 = tag da imagem; $2 = .yml em uso; $3 = réplicas; $4 = hora do último pedido de início
+  OCUDU_IMAGE_TAG="$1" OCUDU_GNB_CONFIG="$2" OCUDU_REPLICAS="$3" OCUDU_START_REQUEST="${4:-0}" OCUDU_NAMESPACE="${OCUDU_NAMESPACE}" OCUDU_NODE="${OCUDU_NODE}" \
   OCUDU_CONFIG_DIR="${OCUDU_CONFIG_DIR}" OCUDU_LOG_DIR="${OCUDU_LOG_DIR}" OCUDU_IMAGE="${OCUDU_IMAGE}" \
   OCUDU_DEFAULT_CONFIG="${OCUDU_DEFAULT_CONFIG}" OCUDU_EXTRA_CONFIG="${OCUDU_EXTRA_CONFIG}" \
   OCUDU_CPUS="${OCUDU_CPUS}" OCUDU_HUGEPAGES_1G="${OCUDU_HUGEPAGES_1G}" \
@@ -95,7 +95,11 @@ do_deploy() {
   local cur_rep cur_cfg
   cur_rep="$(k -n "${OCUDU_NAMESPACE}" get deploy ocudu-gnb -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
   cur_cfg="$(k -n "${OCUDU_NAMESPACE}" get deploy ocudu-gnb -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="GNB_CONFIG")].value}' 2>/dev/null || true)"
-  render "${tag}" "${cur_cfg:-${OCUDU_DEFAULT_CONFIG}}" "${cur_rep:-0}" > "${out}/ocudu.yaml"
+  local cur_req
+  cur_req="$(k -n "${OCUDU_NAMESPACE}" get deploy ocudu-gnb -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="GNB_START_REQUEST")].value}' 2>/dev/null || true)"
+  # gNB ligado e ainda sem a variável (versão anterior): conta como pedido agora, para não ficar parado
+  if [[ -z "${cur_req}" && "${cur_rep:-0}" != "0" ]]; then cur_req="$(date +%s)"; fi
+  render "${tag}" "${cur_cfg:-${OCUDU_DEFAULT_CONFIG}}" "${cur_rep:-0}" "${cur_req:-0}" > "${out}/ocudu.yaml"
   ok "${out}/ocudu.yaml"
   if ${dry}; then
     # cliente: o namespace ainda pode não existir (o servidor recusaria o Deployment)
