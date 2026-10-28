@@ -67,6 +67,26 @@ command -v taskset >/dev/null || { echo "ocudu-gnb: a imagem não tem taskset (u
 echo "ocudu-gnb: taskset -c ${GNB_CPUS} gnb -c $cfg $extra"
 taskset -c "${GNB_CPUS}" gnb -c "$cfg" $extra &
 pid=$!
+# Threads comuns (não tempo real) que o gNB não fixa em CPU herdam todas as GNB_CPUS. Com isolcpus não há
+# balanceamento entre CPUs isoladas, e sem limite de tempo real (sched_rt_runtime_us=-1) uma delas pode cair numa
+# CPU ocupada 100 % por uma thread de tempo real e nunca rodar (ex.: o log do gNB parou em 8 KB). O vigia move
+# essas threads para GNB_AUX_CPUS (CPUs sem trabalho do gNB). Não mexe na thread principal nem nas de tempo real.
+if [ -n "${GNB_AUX_CPUS:-}" ]; then
+  (
+    full=$(taskset -cp "$pid" 2>/dev/null | sed 's/.*: //')
+    for _ in $(seq 1 60); do
+      for t in /proc/"$pid"/task/*; do
+        tid=${t##*/}; [ "$tid" = "$pid" ] && continue
+        pol=$(sed 's/.*) //' "$t/stat" 2>/dev/null | awk '{print $39}'); [ "$pol" = 0 ] || continue
+        aff=$(taskset -cp "$tid" 2>/dev/null | sed 's/.*: //')
+        if [ -n "$full" ] && [ "$aff" = "$full" ] && taskset -cp "${GNB_AUX_CPUS}" "$tid" >/dev/null 2>&1; then
+          echo "ocudu-gnb: thread $(cat "$t/comm" 2>/dev/null) ($tid) -> CPUs ${GNB_AUX_CPUS}"
+        fi
+      done
+      sleep 2
+    done
+  ) &
+fi
 trap 'echo "ocudu-gnb: parando (SIGINT)"; kill -INT $pid' TERM INT
 wait $pid; rc=$?
 trap - TERM INT
@@ -115,6 +135,7 @@ deployment = {
                         {"name": "GNB_CONFIG", "value": env("OCUDU_GNB_CONFIG", env("OCUDU_DEFAULT_CONFIG"))},
                         {"name": "GNB_EXTRA_CONFIG", "value": env("OCUDU_EXTRA_CONFIG", "")},
                         {"name": "GNB_CPUS", "value": env("OCUDU_CPUS")},
+                        {"name": "GNB_AUX_CPUS", "value": env("OCUDU_AUX_CPUS", "")},
                         {"name": "GNB_START_REQUEST", "value": env("OCUDU_START_REQUEST", "0")},
                     ],
                     "volumeMounts": [
