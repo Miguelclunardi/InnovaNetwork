@@ -105,15 +105,21 @@ Conferir no torre2: `kubectl get nodes -o wide` → `innovaserver Ready … 10.1
 ```bash
 sudo ~/innovanetwork-ran/no-ran.sh importar 2>&1 | tee ~/innovanetwork-ran/importar.log
 ```
-`docker save | k3s ctr -n k8s.io images import -`. *(Em andamento — ver seção 5.)*
+`docker save | k3s ctr -n k8s.io images import -`. Conferir no torre2 (a lista do nó atualiza em segundos):
+```bash
+kubectl get node innovaserver -o json | grep -o 'innovanetwork/ocudu-gnb:[0-9a-f]*' | head -1
+```
+Resultado (2026-10-28): `docker.io/innovanetwork/ocudu-gnb:6fe9ad0`, 137 MB.
 
 ### 3.6 Namespace e Deployment — torre2
 
 ```bash
 ./ran/ocudu/install.sh --dry-run   # gera e valida, sem aplicar
 ./ran/ocudu/install.sh             # aplica: namespace "ocudu", Deployment com 0 réplicas (parado)
+kubectl -n ocudu get deploy,cm     # ocudu-gnb 0/0 + descritor innovanetwork-component
 ```
-*(Pendente.)*
+Não precisa de sudo; só acrescenta o namespace. Rodar de novo preserva o `.yml` escolhido e as réplicas (não
+derruba um gNB ligado). Resultado (2026-10-28): criado, gNB parado.
 
 ### 3.7 Ligar o gNB pelo Kubernetes — torre2
 
@@ -142,7 +148,7 @@ sudo ~/innovanetwork-ran/no-ran.sh importar 2>&1 | tee ~/innovanetwork-ran/impor
 | 2 | `entrar` rodado no torre2: `command not found` | comando do nó executado na máquina errada | nenhuma mudança; a regra de "em qual máquina" está em cada passo |
 | 3 | k3s instala mas não sobe: `listen tcp 0.0.0.0:10250: bind: address already in use` | **MicroK8s** instalado no nó (snap, desde 2026-08-04, com namespaces do RIC O-RAN) ocupando as portas | `sudo microk8s stop` (desliga e não volta no boot; **não apaga nada**). O `entrar` agora detecta isso antes de instalar |
 | 4 | depois de liberar as portas, o agente fica em ciclo: `Node authorization rejected` + `ContentLength=… with Body length 0` | certificados da tentativa que falhou (o nó nunca se registrou) + defeito conhecido do k3s na nova tentativa | `sudo systemctl stop k3s-agent; sudo rm -rf /var/lib/rancher/k3s/agent; sudo systemctl start k3s-agent`. O `entrar` agora limpa isso sozinho |
-| 5 | `importar` não colocou a imagem no k3s | em análise | — |
+| 5 | a 1ª execução do `importar` não deixou a imagem no k3s | não identificada (saída não guardada) | rodar de novo com `tee` funcionou. Sempre guardar a saída dos comandos com `2>&1 \| tee arquivo.log` |
 
 Observação: a rede de pods ficou com MTU diferente nos dois nós (8950 no innovaserver, fibra 9000; 1450 no
 torre2, `k3s0`). Não afeta o gNB (rede do host). A revisar.
