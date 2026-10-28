@@ -137,6 +137,24 @@ Resultado (2026-10-28, 14:46 local, Open5GS): `N2: Connection to AMF on 10.10.0.
 fronthaul **92,3 % dos pacotes no tempo, 3 adiantados, 0 atrasados** em 30 s (nativo: ~91 %); gNB nas CPUs
 reservadas (DPDK em 2–5, como no nativo); log em `/tmp/gnb.log` do host (o painel continua lendo).
 
+### 3.8 Trocar de core com o gNB no Kubernetes (até o painel ser adaptado)
+
+O cartão **Core ativo** do painel ainda controla só o gNB **nativo**. Com o gNB no Kubernetes:
+1. painel → Controle → Core ativo → outro core, com **"religar o gNB" desmarcado** → Trocar agora;
+2. no torre2: `./ran/ocudu/gnb.sh iniciar gnb_ru_liteon_FREE5GC` (ou `…SLPIT_CORE` para o Open5GS). Trocar o
+   `.yml` recria o pod (~15 s até o N2).
+
+Resultado (2026-10-28, free5GC): `N2: Connection to AMF on 10.10.0.30:38412 completed`; celular com
+`internet` (`10.60.0.2`) e `ims` (`10.62.0.1`); RU 90,7 % no tempo, 0 atrasados.
+
+### 3.9 Editar o `.yml` x mudar o código do OCUDU
+
+- **`.yml`** (`~/ocudu/configs/` no nó): o pod lê a pasta do host, sem cópia. Vale no próximo início do gNB
+  (`gnb.sh parar` + `gnb.sh iniciar <yml>`). Não precisa recompilar. `.yml` novo: basta criar o arquivo.
+- **Código** (`~/ocudu`, C++): o pod usa a **imagem**. Fazer **commit** (a imagem é gerada do commit; mudança
+  sem commit não entra) → no nó `sudo ~/innovanetwork-ran/no-ran.sh imagem` → no torre2
+  `./ran/ocudu/install.sh` (a tag da imagem é o commit) → reiniciar o gNB.
+
 ## 4. Verificações feitas
 
 | O quê | Como | Resultado (2026-10-28) |
