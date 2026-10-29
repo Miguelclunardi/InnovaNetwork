@@ -257,7 +257,7 @@ function updatePills(ov) {
   pc.className = "pill " + (c.pods_error ? "err" : c.pods_ready === c.pods_total && c.pods_total ? "ok" : "warn");
   const r = ov.ru;
   const pr = $("#pill-ru");
-  pr.classList.toggle("hidden", !r);
+  $("#row-ru").classList.toggle("hidden", !r);
   if (r) {
     const good = (v) => v === "Ready" || v === "SYNCHRONIZED";
     const radio = good(r.sync) && good(r.rf) && good(r.dpd);
@@ -265,7 +265,41 @@ function updatePills(ov) {
     pr.className = "pill " + (!r.online || !radio ? "err" : good(r.du) ? "ok" : "warn");
     pr.title = r.error || `sync ${r.sync} · RF ${r.rf} · DPD ${r.dpd} · DU ${r.du}`;
   }
+  // GPS / PTP do nó do rádio
+  const rh = ov.radio;
+  $("#row-gps").classList.toggle("hidden", !rh);
+  if (rh) {
+    const gi = rh.online ? gpsInfo(rh.gps, rh.ptp) : { v: "agente sem contato", s: "", c: "err" };
+    const pgps = $("#pill-gps");
+    pgps.textContent = gi.v;
+    pgps.className = "pill " + gi.c;
+    $("#status-gps-detail").textContent = gi.s;
+  } else $("#status-gps-detail").textContent = "";
+  // botão Status: a cor do pior item visível
+  const rows = $$("#status-pop .strow:not(.hidden) .pill");
+  const n = (c) => rows.filter((p) => p.classList.contains(c)).length;
+  const sb = $("#status-btn");
+  sb.className = "pill " + (n("err") ? "err" : n("warn") ? "warn" : "ok");
+  sb.textContent = n("err") ? `Status · ${n("err")} falha${n("err") > 1 ? "s" : ""}` : n("warn") ? `Status · ${n("warn")} alerta${n("warn") > 1 ? "s" : ""}` : "Status · tudo ok";
 }
+// GPS do nó do rádio (ts2phc): texto, detalhe e classe (ok/warn/err)
+function gpsInfo(g, ptp) {
+  const pv = Object.values(ptp || {});
+  const ptpOk = pv.length && pv.every((x) => x === "active");
+  if (!g) return { v: "GPS sem dados", s: "", c: "" };
+  const sub = [g.offset_ns != null ? `offset ${g.offset_ns} ns` : "", g.age != null ? `última leitura há ${Math.round(g.age)} s` : ""]
+    .filter(Boolean).join(" · ");
+  switch (g.state) {
+    case "travado": return { v: ptpOk ? "GPS travado · PTP ok" : "GPS travado · PTP parado", s: sub, c: ptpOk ? "ok" : "warn" };
+    case "procurando": return { v: "GPS procurando satélites", s: "ts2phc sem hora válida do GPS: espere antes de ligar o gNB", c: "warn" };
+    case "ajustando": case "sem_trava": return { v: "GPS ajustando", s: sub, c: "warn" };
+    case "parado": return { v: "ts2phc sem mensagens", s: sub, c: "err" };
+    default: return { v: "GPS sem dados", s: g.line || "", c: "" };
+  }
+}
+$("#status-btn").addEventListener("click", (e) => { e.stopPropagation(); $("#status-pop").classList.toggle("hidden"); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#status-box")) $("#status-pop").classList.add("hidden"); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#status-pop").classList.add("hidden"); });
 
 // ---------------------------------------------------------------------------
 //  Visão geral

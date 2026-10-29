@@ -283,3 +283,13 @@ button.rec.on#admin-btn { background: rgba(255,255,255,.18); border-color: #91cf
 .adminpop .err { color: var(--err); margin-top: 6px; }
 /* carregando (Histórico): a tela responde na hora e escurece até os dados chegarem */
 .loading { opacity: .45; transition: opacity .15s; pointer-events: none; }
+/* botão Status (topo): os indicadores ficam num quadro que abre na própria tela */
+.statusbox { position: relative; }
+.topbar #status-btn { cursor: pointer; font: inherit; font-size: 12px; }
+.statuspop { position: absolute; right: 0; top: calc(100% + 8px); width: 320px; z-index: 50; color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.statuspop .strow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 0;
+  border-bottom: 1px solid var(--border); }
+.statuspop .stl { color: var(--muted); font-size: 12px; }
+.statuspop .pill { white-space: nowrap; border-color: var(--border); color: var(--muted); }
+#status-gps-detail { margin-top: 8px; font-size: 12px; }

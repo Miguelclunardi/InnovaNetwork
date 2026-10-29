@@ -2075,8 +2075,12 @@ class Handler(BaseHTTPRequestHandler):
         core = CORES.cur().snapshot()
         cell_last = ran["cells"][0]["last"] if ran["cells"] else {}
         pods = core["pods"]
+        gv = GNBCTL.view() if GNBCTL else None
+        gst = (gv or {}).get("status") or {}
         return {
             "now": time.time(),
+            # nó do rádio (agente do gNB): GPS (ts2phc) e serviços PTP, para o botão Status
+            "radio": {"online": gv["online"], "gps": gst.get("gps"), "ptp": gst.get("ptp")} if gv else None,
             "core_active": CORES.active(), "core_name": CORES.cur_def()["label"],
             "gnb": {"status": ran["status"], "cell": cell_last,
                     "ues": [dict({k: u[k] for k in ("id", "pci", "rnti", "active", "last", "first_seen", "last_seen")},

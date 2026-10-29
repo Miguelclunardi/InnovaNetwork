@@ -40,7 +40,7 @@ NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 
 # Lido no host do gNB (python3 -): só leitura.
 STATUS = r'''
-import glob, json, os, re, subprocess, sys
+import glob, json, os, re, subprocess, sys, time
 D = sys.argv[1]
 def sh(*a):
     try:
@@ -110,6 +110,32 @@ nics = {c["nic"] for c in cfgs if re.match(r"^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2
 out["nics"] = {n: os.path.basename(os.path.realpath("/sys/bus/pci/devices/%s/driver" % n))
                if os.path.exists("/sys/bus/pci/devices/%s/driver" % n) else None for n in nics}
 out["ptp"] = {s: sh("systemctl", "is-active", s).strip() for s in ("ptp4l-gm", "ts2phc", "phc2sys")}
+def gps_state():
+    # ts2phc: "offset N sX" (s2 = travado no GPS) ou "source ts not valid" (GPS ainda sem hora válida)
+    lines = [l for l in sh("journalctl", "-u", "ts2phc", "-n", "20", "--no-pager", "-o", "short-unix").splitlines()
+             if l[:1].isdigit()]
+    if not lines:
+        return {"state": "sem_dados"}
+    last = lines[-1]
+    try:
+        age = round(time.time() - float(last.split()[0]), 1)
+    except ValueError:
+        age = None
+    msg = re.sub(r"^\S+\s+\S+\s+\S+?:\s*", "", last)
+    m = re.search(r"offset\s+(-?\d+)\s+s(\d)", msg)
+    if "not valid" in msg:
+        st = "procurando"
+    elif m:
+        st = {"2": "travado", "1": "ajustando", "0": "sem_trava"}.get(m.group(2), "ajustando")
+    else:
+        st = "desconhecido"
+    if age is not None and age > 60:
+        st = "parado"
+    g = {"state": st, "age": age, "line": msg[-120:]}
+    if m:
+        g["offset_ns"] = int(m.group(1))
+    return g
+out["gps"] = gps_state()
 print(json.dumps(out))
 '''
 

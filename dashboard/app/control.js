@@ -124,6 +124,7 @@ const Control = {
         s: a ? `${a.config}.yml · PID ${a.pid || "–"}` : (s.manual || []).length ? `PID ${(s.manual || []).map((m) => m.pid).join(", ")} (pare no terminal)` : f ? `falhou: ${f.sub || ""} (${f.config})` : kw ? "confira GPS/RU e clique Iniciar" : "",
         c: a && a.sub === "running" ? "ok" : (s.manual || []).length || kw ? "warn" : f ? "err" : "" },
       { l: "Ligado desde", v: a && a.since ? a.since.replace(/^\w+ /, "").replace(/ [A-Z-]+\d*$/, "") : "–", s: "" },
+      (() => { const g = gpsInfo(s.gps, s.ptp); return { l: "GPS (ts2phc)", v: g.v, s: g.s, c: g.c }; })(),
       { l: "PTP (ptp4l / ts2phc / phc2sys)", v: ["ptp4l-gm", "ts2phc", "phc2sys"].map((x) => ptp[x] === "active" ? "✓" : "✗").join(" "),
         s: Object.values(ptp).every((x) => x === "active") ? "todos ativos" : "algum serviço PTP parado", c: Object.values(ptp).every((x) => x === "active") ? "ok" : "err" },
       { l: "Fronthaul (VF DPDK)", v: Object.entries(nics).filter(([, d]) => d).map(([n, d]) => d === "vfio-pci" ? "✓ vfio" : d).join(" ") || "–",

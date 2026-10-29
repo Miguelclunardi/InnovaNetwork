@@ -28,9 +28,17 @@
     <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Configuração</button>
   </nav>
   <div class="topright">
-    <span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span>
-    <span class="pill" id="pill-core" title="Pods do core">core …</span>
-    <span class="pill hidden" id="pill-ru" title="Estado da RU">RU …</span>
+    <div class="statusbox" id="status-box">
+      <button class="pill" id="status-btn" title="Estado da rede: clique para ver os detalhes">Status …</button>
+      <div class="statuspop card hidden" id="status-pop">
+        <b>Estado da rede</b>
+        <div class="strow"><span class="stl">gNB</span><span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span></div>
+        <div class="strow"><span class="stl">Core</span><span class="pill" id="pill-core" title="Pods do core">core …</span></div>
+        <div class="strow hidden" id="row-ru"><span class="stl">RU</span><span class="pill" id="pill-ru" title="Estado da RU">RU …</span></div>
+        <div class="strow hidden" id="row-gps"><span class="stl">GPS / PTP</span><span class="pill" id="pill-gps">GPS …</span></div>
+        <div class="muted" id="status-gps-detail"></div>
+      </div>
+    </div>
     <button class="rec hidden" id="rec">● Gravar experimento</button>
     <div class="adminbox hidden" id="admin-box">
       <button class="rec" id="admin-btn" title="Login de administrador: vale para todas as abas">🔒 Admin</button>
