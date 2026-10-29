@@ -22,7 +22,7 @@ sudo ./install.sh --dashboard-only          # o painel ganha o cartão "Core ati
 
 ```bash
 cd ~/ocudu/configs
-cp gnb_ru_liteon_SLPIT_CORE.yml gnb_ru_liteon_FREE5GC.yml
+cp gnb_split_open5gs.yml gnb_ru_liteon_FREE5GC.yml
 sed -i 's/addr: 10.10.0.10/addr: 10.10.0.30/' gnb_ru_liteon_FREE5GC.yml
 grep -n -A2 "amf:" gnb_ru_liteon_FREE5GC.yml          # addr: 10.10.0.30
 ```
@@ -60,7 +60,7 @@ Leva ~1 min. Os celulares caem e voltam com a rede **InnovaFree5GC** e IPs `10.6
 
 ## 5. Voltar ao Open5GS
 
-Mesmo caminho: cartão **Core ativo** → **Open5GS** → `.yml` `gnb_ru_liteon_SLPIT_CORE` → **Trocar agora**
+Mesmo caminho: cartão **Core ativo** → **Open5GS** → `.yml` `gnb_split_open5gs` → **Trocar agora**
 (~5 min: o Open5GS tem mais funções e espera o NRF/SCP).
 
 ## Regras

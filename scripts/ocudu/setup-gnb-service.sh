@@ -68,7 +68,7 @@ fi
 
 cat >"${UNIT}" <<EOF
 # Gerado por open5GK3S/scripts/ocudu/setup-gnb-service.sh
-# gNB OCUDU com ${DIR}/configs/<instância>.yml — ex.: systemctl start ocudu-gnb@gnb_ru_liteon_SLPIT_CORE
+# gNB OCUDU com ${DIR}/configs/<instância>.yml — ex.: systemctl start ocudu-gnb@gnb_split_open5gs
 [Unit]
 Description=gNB OCUDU com %i.yml (painel open5GK3S)
 After=network-online.target

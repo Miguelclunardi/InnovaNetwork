@@ -95,14 +95,14 @@ Antes: GNSS válido e O-RU sincronizada ([hardware](../hardware/e810-liteon.md#4
 🖥️
 ```bash
 ./ran/ocudu/gnb.sh configs
-./ran/ocudu/gnb.sh iniciar gnb_ru_liteon_SLPIT_CORE
+./ran/ocudu/gnb.sh iniciar gnb_split_open5gs
 ./ran/ocudu/gnb.sh log -f
 ```
 
 Esperado no log:
 
 ```
-ocudu-gnb: taskset -c 0-17 gnb -c /configs/gnb_ru_liteon_SLPIT_CORE.yml -c /configs/metricas.yml
+ocudu-gnb: taskset -c 0-17 gnb -c /configs/gnb_split_open5gs.yml -c /configs/metricas.yml
 N2: Connection to AMF on 10.10.0.10:38412 completed
 ==== gNB started ===
 ```

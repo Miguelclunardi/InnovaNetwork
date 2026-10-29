@@ -139,7 +139,7 @@ nano ran/ocudu/ocudu.env
 | `OCUDU_NODE_IP`, `OCUDU_NODE_IFACE` | `10.10.0.1`, `ens4f3np3` | IP e interface do nó no cluster (a fibra, **nunca** o fronthaul) |
 | `OCUDU_SERVER_VIA` | `10.10.0.2` | IP da máquina do core na fibra (rota até `10.254.254.1`) |
 | `OCUDU_SRC_DIR`, `OCUDU_CONFIG_DIR` | `/home/innovaserver/ocudu`, `…/configs` | código e `.yml` do gNB no nó |
-| `OCUDU_DEFAULT_CONFIG`, `OCUDU_EXTRA_CONFIG` | `gnb_ru_liteon_SLPIT_CORE`, `metricas.yml` | `.yml` padrão e o 2º `-c` (métricas na porta 8001) |
+| `OCUDU_DEFAULT_CONFIG`, `OCUDU_EXTRA_CONFIG` | `gnb_split_open5gs`, `metricas.yml` | `.yml` padrão e o 2º `-c` (métricas na porta 8001) |
 | `OCUDU_CPUS` | `0-17` | CPUs do gNB (`taskset`) |
 | `OCUDU_HUGEPAGES_1G`, `OCUDU_MEMORY_REQUEST` | `2Gi`, `2Gi` | hugepages e memória pedidas pelo pod |
 | `OCUDU_IMAGE*`, `OCUDU_BUILD_JOBS` | `innovanetwork/ocudu-gnb`, `8` | imagem (tag = commit do código) e compilação |
@@ -200,7 +200,7 @@ Antes: core ligado, PTP/GNSS válidos, O-RU pronta e **nenhum gNB nativo rodando
 
 ```bash
 ./ran/ocudu/gnb.sh configs                            # .yml disponíveis e o AMF de cada um
-./ran/ocudu/gnb.sh iniciar gnb_ru_liteon_SLPIT_CORE
+./ran/ocudu/gnb.sh iniciar gnb_split_open5gs
 ./ran/ocudu/gnb.sh log -f                             # esperar "N2: Connection to AMF … completed"
 ```
 

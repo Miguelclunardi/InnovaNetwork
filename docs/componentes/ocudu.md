@@ -66,7 +66,7 @@ opção futura.
 | `OCUDU_NAMESPACE` | `ocudu` | namespace |
 | `OCUDU_SRC_DIR` | `/home/innovaserver/ocudu` | repositório Git do OCUDU (fonte da imagem) |
 | `OCUDU_CONFIG_DIR` | `…/ocudu/configs` | pasta dos `.yml`, montada só leitura no pod |
-| `OCUDU_DEFAULT_CONFIG` | `gnb_ru_liteon_SLPIT_CORE` | `.yml` inicial |
+| `OCUDU_DEFAULT_CONFIG` | `gnb_split_open5gs` | `.yml` inicial |
 | `OCUDU_EXTRA_CONFIG` | `metricas.yml` | 2º `-c` (liga o `remote_control` na porta 8001, usado pelo painel) |
 | `OCUDU_CPUS` | `0-17` | CPUs do gNB (`taskset`) |
 | `OCUDU_HUGEPAGES_1G` / `OCUDU_MEMORY_REQUEST` | `2Gi` / `2Gi` | recursos pedidos pelo pod |
@@ -131,7 +131,7 @@ Os `.yml` ficam em `~/ocudu/configs/` no nó e são lidos direto do host. Para c
 
 | Arquivo (exemplo) | AMF | Core |
 |---|---|---|
-| `gnb_ru_liteon_SLPIT_CORE.yml` | `10.10.0.10` | Open5GS |
+| `gnb_split_open5gs.yml` | `10.10.0.10` | Open5GS |
 | `gnb_ru_liteon_FREE5GC.yml` | `10.10.0.30` | free5GC |
 
 Nos dois: N2 e N3 do gNB em `10.10.0.1` (`cu_cp.amf.bind_addr`, `cu_up.ngu.socket.bind_addr`). O endereço N3 do

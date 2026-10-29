@@ -12,7 +12,7 @@ gNB, configuração da O-RU e o `config.env`, com chaves mascaradas).
 
 ## 2. Experimento A
 
-1. Coloque o setup A no ar (ex.: gNB com `gnb_ru_liteon_SLPIT_CORE`).
+1. Coloque o setup A no ar (ex.: gNB com `gnb_split_open5gs`).
 2. No topo do painel: **● Gravar experimento** → nome `A — 100 MHz padrão`, notas (posição do celular, o que mudou).
 3. Gere tráfego por um tempo fixo, sempre igual nos dois experimentos. Exemplos:
    - celular: teste de velocidade ou download grande;

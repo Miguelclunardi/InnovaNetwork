@@ -16,7 +16,7 @@ O pod lê `~/ocudu/configs/` **direto do host**, sem cópia.
 
 ```bash
 cd ~/ocudu/configs
-cp gnb_ru_liteon_SLPIT_CORE.yml gnb_teste.yml        # trabalhe numa cópia
+cp gnb_split_open5gs.yml gnb_teste.yml        # trabalhe numa cópia
 nano gnb_teste.yml                                   # ex.: ru_ofh → cells → tx_gain / dl_arfcn
 ```
 
@@ -27,7 +27,7 @@ nano gnb_teste.yml                                   # ex.: ru_ofh → cells →
 ./ran/ocudu/gnb.sh log -f
 ```
 
-O pod é recriado com o novo arquivo (~15 s até o N2). Para voltar: `./ran/ocudu/gnb.sh iniciar gnb_ru_liteon_SLPIT_CORE`.
+O pod é recriado com o novo arquivo (~15 s até o N2). Para voltar: `./ran/ocudu/gnb.sh iniciar gnb_split_open5gs`.
 
 > Não altere o `metricas.yml`: ele liga as métricas lidas pelo painel.
 
