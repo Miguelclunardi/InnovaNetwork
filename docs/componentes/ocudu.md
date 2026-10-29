@@ -132,7 +132,7 @@ Os `.yml` ficam em `~/ocudu/configs/` no nó e são lidos direto do host. Para c
 | Arquivo (exemplo) | AMF | Core |
 |---|---|---|
 | `gnb_split_open5gs.yml` | `10.10.0.10` | Open5GS |
-| `gnb_ru_liteon_FREE5GC.yml` | `10.10.0.30` | free5GC |
+| `gnb_split_free5gc.yml` | `10.10.0.30` | free5GC |
 
 Nos dois: N2 e N3 do gNB em `10.10.0.1` (`cu_cp.amf.bind_addr`, `cu_up.ngu.socket.bind_addr`). O endereço N3 do
 UPF não está no `.yml`: o SMF informa na sessão. **Não altere o `metricas.yml`**: é ele que liga as métricas

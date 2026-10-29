@@ -66,7 +66,7 @@ cu_cp:
     addr: 10.10.0.30        # AMF do free5GC
 ```
 
-No setup de referência: `~/ocudu/configs/gnb_ru_liteon_FREE5GC.yml`. O N3 do gNB continua `10.10.0.1`. A troca de
+No setup de referência: `~/ocudu/configs/gnb_split_free5gc.yml`. O N3 do gNB continua `10.10.0.1`. A troca de
 core no painel oferece só os `.yml` que apontam para o AMF do core escolhido.
 
 ## 5. Celulares comerciais

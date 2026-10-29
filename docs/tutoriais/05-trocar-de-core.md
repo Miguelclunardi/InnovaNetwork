@@ -22,9 +22,9 @@ sudo ./install.sh --dashboard-only          # o painel ganha o cartão "Core ati
 
 ```bash
 cd ~/ocudu/configs
-cp gnb_split_open5gs.yml gnb_ru_liteon_FREE5GC.yml
-sed -i 's/addr: 10.10.0.10/addr: 10.10.0.30/' gnb_ru_liteon_FREE5GC.yml
-grep -n -A2 "amf:" gnb_ru_liteon_FREE5GC.yml          # addr: 10.10.0.30
+cp gnb_split_open5gs.yml gnb_split_free5gc.yml
+sed -i 's/addr: 10.10.0.10/addr: 10.10.0.30/' gnb_split_free5gc.yml
+grep -n -A2 "amf:" gnb_split_free5gc.yml          # addr: 10.10.0.30
 ```
 
 ## 3. Trocar
@@ -32,7 +32,7 @@ grep -n -A2 "amf:" gnb_ru_liteon_FREE5GC.yml          # addr: 10.10.0.30
 Painel → **🔒 Admin** → aba **Controle** → cartão **Core ativo**:
 
 1. clique em **free5GC**;
-2. deixe **religar o gNB OCUDU com** marcado e escolha `gnb_ru_liteon_FREE5GC` (só aparecem os `.yml` deste AMF);
+2. deixe **religar o gNB OCUDU com** marcado e escolha `gnb_split_free5gc` (só aparecem os `.yml` deste AMF);
 3. **Trocar agora**.
 
 O andamento aparece linha a linha (exemplo resumido):
@@ -43,7 +43,7 @@ parando o core Open5GS e o UERANSIM dele
 core ativo: free5GC
 iniciando … NRF ✓ … UPF ✓ … SMF ✓ (PFCP associado) … AMF ✓ (escutando 10.10.0.30)
 UERANSIM: NG Setup ✓
-gNB OCUDU iniciado com gnb_ru_liteon_FREE5GC.yml · RU: DU conectado · AMF: gNB conectado (N2)
+gNB OCUDU iniciado com gnb_split_free5gc.yml · RU: DU conectado · AMF: gNB conectado (N2)
 ```
 
 Leva ~1 min. Os celulares caem e voltam com a rede **InnovaFree5GC** e IPs `10.60.x.x` (`internet`) e

@@ -109,7 +109,7 @@ pods. **N6:** o UPF faz NAT dos pools e sai pela rota padrão da máquina do cor
 | Pools dos UEs | `internet` 10.45/16 · `internet2` 10.46/16 | `internet` 10.60/16 · `internet2` 10.61/16 · `ims` 10.62/16 |
 | Nome da rede no celular | `InnovaOpen5GS` | `InnovaFree5GC` |
 | Assinantes (web) | WebUI `:30999` | WebConsole `:31000` |
-| `.yml` do gNB OCUDU (exemplo) | `gnb_split_open5gs.yml` | `gnb_ru_liteon_FREE5GC.yml` |
+| `.yml` do gNB OCUDU (exemplo) | `gnb_split_open5gs.yml` | `gnb_split_free5gc.yml` |
 
 ### Comum
 
