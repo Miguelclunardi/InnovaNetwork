@@ -281,3 +281,5 @@ button.rec.on#admin-btn { background: rgba(255,255,255,.18); border-color: #91cf
   box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 .adminpop input { width: 100%; }
 .adminpop .err { color: var(--err); margin-top: 6px; }
+/* carregando (Histórico): a tela responde na hora e escurece até os dados chegarem */
+.loading { opacity: .45; transition: opacity .15s; pointer-events: none; }

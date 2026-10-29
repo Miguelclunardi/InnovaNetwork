@@ -357,7 +357,13 @@ const Ran = {
   async refresh() {
     if (this.paused) return;
     const win = +$("#ran-window").value;
+    const seq = (this._seq = (this._seq || 0) + 1);
     const d = await api("api/ran?window=" + win);
+    if (seq !== this._seq) return;   // chegou depois de uma resposta mais nova
+    this.last = d;
+    this.render(d);
+  },
+  render(d) {
     const st = d.status;
     $("#ran-status").textContent = !st.enabled ? "métricas do gNB desligadas (GNB_METRICS_URL vazio)"
       : st.connected ? `conectado a ${st.url} · ${st.messages} mensagens · última há ${ago(st.last_msg)}`
@@ -376,7 +382,8 @@ const Ran = {
     const ids = ues.map((u) => u.id);
     if (!ids.includes(this.selected)) this.selected = (ues.find((u) => u.active) || ues[0] || {}).id || null;
     const optsHtml = ues.map((u) => `<option value="${esc(u.id)}" ${u.id === this.selected ? "selected" : ""}>${esc(ueTitle(u))} · RNTI ${esc(u.rnti)}${u.active ? "" : " (inativo)"}</option>`).join("");
-    if (sel.innerHTML !== optsHtml) sel.innerHTML = optsHtml || "<option>sem UEs</option>";
+    // só recria a lista quando ela muda e não está aberta (recriar uma lista aberta fecha a lista)
+    if (this._opts !== optsHtml && document.activeElement !== sel) { sel.innerHTML = optsHtml || "<option>sem UEs</option>"; this._opts = optsHtml; }
     // cartões dos UEs
     $("#ran-uecards").innerHTML = ues.map((u) => {
       const l = u.last || {};
@@ -387,7 +394,6 @@ const Ran = {
         <div class="m"><div><span>DL</span> ${fmtRate(l.dl_brate)}</div><div><span>UL</span> ${fmtRate(l.ul_brate)}</div><div><span>CQI</span> ${fmt(l.cqi, 0)}</div>
         <div><span>MCS</span> ${fmt(l.dl_mcs, 0)}/${fmt(l.ul_mcs, 0)}</div><div title="últimos 10 s"><span>BLER</span> ${fmt(l.dl_bler_win)}/${fmt(l.ul_bler_win)}%</div><div><span>SNR</span> ${fmt(l.pusch_snr_db)}</div></div></div>`;
     }).join("") || `<div class="empty">Nenhum UE visto pelo gNB nesta janela.</div>`;
-    $$(".uecard").forEach((c) => c.addEventListener("click", () => { this.select(c.dataset.id); }));
 
     const mbps = (v) => fmt(v, 1);
     // célula
@@ -433,13 +439,21 @@ const Ran = {
   },
   showOld: false,
   select(id) {
+    if (!id) return;
     this.selected = id;
     store.set("ran.ue", id);
     $("#ran-ue").value = id;
-    this.refresh();
+    if (this.last) this.render(this.last);   // mostra na hora com os dados que já temos
+    else this.refresh();
   },
 };
-$("#ran-ue").addEventListener("change", (e) => Ran.select(e.target.value));
+$("#ran-ue").addEventListener("change", (e) => { Ran.select(e.target.value); e.target.blur(); });
+// Cartões dos UEs: um ouvinte só, no contêiner, no "pointerdown". Os cartões são recriados a cada 2 s, e um
+// "click" que começa num cartão e termina no cartão novo se perde.
+$("#ran-uecards").addEventListener("pointerdown", (e) => {
+  const c = e.target.closest(".uecard");
+  if (c && e.button === 0) Ran.select(c.dataset.id);
+});
 $("#ran-window").addEventListener("change", () => { store.set("ran.window", $("#ran-window").value); Ran.refresh(); });
 $("#ran-pause").addEventListener("click", (e) => {
   Ran.paused = !Ran.paused;

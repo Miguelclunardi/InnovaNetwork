@@ -99,13 +99,25 @@ const Hist = {
   },
 
   renderExps() {
+    // Recriar a tabela a cada 2 s perdia cliques nas caixas e botões: só recria quando algo muda;
+    // senão atualiza só a duração do experimento que está gravando.
+    const key = JSON.stringify([this.exps.map((e) => [e.id, e.name, e.notes, e.t_end, e.setup && e.setup.ues]), [...this.sel]]);
+    if (key === this._expsKey) {
+      for (const e of this.exps) {
+        if (e.t_end) continue;
+        const c = $(`#hist-exps [data-dur="${e.id}"]`);
+        if (c) c.textContent = fmtDur(Date.now() / 1000 - e.t_start);
+      }
+      return;
+    }
+    this._expsKey = key;
     const rows = this.exps.map((e) => {
       const dur = (e.t_end || Date.now() / 1000) - e.t_start;
       const ues = ((e.setup && e.setup.ues) || []).map((u) => u.name || (u.imsi ? "…" + u.imsi.slice(-4) : "RNTI " + u.rnti)).join(", ");
       return `<tr class="${this.sel.has(e.id) ? "selrow" : ""}">
         <td><input type="checkbox" data-sel="${e.id}" ${this.sel.has(e.id) ? "checked" : ""}></td>
         <td><b>${esc(e.name)}</b>${e.t_end ? "" : ' <span class="tag warn">gravando</span>'}${ues ? `<br><span class="muted">UEs: ${esc(ues)}</span>` : ""}</td>
-        <td>${fmtDateTime(e.t_start)}</td><td class="num">${fmtDur(dur)}</td>
+        <td>${fmtDateTime(e.t_start)}</td><td class="num" data-dur="${e.id}">${fmtDur(dur)}</td>
         <td class="notes">${esc(e.notes || "")}</td>
         <td class="actions"><button class="btn small" data-view="${e.id}">Ver</button>
           <button class="btn small" data-edit="${e.id}">Editar</button>
@@ -153,7 +165,15 @@ const Hist = {
     $("#hist-view-title").textContent = `${p.title} · ${fmtDateTime(p.t0)} → ${fmtDateTime(p.t1)} (${fmtDur(p.t1 - p.t0)})`;
     $("#hist-csv").href = `api/history/csv?from=${p.t0}&to=${p.t1}`;
     const q = `from=${p.t0}&to=${p.t1}`;
-    const [d, sm] = await Promise.all([api(`api/history/data?${q}&points=1200`), api(`api/history/summary?${q}`)]);
+    const seq = (this._vseq = (this._vseq || 0) + 1);
+    $("#hist-view").classList.add("loading");
+    let d, sm;
+    try {
+      [d, sm] = await Promise.all([api(`api/history/data?${q}&points=1200`), api(`api/history/summary?${q}`)]);
+    } finally {
+      if (seq === this._vseq) $("#hist-view").classList.remove("loading");
+    }
+    if (seq !== this._vseq) return;   // o usuário já pediu outro período
     this.kpis(sm, "#hist-kpis");
     this.ueTable(sm);
     this.charts(d, p.t1 - p.t0);

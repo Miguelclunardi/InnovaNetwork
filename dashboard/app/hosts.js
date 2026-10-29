@@ -48,16 +48,13 @@ const Machines = {
         ${!h.online && h.error ? `<div class="err">${esc(h.error)}</div>` : ""}
       </button>`;
     }).join("") || `<div class="empty">Nenhuma máquina configurada.</div>`;
-    $$("#host-list .hostcard").forEach((b) => b.addEventListener("click", () => {
-      this.selected = b.dataset.name;
-      store.set("hosts.sel", this.selected);
-      this.refresh();
-    }));
     if (this.selected) await this.detail();
   },
 
   async detail() {
-    const d = await api("api/hosts/" + encodeURIComponent(this.selected) + "?window=" + $("#hd-window").value);
+    const name = this.selected;
+    const d = await api("api/hosts/" + encodeURIComponent(name) + "?window=" + $("#hd-window").value);
+    if (name !== this.selected) return;   // o usuário já escolheu outra máquina
     const l = d.last;
     $("#host-detail").classList.remove("hidden");
     $("#hd-title").textContent = d.name;
@@ -148,3 +145,12 @@ Machines.energy = function (e) {
     Object.entries(f).map(([kk, v]) => `<tr><td>${esc(kk)}</td><td class="num">${esc(v)}</td></tr>`).join("");
 };
 $("#hd-window").addEventListener("change", () => Machines.detail());
+// Máquinas: um ouvinte só, no "pointerdown" (a lista é recriada a cada 2 s); destaca e carrega o detalhe na hora
+$("#host-list").addEventListener("pointerdown", (e) => {
+  const b = e.target.closest(".hostcard");
+  if (!b || e.button !== 0 || b.dataset.name === Machines.selected) return;
+  Machines.selected = b.dataset.name;
+  store.set("hosts.sel", Machines.selected);
+  $$("#host-list .hostcard").forEach((x) => x.classList.toggle("sel", x === b));
+  Machines.detail();
+});
