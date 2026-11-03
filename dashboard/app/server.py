@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  dashboard/app/server.py — painel de logs e métricas do InnovaNetwork.
+#  dashboard/app/server.py — InnovaNetwork logs and metrics dashboard.
 #
-#  Dois cores possíveis no mesmo k3s, cada um no seu namespace: Open5GS (padrão)
-#  e free5GC (opcional, FREE5GC_NAMESPACE). Os dois são acompanhados; as abas
-#  mostram o "core ativo" (o que está rodando; se os dois, o último escolhido).
+#  Two possible cores in the same k3s, each in its own namespace: Open5GS (default)
+#  and free5GC (optional, FREE5GC_NAMESPACE). Both are followed; the tabs show
+#  the "active core" (the one running; if both, the last one chosen).
 #
-#  Só biblioteca padrão do Python (roda na imagem python:*-slim sem pip).
-#  Fontes (todas só leitura):
-#    - gNB (OCUDU): WebSocket de métricas (remote_control, {"cmd":"metrics_subscribe"})
-#    - Kubernetes: pods e logs do namespace do core (ServiceAccount com get/list/watch)
-#    - Open5GS: endpoints Prometheus (:9090/metrics) dos NFs, se ligados
-#    - Log do gNB real: linhas enviadas por um agente (POST /api/ingest/gnb-log)
-#  Guarda só os últimos HISTORY_SECONDS em memória (sem banco de dados).
+#  Python standard library only (runs on the python:*-slim image without pip).
+#  Sources (all read only):
+#    - gNB (OCUDU): metrics WebSocket (remote_control, {"cmd":"metrics_subscribe"})
+#    - Kubernetes: pods and logs of the core namespace (ServiceAccount with get/list/watch)
+#    - Open5GS: Prometheus endpoints (:9090/metrics) of the NFs, if enabled
+#    - Real gNB log: lines sent by an agent (POST /api/ingest/gnb-log)
+#  Keeps only the last HISTORY_SECONDS in memory (the persistent history is optional, history.py).
 # =============================================================================
 import base64
 import collections
@@ -39,7 +39,7 @@ import control
 import history
 
 # ----------------------------------------------------------------------------
-#  Configuração (variáveis de ambiente)
+#  Configuration (environment variables)
 # ----------------------------------------------------------------------------
 SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
 
@@ -60,7 +60,7 @@ NAMESPACE = _env("NAMESPACE") or _default_namespace()
 PORT = int(_env("PORT", "8080"))
 BIND = _env("BIND", "0.0.0.0")
 HISTORY_SECONDS = int(_env("HISTORY_SECONDS", "900"))
-GNB_METRICS_URL = _env("GNB_METRICS_URL")              # ex.: ws://10.10.0.1:8001 (vazio = desligado)
+GNB_METRICS_URL = _env("GNB_METRICS_URL")              # e.g. ws://10.10.0.1:8001 (empty = off)
 GNB_NAME = _env("GNB_NAME", "gNB")
 NETWORK_NAME = _env("NETWORK_NAME")
 CORE_METRICS = _env("CORE_METRICS", "false").lower() in ("1", "true", "yes", "sim", "on")
@@ -68,59 +68,59 @@ CORE_METRICS_PORT = int(_env("CORE_METRICS_PORT", "9090"))
 CORE_POLL_SECONDS = float(_env("CORE_POLL_SECONDS", "5"))
 OPEN5GS_RELEASE = _env("OPEN5GS_RELEASE", "open5gs")
 VERSION = "2.0"
-PASSWORD = _env("DASHBOARD_PASSWORD")                  # vazio = sem senha (usuário: admin)
-INGEST_TOKEN = _env("INGEST_TOKEN")                    # vazio = ingestão de log do gNB desligada
-# Aba Configuração (editar o config.env). Vazio = aba desligada.
+PASSWORD = _env("DASHBOARD_PASSWORD")                  # empty = no password (user: admin)
+INGEST_TOKEN = _env("INGEST_TOKEN")                    # empty = gNB log ingestion off
+# Settings tab (edit config.env). Empty = tab off.
 ADMIN_PASSWORD = _env("ADMIN_PASSWORD")
-CONFIG_PATH = _env("CONFIG_PATH")                      # config.env montado para escrita
-PROJECT_DIR = _env("PROJECT_DIR")                      # projeto montado só leitura (validação)
+CONFIG_PATH = _env("CONFIG_PATH")                      # config.env mounted writable
+PROJECT_DIR = _env("PROJECT_DIR")                      # project mounted read only (validation)
 CONFIG_BACKUP_DIR = _env("CONFIG_BACKUP_DIR")
-K8S_API = _env("K8S_API")                              # só para desenvolvimento (ex.: kubectl proxy)
+K8S_API = _env("K8S_API")                              # development only (e.g. kubectl proxy)
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
-# IMSIs dos UEs simulados (UERANSIM), separados por espaço — o resto é SIM real
+# IMSIs of the simulated UEs (UERANSIM), space separated — the rest are real SIMs
 SIM_IMSIS = set(_env("SIM_IMSIS").split())
 # Apelidos: "IMSI=nome;IMSI=nome"
 UE_NAMES = dict(kv.split("=", 1) for kv in _env("UE_NAMES").split(";") if "=" in kv)
-# Máquinas: a do core é lida direto (HOST_ROOT = /proc e /sys do host montados); as outras chegam
-# por um agente (POST /api/ingest/host). HOSTS = "nome|papel;nome|papel" (para listar mesmo sem dados)
+# Machines: the core one is read directly (HOST_ROOT = host /proc and /sys mounted); the others arrive
+# through an agent (POST /api/ingest/host). HOSTS = "name|role;name|role" (to list them even without data)
 HOST_ROOT = _env("HOST_ROOT")
 HOST_FSROOT = _env("HOST_FSROOT")
 LOCAL_HOST_NAME = _env("LOCAL_HOST_NAME")
 LOCAL_HOST_ROLE = _env("LOCAL_HOST_ROLE", "Core 5G (k3s)")
 HOSTS = [h.split("|", 1) for h in _env("HOSTS").split(";") if "|" in h]
-# Interfaces de túnel do UPF -> DNN ("ogstun=internet;ogstun2=internet2")
-# Histórico persistente (DASHBOARD_PERSIST): arquivo SQLite num diretório do host. Vazio = desligado.
+# UPF tunnel interfaces -> DNN ("ogstun=internet;ogstun2=internet2")
+# Persistent history (DASHBOARD_PERSIST): SQLite file in a host folder. Empty = off.
 PERSIST_PATH = _env("PERSIST_PATH")
 PERSIST_DAYS = int(_env("PERSIST_DAYS", "180"))
 PERSIST_MAX_MB = int(_env("PERSIST_MAX_MB", "20000"))
 PERSIST_CHUNK = int(_env("PERSIST_CHUNK_SECONDS", "60"))
 HISTORY = None
-WEBUI_PORT = _env("WEBUI_PORT")      # NodePort da WebUI do Open5GS (vazio = sem a sub-aba Assinantes)
+WEBUI_PORT = _env("WEBUI_PORT")      # NodePort of the Open5GS WebUI (empty = no Subscribers sub-tab)
 UPF_DEVS = dict(kv.split("=", 1) for kv in _env("UPF_DEVS").split(";") if "=" in kv)
 HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
-# Medidor de energia MiEnergy (página /Data com "chave": número). Mede a máquina ENERGY_METER_HOST.
-ENERGY_METER_URL = _env("ENERGY_METER_URL")          # ex.: http://192.168.68.105/Data (vazio = desligado)
-ENERGY_METER_HOST = _env("ENERGY_METER_HOST")        # nome da máquina na aba Máquinas
+# MiEnergy energy meter (/Data page with "key": number). It measures the ENERGY_METER_HOST machine.
+ENERGY_METER_URL = _env("ENERGY_METER_URL")          # e.g. http://192.168.68.105/Data (empty = off)
+ENERGY_METER_HOST = _env("ENERGY_METER_HOST")        # machine name in the Machines tab
 ENERGY_INTERVAL = float(_env("ENERGY_INTERVAL", "2"))
-# RU (O-RU LiteOn FlexFi): estado enviado por um agente (POST /api/ingest/ru). Vazio = sem aba RU.
+# RU (LiteOn FlexFi O-RU): state sent by an agent (POST /api/ingest/ru). Empty = no RU tab.
 RU_NAME = _env("RU_NAME")
-RU_ADDR = _env("RU_ADDR")            # IP de gestão (só para mostrar)
-# Aba Controle (iniciar/parar/reiniciar). Exige a senha de administrador (aba Configuração).
+RU_ADDR = _env("RU_ADDR")            # management IP (display only)
+# Control tab (start/stop/restart). Requires the administrator password (Settings tab).
 CONTROL = _env("CONTROL", "false").lower() in ("1", "true", "yes", "sim", "on")
 UERANSIM_RELEASE = _env("UERANSIM_RELEASE", "ueransim")
 RAN_AMF_IP = _env("RAN_AMF_IP")       # IP do AMF na fibra (confere o N2 no log)
 RAN_UPF_IP = _env("RAN_UPF_IP")       # IP do UPF na fibra (confere o N3 no log)
-GNB_CTL_TARGET = _env("GNB_CTL_TARGET")   # usuario@host do gNB OCUDU (vazio = sem controle do gNB)
-# Segundo core (free5GC). Vazio = só Open5GS.
+GNB_CTL_TARGET = _env("GNB_CTL_TARGET")   # user@host of the OCUDU gNB (empty = no gNB control)
+# Second core (free5GC). Empty = Open5GS only.
 FREE5GC_NAMESPACE = _env("FREE5GC_NAMESPACE")
 FREE5GC_AMF_IP = _env("FREE5GC_AMF_IP")
 FREE5GC_UPF_IP = _env("FREE5GC_UPF_IP")
 FREE5GC_WEBUI_PORT = _env("FREE5GC_WEBUI_PORT")
 FREE5GC_NETWORK_NAME = _env("FREE5GC_NETWORK_NAME")
-# Pools de IP dos UEs -> DNN ("10.60.0.0/16=internet;10.62.0.0/16=ims"): a DNN de cada sessão sai do IP
+# UE IP pools -> DNN ("10.60.0.0/16=internet;10.62.0.0/16=ims"): the DNN of each session comes from the IP
 FREE5GC_POOLS = [kv.split("=", 1) for kv in _env("FREE5GC_POOLS").split(";") if "=" in kv]
 UE_INACTIVE_SECONDS = 30
-BLER_WINDOW = 10   # s: BLER "agora" dos cartões/tabelas (1 s com poucos blocos oscila demais)
+BLER_WINDOW = 10   # s: "current" BLER of the cards/tables (1 s with few blocks swings too much)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -129,7 +129,7 @@ def log(*a):
 
 
 # ----------------------------------------------------------------------------
-#  Cliente mínimo da API do Kubernetes
+#  Minimal Kubernetes API client
 # ----------------------------------------------------------------------------
 class K8s:
     def __init__(self):
@@ -148,7 +148,7 @@ class K8s:
     def _token(self):
         if K8S_API:
             return None
-        # O token projetado é renovado pelo kubelet: relê sempre
+        # The projected token is renewed by the kubelet: always re-read it
         with open(os.path.join(SA_DIR, "token")) as f:
             return f.read().strip()
 
@@ -186,13 +186,13 @@ K8S = K8s()
 
 
 # ----------------------------------------------------------------------------
-#  Cliente WebSocket mínimo (RFC 6455, só o necessário: texto, ping/pong, close)
+#  Minimal WebSocket client (RFC 6455, only what is needed: text, ping/pong, close)
 # ----------------------------------------------------------------------------
 class WSClient:
     def __init__(self, url, timeout=10):
         u = urllib.parse.urlparse(url)
         if u.scheme not in ("ws", "wss"):
-            raise ValueError("URL deve começar com ws:// ou wss://")
+            raise ValueError("URL must start with ws:// or wss://")
         port = u.port or (443 if u.scheme == "wss" else 80)
         sock = socket.create_connection((u.hostname, port), timeout=timeout)
         if u.scheme == "wss":
@@ -208,18 +208,18 @@ class WSClient:
         while b"\r\n\r\n" not in buf:
             chunk = sock.recv(4096)
             if not chunk:
-                raise ConnectionError("conexão fechada no handshake")
+                raise ConnectionError("connection closed during the handshake")
             buf += chunk
         head, self.buf = buf.split(b"\r\n\r\n", 1)
         if b" 101 " not in head.split(b"\r\n", 1)[0]:
-            raise ConnectionError("handshake recusado: %r" % head[:80])
-        sock.settimeout(30)  # sem mensagens por 30 s => reconecta
+            raise ConnectionError("handshake refused: %r" % head[:80])
+        sock.settimeout(30)  # no messages for 30 s => reconnect
 
     def _recvn(self, n):
         while len(self.buf) < n:
             chunk = self.sock.recv(65536)
             if not chunk:
-                raise ConnectionError("conexão fechada")
+                raise ConnectionError("connection closed")
             self.buf += chunk
         d, self.buf = self.buf[:n], self.buf[n:]
         return d
@@ -239,7 +239,7 @@ class WSClient:
         self.send(0x1, text.encode())
 
     def recv(self):
-        """Devolve a próxima mensagem de texto (junta fragmentos; responde ping)."""
+        """Returns the next text message (joins fragments; answers ping)."""
         parts = []
         while True:
             b1, b2 = self._recvn(2)
@@ -259,7 +259,7 @@ class WSClient:
             if opcode == 0xA:
                 continue
             if opcode == 0x8:
-                raise ConnectionError("servidor fechou o WebSocket")
+                raise ConnectionError("the server closed the WebSocket")
             parts.append(data)
             if fin:
                 return b"".join(parts).decode("utf-8", "replace")
@@ -272,14 +272,14 @@ class WSClient:
 
 
 # ----------------------------------------------------------------------------
-#  Séries temporais em memória
+#  In-memory time series
 # ----------------------------------------------------------------------------
 class Series:
-    """Amostras (t, {campo: valor}) dos últimos HISTORY_SECONDS."""
+    """Samples (t, {field: value}) of the last HISTORY_SECONDS."""
 
     def __init__(self, name=None):
         self.data = collections.deque()
-        self.name = name   # nome no histórico persistente (None = não grava)
+        self.name = name   # name in the persistent history (None = not recorded)
 
     def add(self, t, values):
         self.data.append((t, values))
@@ -309,7 +309,7 @@ class Series:
 
 
 # ----------------------------------------------------------------------------
-#  Coletor do gNB (WebSocket de métricas do OCUDU)
+#  gNB collector (OCUDU metrics WebSocket)
 # ----------------------------------------------------------------------------
 UE_FIELDS = (
     "dl_brate", "ul_brate", "dl_mcs", "ul_mcs", "cqi", "dl_ri", "ul_ri",
@@ -347,11 +347,11 @@ class GnbCollector(threading.Thread):
                 ws.send_text(json.dumps({"cmd": "metrics_subscribe"}))
                 with self.lock:
                     self.status.update(connected=True, since=time.time(), error=None)
-                log("gNB: conectado em", self.url)
+                log("gNB: connected to", self.url)
                 backoff = 1
                 while True:
                     self._handle(ws.recv())
-            except Exception as e:  # noqa: BLE001 — qualquer falha => reconecta
+            except Exception as e:  # noqa: BLE001 — any failure => reconnect
                 with self.lock:
                     if self.status["connected"]:
                         self.status["reconnects"] += 1
@@ -398,7 +398,7 @@ class GnbCollector(threading.Thread):
             uok, unok = v["ul_nof_ok"] or 0, v["ul_nof_nok"] or 0
             v["dl_bler"] = 100.0 * dnok / (dok + dnok) if dok + dnok else None
             v["ul_bler"] = 100.0 * unok / (uok + unok) if uok + unok else None
-            # Sem transmissões no período o gNB manda 0 em MCS/SNR: vira lacuna, não zero
+            # Without transmissions in the period the gNB sends 0 for MCS/SNR: it becomes a gap, not zero
             if not dok + dnok:
                 v["dl_mcs"] = None
             if not uok + unok:
@@ -428,16 +428,16 @@ class GnbCollector(threading.Thread):
             "msg3_nof_ok": _num(cm.get("msg3_nof_ok")),
             "msg3_nof_nok": _num(cm.get("msg3_nof_nok")),
         })
-        # Esquece UEs que sumiram há mais que a janela de histórico
+        # Forget UEs gone for longer than the history window
         limit = t - HISTORY_SECONDS
         for k in [k for k, e in self.ues.items() if e["last"] < limit]:
             del self.ues[k]
 
     @staticmethod
     def _last_valid(series, now, horizon=20):
-        """Última amostra, completando campos vazios com o último valor válido dos últimos `horizon` s."""
+        """Last sample, filling empty fields with the last valid value of the last `horizon` s."""
         out = {}
-        acc = [0, 0, 0, 0]   # dl ok/nok, ul ok/nok nos últimos BLER_WINDOW s
+        acc = [0, 0, 0, 0]   # dl ok/nok, ul ok/nok in the last BLER_WINDOW s
         for t, v in reversed(series.data):
             if now - t > BLER_WINDOW:
                 break
@@ -476,9 +476,9 @@ class GnbCollector(threading.Thread):
 
 
 # ----------------------------------------------------------------------------
-#  Coletor do core (pods, eventos dos logs do AMF/SMF/UPF, métricas Prometheus)
+#  Core collector (pods, events from the AMF/SMF/UPF logs, Prometheus metrics)
 # ----------------------------------------------------------------------------
-RE_TS = re.compile(r"^(\S+) ")  # timestamp RFC3339 que o kubelet põe com timestamps=true
+RE_TS = re.compile(r"^(\S+) ")  # RFC3339 timestamp the kubelet adds with timestamps=true
 RE_GNB_ACC = re.compile(r"gNB-N2 accepted\[([^\]]+)\]")
 RE_GNB_N = re.compile(r"Number of gNBs is now (\d+)")
 RE_GNB_GONE = re.compile(r"gNB-N2\[([^\]]+)\] (connection refused|.*closed|.*removed)", re.I)
@@ -487,7 +487,7 @@ RE_DEREG = re.compile(r"\[imsi-(\d+)\].*(De-register|Deregistration|De-registere
 RE_DNN_NOK = re.compile(r"\[imsi-(\d+)\] DNN Not Supported OR Not Subscribed")
 RE_REJECT = re.compile(r"\[imsi-(\d+)\].*[Rr]eject")
 RE_SESS_ADD = re.compile(r"UE SUPI\[imsi-(\d+)\] DNN\[([^\]]+)\] IPv4\[([^\]]*)\] IPv6\[([^\]]*)\]")
-# Identificação do UE: AMF_UE_NGAP_ID -> IMSI (log do AMF). O SUCI em claro (esquema 0) já traz o MSIN.
+# UE identification: AMF_UE_NGAP_ID -> IMSI (AMF log). A plain SUCI (scheme 0) already carries the MSIN.
 RE_NGAP_IDS = re.compile(r"RAN_UE_NGAP_ID\[(\d+)\] AMF_UE_NGAP_ID\[(\d+)\]")
 RE_IDENT = re.compile(r"\[(?:imsi-(\d{15})|suci-0-(\d{3})-(\d{2,3})-[^-\]]+-0-[^-\]]+-(\d+))[\]:]")
 RE_SESS_DEL = re.compile(r"Removed Session: UE IMSI:\[imsi-(\d+)\] DNN:\[([^:\]]+)")
@@ -507,7 +507,7 @@ RE5_SESS_DEL = re.compile(r"\[pdu_session_id:(\d+)\]\[supi:imsi-(\d{15})\] smCon
 
 
 def _pool_dnn(ip, pools):
-    """DNN pelo pool do IP (free5GC: um pool por DNN)."""
+    """DNN from the IP pool (free5GC: one pool per DNN)."""
     import ipaddress
     try:
         a = ipaddress.ip_address(ip)
@@ -520,8 +520,8 @@ def _pool_dnn(ip, pools):
 
 
 class LogFollower:
-    """Lê o log de um pod em pedaços (sinceTime) e repassa linhas novas ao parser.
-    Se o pod mudar (uid novo), relê desde o início e o parser zera o estado."""
+    """Reads a pod log in chunks (sinceTime) and passes new lines to the parser.
+    If the pod changes (new uid), it re-reads from the start and the parser resets its state."""
 
     def __init__(self, component, container, parser, namespace=None):
         self.ns = namespace or NAMESPACE
@@ -545,7 +545,7 @@ class LogFollower:
         if self.last_ts:
             params["sinceTime"] = self.last_ts
         else:
-            params["tailLines"] = "200000"   # 1ª leitura: estado desde o início do pod (limite de segurança)
+            params["tailLines"] = "200000"   # 1st read: state since the pod start (safety limit)
         try:
             text = K8S.get_text("/api/v1/namespaces/%s/pods/%s/log" % (self.ns, self.pod), params, timeout=30)
         except Exception as e:  # noqa: BLE001
@@ -568,23 +568,23 @@ class LogFollower:
 
 
 class CoreState:
-    """Estado derivado dos logs: gNBs (N2), UEs, sessões PDU e eventos relevantes."""
+    """State derived from the logs: gNBs (N2), UEs, PDU sessions and relevant events."""
 
     def __init__(self, kind="open5gs", label="Open5GS", pools=()):
         self.kind, self.label, self.pools = kind, label, list(pools)
         self.lock = threading.Lock()
         self.gnbs = {}         # ip -> {"accepted": ts}
         self.psi = {}          # free5GC: (imsi, pdu_session_id) -> dnn
-        self.pend = {}         # free5GC: imsi -> (psi, ip, ts) à espera da DNN
+        self.pend = {}         # free5GC: imsi -> (psi, ip, ts) waiting for the DNN
         self.nof_gnbs = None
         self.ues = {}          # imsi -> {"event": str, "ts": str, "registered": bool}
         self.sessions = {}     # (imsi, dnn) -> {"ipv4": ..., "ipv6": ..., "ts": ...}
-        self.events = collections.OrderedDict()   # chave normalizada -> evento (agrupa repetidos)
+        self.events = collections.OrderedDict()   # normalized key -> event (groups repeats)
         self.counters = collections.Counter()
         self.amf_ids = collections.OrderedDict()   # AMF_UE_NGAP_ID -> IMSI
         self._n = 0
-        self._ident = (None, -99)    # (imsi, nº da linha) da última identidade vista no log do AMF
-        self._pend = (None, -99)     # (AMF_UE_NGAP_ID, nº da linha) ainda sem identidade
+        self._ident = (None, -99)    # (imsi, line no.) of the last identity seen in the AMF log
+        self._pend = (None, -99)     # (AMF_UE_NGAP_ID, line no.) still without identity
 
     def _map_amf(self, amf_id, imsi):
         self.amf_ids[amf_id] = imsi
@@ -652,35 +652,35 @@ class CoreState:
                 m = RE_GNB_ACC.search(line)
                 if m:
                     self.gnbs[m.group(1)] = {"accepted": ts}
-                    self._event(ts, comp, "info", "gNB conectou (N2) de %s" % m.group(1))
+                    self._event(ts, comp, "info", "gNB connected (N2) from %s" % m.group(1))
                 m = RE_GNB_N.search(line)
                 if m:
                     self.nof_gnbs = int(m.group(1))
                 m = RE_GNB_GONE.search(line)
                 if m:
                     self.gnbs.pop(m.group(1), None)
-                    self._event(ts, comp, "warning", "gNB desconectou (N2): %s" % m.group(1))
+                    self._event(ts, comp, "warning", "gNB disconnected (N2): %s" % m.group(1))
                 m = RE_REG_OK.search(line)
                 if m:
-                    self._ue(m.group(1), "registrado", ts, True)
+                    self._ue(m.group(1), "registered", ts, True)
                     self.counters["registrations"] += 1
                 m = RE_DEREG.search(line)
                 if m:
-                    self._ue(m.group(1), "desregistrado", ts, False)
-                    self._event(ts, comp, "info", "UE %s desregistrou" % m.group(1))
+                    self._ue(m.group(1), "deregistered", ts, False)
+                    self._event(ts, comp, "info", "UE %s deregistered" % m.group(1))
                 m = RE_DNN_NOK.search(line)
                 if m:
-                    # Normalmente o UE pedindo uma DNN extra (ex.: ims) que não está na assinatura: inofensivo
-                    self._ue(m.group(1), "pediu DNN fora da assinatura (ex.: ims) — recusada", ts)
+                    # Usually the UE asking for an extra DNN (e.g. ims) that is not in the subscription: harmless
+                    self._ue(m.group(1), "asked for a DNN outside the subscription (e.g. ims): rejected", ts)
                     self.counters["dnn_not_subscribed"] += 1
                 elif lvl and RE_REJECT.search(line):
                     m = RE_REJECT.search(line)
-                    self._ue(m.group(1), "rejeição", ts)
+                    self._ue(m.group(1), "rejected", ts)
             elif comp == "smf":
                 m = RE_SESS_ADD.search(line)
                 if m:
                     self.sessions[(m.group(1), m.group(2))] = {"ipv4": m.group(3), "ipv6": m.group(4), "ts": ts}
-                    self._event(ts, comp, "info", "sessão PDU: %s %s %s" % (m.group(1), m.group(2), m.group(3)))
+                    self._event(ts, comp, "info", "PDU session: %s %s %s" % (m.group(1), m.group(2), m.group(3)))
                 m = RE_SESS_DEL.search(line)
                 if m:
                     self.sessions.pop((m.group(1), m.group(2)), None)
@@ -696,10 +696,10 @@ class CoreState:
     def _sess5(self, imsi, psi, dnn, ip, ts):
         self.psi[(imsi, psi)] = dnn
         self.sessions[(imsi, dnn)] = {"ipv4": ip, "ipv6": "", "ts": ts}
-        self._event(ts, "smf", "info", "sessão PDU: %s %s %s" % (imsi, dnn, ip))
+        self._event(ts, "smf", "info", "PDU session: %s %s %s" % (imsi, dnn, ip))
 
     def _line_f5(self, comp, ts, line):
-        """Logs do free5GC: mesmos estados (gNBs, UEs, sessões, eventos) que o Open5GS."""
+        """free5GC logs: same states (gNBs, UEs, sessions, events) as Open5GS."""
         with self.lock:
             m = RE5_LVL.match(line)
             lvl = {"ERRO": "error", "FATA": "error", "PANI": "error", "WARN": "warning"}.get(m.group(1)) if m else None
@@ -711,28 +711,28 @@ class CoreState:
                 if m:
                     self.gnbs[m.group(1)] = {"accepted": ts}
                     self.nof_gnbs = len(self.gnbs)
-                    self._event(ts, comp, "info", "gNB conectou (N2) de %s" % m.group(1))
+                    self._event(ts, comp, "info", "gNB connected (N2) from %s" % m.group(1))
                 m = RE5_GNB_GONE.search(line)
                 if m and m.group(1) in self.gnbs:
                     self.gnbs.pop(m.group(1), None)
                     self.nof_gnbs = len(self.gnbs)
-                    self._event(ts, comp, "warning", "gNB desconectou (N2): %s" % m.group(1))
+                    self._event(ts, comp, "warning", "gNB disconnected (N2): %s" % m.group(1))
                 m = RE5_REG_OK.search(line)
                 if m:
-                    self._ue(m.group(1), "registrado", ts, True)
+                    self._ue(m.group(1), "registered", ts, True)
                     self.counters["registrations"] += 1
                 m = RE5_DEREG.search(line)
                 if m:
-                    self._ue(m.group(1), "desregistrado", ts, False)
-                    self._event(ts, comp, "info", "UE %s desregistrou" % m.group(1))
+                    self._ue(m.group(1), "deregistered", ts, False)
+                    self._event(ts, comp, "info", "UE %s deregistered" % m.group(1))
                 m = RE5_SM_NOK.search(line)
                 if m:
-                    # ex.: o celular pede uma DNN sem dizer a slice e o free5GC usa a 1ª slice permitida
-                    self._ue(m.group(1), "sessão recusada pelo SMF (DNN/slice fora da configuração)", ts)
+                    # e.g. the phone asks for a DNN without giving the slice and free5GC uses the 1st allowed slice
+                    self._ue(m.group(1), "session rejected by the SMF (DNN/slice outside the configuration)", ts)
                     self.counters["dnn_not_subscribed"] += 1
                 m = RE5_REJECT.search(line)
                 if m:
-                    self._ue(m.group(1), "rejeição", ts)
+                    self._ue(m.group(1), "rejected", ts)
             elif comp == "smf":
                 m = RE5_SESS_ADD.search(line)
                 if m:
@@ -756,7 +756,7 @@ class CoreState:
                 self._event(ts, comp, lvl, RE5_HEAD.sub("", line)[:300])
 
     def _event(self, ts, src, lvl, msg):
-        # Mensagens iguais (a menos de números/IDs) viram uma linha com contador
+        # Identical messages (apart from numbers/IDs) become one line with a counter
         norm = msg if lvl == "info" else re.sub(r"\d+", "#", re.sub(r"\(\.\./[^)]*\)", "", msg))
         key = (src, lvl, norm)
         e = self.events.pop(key, None)
@@ -767,7 +767,7 @@ class CoreState:
             e = {"ts": ts, "first": ts, "src": src, "level": lvl, "msg": msg, "count": 1}
         self.events[key] = e
         if HISTORY is not None:
-            # no histórico a origem leva o core (os dois cores gravam no mesmo banco)
+            # in the history the source carries the core (both cores write to the same database)
             HISTORY.event(ts, src if self.kind == "open5gs" else "%s (%s)" % (src, self.label), lvl, msg)
         while len(self.events) > 400:
             self.events.popitem(last=False)
@@ -849,9 +849,9 @@ class CoreCollector(threading.Thread):
         try:
             data = K8S.get_json("/api/v1/namespaces/%s/pods" % self.ns)
         except urllib.error.HTTPError as e:
-            if e.code in (403, 404):   # core não instalado (ou sem permissão no namespace)
+            if e.code in (403, 404):   # core not installed (or no permission in the namespace)
                 with self.lock:
-                    self.pods, self.pods_error = [], "namespace %s indisponível (%s)" % (self.ns, e.code)
+                    self.pods, self.pods_error = [], "namespace %s unavailable (%s)" % (self.ns, e.code)
                 return
             raise
         now = time.time()
@@ -902,7 +902,7 @@ class CoreCollector(threading.Thread):
             p = next((p for p in pods if p["component"] == nf and p["phase"] == "Running" and p["ip"]), None)
             entry = {"latest": {}, "types": {}, "error": None, "pod": p["name"] if p else None}
             if not p:
-                entry["error"] = "pod não encontrado"
+                entry["error"] = "pod not found"
             else:
                 try:
                     url = "http://%s:%d/metrics" % (p["ip"], CORE_METRICS_PORT)
@@ -951,14 +951,14 @@ def _parse_rfc3339(s):
 
 
 # ----------------------------------------------------------------------------
-#  Máquinas (CPU, memória, temperaturas, rede, discos, processos)
+#  Machines (CPU, memory, temperatures, network, disks, processes)
 # ----------------------------------------------------------------------------
 class Hosts:
     def __init__(self):
         self.lock = threading.Lock()
         self.h = {}   # nome -> {"role", "source", "last", "ts", "error", "series"}
         for name, role in HOSTS:
-            self._entry(name, role, "agente")
+            self._entry(name, role, "agent")
 
     def _entry(self, name, role, source):
         e = self.h.get(name)
@@ -1009,10 +1009,10 @@ class Hosts:
                     "series": e["series"].window(time.time() - window)}
 
 
-# Campos do MiEnergy (monofásico) mostrados com nome; os demais aparecem na tabela crua
+# MiEnergy (single-phase) fields shown with a name; the others show in the raw table
 ENERGY_FIELDS = {"p_a": "power", "v_a": "voltage", "i_a": "current", "fp_a": "pf", "freq": "freq",
                  "frequencia": "freq", "energia_ativa_total": "energy_kwh"}
-RE_ENERGY = re.compile(r'([a-zA-Z0-9_]+)["\':\s]+([-\d\.]+)')   # mesmo filtro do collector.py do MiEnergy
+RE_ENERGY = re.compile(r'([a-zA-Z0-9_]+)["\':\s]+([-\d\.]+)')   # same filter as the MiEnergy collector.py
 
 
 class EnergyMeter(threading.Thread):
@@ -1039,7 +1039,7 @@ class EnergyMeter(threading.Thread):
                     except ValueError:
                         pass
                 if not vals:
-                    raise ValueError("resposta sem números: %r" % text[:120])
+                    raise ValueError("response without numbers: %r" % text[:120])
                 now = time.time()
                 main = {ENERGY_FIELDS[k]: v for k, v in vals.items() if k in ENERGY_FIELDS}
                 with self.lock:
@@ -1073,8 +1073,8 @@ class EnergyMeter(threading.Thread):
 
 
 class RuState:
-    """Último estado da RU, série para gráficos/histórico e eventos de mudança de estado."""
-    STATE_KEYS = (("sync", "Sincronismo (PTP)"), ("rf", "RF"), ("dpd", "DPD"), ("du", "DU conectado"))
+    """Last RU state, series for charts/history and state-change events."""
+    STATE_KEYS = (("sync", "Sync (PTP)"), ("rf", "RF"), ("dpd", "DPD"), ("du", "DU connected"))
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -1091,7 +1091,7 @@ class RuState:
         with self.lock:
             if error:
                 if self.error != error:
-                    self._event(now, "warning", "agente da RU: %s" % error)
+                    self._event(now, "warning", "RU agent: %s" % error)
                 self.error, self.err_ts = error, now
                 return
             if not isinstance(sample, dict):
@@ -1101,10 +1101,10 @@ class RuState:
             for k, label in self.STATE_KEYS:
                 if st.get(k) != old.get(k) and (self.last is not None or st.get(k) not in ("Ready", "SYNCHRONIZED")):
                     good = st.get(k) in ("Ready", "SYNCHRONIZED")
-                    msg = ("%s: %s → %s" % (label, old[k], st.get(k))) if old.get(k) else ("%s: %s (ao iniciar o painel)" % (label, st.get(k)))
+                    msg = ("%s: %s → %s" % (label, old[k], st.get(k))) if old.get(k) else ("%s: %s (when the dashboard started)" % (label, st.get(k)))
                     self._event(now, "info" if good or k == "du" else "warning", msg)
             if self.error:
-                self._event(now, "info", "agente da RU reconectado")
+                self._event(now, "info", "RU agent reconnected")
             if sample.get("info"):
                 self.info = sample["info"]
             self.last, self.ts, self.error = sample, now, None
@@ -1132,7 +1132,7 @@ class RuState:
             self.series.add(now, v)
 
     def _event(self, ts, lvl, msg):
-        # mesmo formato dos eventos do core (ISO UTC com microssegundos)
+        # same format as the core events (ISO UTC with microseconds)
         iso = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         self.events.appendleft({"ts": iso, "level": lvl, "msg": msg})
         if HISTORY is not None:
@@ -1168,18 +1168,18 @@ def local_host_loop(hosts):
             hosts.push(name, LOCAL_HOST_ROLE, "local", c.sample())
         except Exception as e:  # noqa: BLE001
             hosts.push(name, LOCAL_HOST_ROLE, "local", error=str(e))
-            log("máquina local:", e)
+            log("local machine:", e)
 
 
 # ----------------------------------------------------------------------------
-#  Log do gNB real (recebido de um agente no host do gNB)
+#  Real gNB log (received from an agent)
 # ----------------------------------------------------------------------------
-# Só linhas do CU (RRC/CU-CP/NGAP): nelas "ue=" é o índice do UE no CU-CP. No [SCHED]/[MAC] "ue=" é do DU.
+# Only CU lines (RRC/CU-CP/NGAP): there "ue=" is the UE index in the CU-CP. In [SCHED]/[MAC] "ue=" belongs to the DU.
 # ----------------------------------------------------------------------------
-#  Core sem Prometheus: CPU/memória de cada NF e tráfego do UPF lidos do /proc do host
-#  (o pod monta /proc do host só leitura). Não exige reiniciar nada do core.
+#  Core without Prometheus: CPU/memory of each NF and UPF traffic read from the host /proc
+#  (the pod mounts the host /proc read only). Nothing of the core needs a restart.
 # ----------------------------------------------------------------------------
-NF_PROCS = {"mongod": "mongodb"}   # demais: open5gs-<nf>d -> <nf> (Open5GS) ou o próprio nome (free5GC)
+NF_PROCS = {"mongod": "mongodb"}   # others: open5gs-<nf>d -> <nf> (Open5GS) or the name itself (free5GC)
 F5_PROCS = {"amf", "smf", "upf", "nrf", "udr", "udm", "ausf", "nssf", "pcf", "chf", "nef", "webui"}
 
 
@@ -1195,7 +1195,7 @@ class CoreProcs:
         self.error = None
         self.hz = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 
-    kind_fn = staticmethod(lambda: "open5gs")   # trocado em main(): dialeto do core ativo
+    kind_fn = staticmethod(lambda: "open5gs")   # replaced in main(): dialect of the active core
 
     def _nf(self, comm):
         if comm in NF_PROCS:
@@ -1275,13 +1275,13 @@ class CoreProcs:
         if name in UPF_DEVS:
             return "N6 · DNN %s (rx = uplink, tx = downlink)" % UPF_DEVS[name]
         if name.startswith("ogstun"):
-            return "N6 · túnel dos UEs (rx = uplink, tx = downlink)"
+            return "N6 · UE tunnel (rx = uplink, tx = downlink)"
         if name == "upfgtp":
-            return "N6 · túnel gtp5g dos UEs, todas as DNNs (rx = uplink, tx = downlink)"
+            return "N6 · gtp5g UE tunnel, all DNNs (rx = uplink, tx = downlink)"
         if name == "net1":
-            return "N3 · link com o gNB, GTP-U (rx = uplink, tx = downlink)"
+            return "N3 · link to the gNB, GTP-U (rx = uplink, tx = downlink)"
         if name == "eth0":
-            return "rede do pod (N4/PFCP e saída N6 com NAT)"
+            return "pod network (N4/PFCP and N6 egress with NAT)"
         return ""
 
     def run(self):
@@ -1307,7 +1307,7 @@ RE_LOG_AMFUE = re.compile(r"\[NGAP *\] \[\w\] (?:[TR]x PDU )?ue=(\d+) ran_ue=\d+
 
 
 def ue_identity(rnti):
-    """RNTI do gNB -> IMSI, nome, tipo e IPs (log do gNB + log do AMF + sessões do SMF)."""
+    """gNB RNTI -> IMSI, name, type and IPs (gNB log + AMF log + SMF sessions)."""
     try:
         rnti = int(rnti)
     except (TypeError, ValueError):
@@ -1332,8 +1332,8 @@ class GnbLog:
         self.cond = threading.Condition()
         self.last_push = None
         self.source = None
-        self.rnti_cu = {}     # RNTI (int) -> índice do UE no CU-CP
-        self.cu_amf = {}      # índice do UE no CU-CP -> AMF_UE_NGAP_ID
+        self.rnti_cu = {}     # RNTI (int) -> UE index in the CU-CP
+        self.cu_amf = {}      # UE index in the CU-CP -> AMF_UE_NGAP_ID
 
     def _ident(self, ln):
         m = RE_LOG_CRNTI.search(ln)
@@ -1352,7 +1352,7 @@ class GnbLog:
             return self.cu_amf.get(cu) if cu is not None else None
 
     def ident_only(self, lines):
-        """Linhas antigas só para montar o vínculo RNTI -> UE (não entram na tela de log)."""
+        """Old lines only to build the RNTI -> UE link (they do not go to the log view)."""
         with self.cond:
             for ln in lines:
                 self._ident(ln)
@@ -1383,10 +1383,10 @@ class GnbLog:
 #  HTTP
 # ----------------------------------------------------------------------------
 class CoreSet:
-    """Os cores do projeto e qual está ativo.
+    """The project cores and which one is active.
 
-    Ativo = o único com o AMF rodando; se os dois (ou nenhum) estiverem, vale a última escolha
-    (troca pela aba Controle), guardada ao lado do histórico para sobreviver a reinícios do painel."""
+    Active = the only one with the AMF running; if both (or none) are, the last choice wins
+    (switch from the Control tab), stored next to the history to survive dashboard restarts."""
 
     def __init__(self):
         self.defs = collections.OrderedDict()
@@ -1429,7 +1429,7 @@ class CoreSet:
                 with open(self.state_path, "w") as f:
                     json.dump({"active": name, "ts": time.time()}, f)
             except OSError as e:
-                log("core ativo: não gravou %s: %s" % (self.state_path, e))
+                log("active core: could not write %s: %s" % (self.state_path, e))
 
     def cur(self):
         return self.col[self.active()]
@@ -1457,9 +1457,9 @@ STARTED = time.time()
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
                  ".ico": "image/x-icon"}
-# ----------------------------------------------------------------------------- aba Configuração
+# ----------------------------------------------------------------------------- Settings tab
 class Admin:
-    """Sessões do administrador (senha própria, token em memória, 8 h)."""
+    """Administrator sessions (own password, in-memory token, 8 h)."""
     TTL = 8 * 3600
 
     def __init__(self):
@@ -1472,7 +1472,7 @@ class Admin:
             if time.time() < self.fail_until:
                 return None
             if not ADMIN_PASSWORD or not hmac.compare_digest(str(password), ADMIN_PASSWORD):
-                self.fail_until = time.time() + 2   # freia tentativa de adivinhar a senha
+                self.fail_until = time.time() + 2   # slows down password guessing
                 return None
             tok = secrets.token_urlsafe(32)
             self.sessions[tok] = time.time() + self.TTL
@@ -1498,7 +1498,7 @@ CONFIG_LOCK = threading.Lock()
 
 def _control_event(level, msg):
     CORES.cur().state._event(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                      "painel", level, msg)
+                      "dashboard", level, msg)
 
 
 GNBCTL = control.GnbCtl(GNB_CTL_TARGET) if CONTROL and CONFIG and GNB_CTL_TARGET else None
@@ -1528,7 +1528,7 @@ def settings_view(reveal):
 
 
 def settings_plan(body):
-    """Texto novo + diff + impacto + validação para um pedido de alteração."""
+    """New text + diff + impact + validation for a change request."""
     text, h = CONFIG.read()
     if body.get("restore"):
         new = CONFIG.backup_text(body["restore"])
@@ -1537,16 +1537,16 @@ def settings_plan(body):
         if isinstance(changes, dict) and any(
                 (isinstance(v, str) and MASK in v) or (isinstance(v, list) and any(MASK in str(x) for x in v))
                 for v in changes.values()):
-            raise configedit.ConfigError("há campos secretos ainda mascarados: clique em 'mostrar segredos' antes de editá-los")
+            raise configedit.ConfigError("some secret fields are still masked: click 'Show secrets' before editing them")
         new = configedit.apply_changes(text, changes)
     names = configedit.changed_vars(text, new)
     return text, h, new, {"diff": configedit.diff(text, new), "changed": names, "impact": configedit.impact(names),
                           "validation": configedit.validate(PROJECT_DIR, new) if names else {"ok": True, "output": ""}}
 
 
-# ----------------------------------------------------------------------------- histórico
+# ----------------------------------------------------------------------------- history
 def history_meta(series):
-    """Metadados gravados com cada bloco: quem é o UE (o RNTI muda a cada conexão)."""
+    """Metadata stored with each block: who the UE is (the RNTI changes on every connection)."""
     if series.startswith("ue:"):
         ident = ue_identity(series.rsplit(":", 1)[-1])
         if ident:
@@ -1558,7 +1558,7 @@ def history_meta(series):
 
 
 def experiment_setup():
-    """Retrato do setup no início de um experimento (para comparar depois)."""
+    """Snapshot of the setup at the start of an experiment (to compare later)."""
     ran = GNB.snapshot(30)
     ues = [dict(rnti=u["rnti"], **{k: v for k, v in ue_identity(u["rnti"]).items() if k != "sessions"})
            for u in ran["ues"] if u["active"]]
@@ -1574,12 +1574,12 @@ def experiment_setup():
                  "ru": dict(RU.detail(60).get("info") or {}, addr=RU_ADDR, name=RU_NAME) if RU else None}
 
 
-# ----------------------------------------------------------------------------- aba Documentação
+# ----------------------------------------------------------------------------- Documentation tab
 DOC_SKIP = {".git", "helm", "logs", "node_modules", "__pycache__"}
 
 
 def _git_ignored():
-    """Padrões que o git ignora (.git/info/exclude e .gitignore): o que é local não aparece no painel."""
+    """Patterns git ignores (.git/info/exclude and .gitignore): local files do not show in the dashboard."""
     pats = []
     for f in (os.path.join(PROJECT_DIR or "", ".git", "info", "exclude"), os.path.join(PROJECT_DIR or "", ".gitignore")):
         try:
@@ -1598,7 +1598,7 @@ def _is_ignored(rel, pats):
 
 
 def docs_list():
-    """Arquivos .md do projeto (o mesmo conteúdo do git), README primeiro, depois docs/."""
+    """Project .md files (the same content as git), README first, then docs/."""
     if not PROJECT_DIR or not os.path.isdir(PROJECT_DIR):
         return []
     out = []
@@ -1625,15 +1625,15 @@ def doc_read(path):
     full = os.path.realpath(os.path.join(PROJECT_DIR, path))
     if (not full.startswith(os.path.realpath(PROJECT_DIR) + os.sep) or not full.lower().endswith(".md")
             or _is_ignored(os.path.relpath(full, os.path.realpath(PROJECT_DIR)), _git_ignored())):
-        raise ValueError("arquivo inválido")
+        raise ValueError("invalid file")
     if any(part in DOC_SKIP or part.startswith(".") for part in os.path.relpath(full, PROJECT_DIR).split(os.sep)[:-1]):
-        raise ValueError("arquivo inválido")
+        raise ValueError("invalid file")
     with open(full, encoding="utf-8", errors="replace") as f:
         return f.read(2 * 1024 * 1024)
 
 
 def git_info():
-    """Branch e commit do projeto (lidos de .git sem rodar git) e o endereço do repositório."""
+    """Project branch and commit (read from .git without running git) and the repository address."""
     g = os.path.join(PROJECT_DIR or "", ".git")
     info = {"branch": None, "commit": None, "remote": None}
     try:
@@ -1657,7 +1657,7 @@ def git_info():
         if m:
             url = m.group(1)
             mm = re.match(r"^(?:git@|ssh://git@)([^:/]+)[:/](.+?)(?:\.git)?$", url)
-            # apelido SSH (ex.: github-open5gk3s) -> github.com
+            # SSH alias (e.g. github-open5gk3s) -> github.com
             info["remote"] = "https://%s/%s" % ("github.com" if "github" in mm.group(1) else mm.group(1), mm.group(2)) if mm else url
     except OSError:
         pass
@@ -1673,7 +1673,7 @@ def _range(qs):
     return t0, min(t1, now + 60)
 
 
-STATIC_FILES = {"docs.js", "control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
+STATIC_FILES = {"i18n.js", "docs.js", "control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -1690,7 +1690,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "innovanetwork-dashboard/" + VERSION
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, fmt, *args):  # silencioso (só erros)
+    def log_message(self, fmt, *args):  # quiet (errors only)
         pass
 
     # ---- utilidades
@@ -1746,7 +1746,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             return self._send(200, {"ok": True, "uptime": time.time() - STARTED})
         if not self._auth_ok():
-            return self._send(401, {"error": "autenticação necessária"},
+            return self._send(401, {"error": "authentication required"},
                               extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
         try:
             if path in ("/", "/index.html"):
@@ -1772,7 +1772,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     return self._send(200, {"path": _q(qs, "path", ""), "text": doc_read(_q(qs, "path", ""))})
                 except (ValueError, OSError) as e:
-                    return self._send(404, {"error": "documento não encontrado: %s" % e})
+                    return self._send(404, {"error": "document not found: %s" % e})
             if path == "/api/cores":
                 return self._send(200, {"active": CORES.active(), "cores": CORES.view()})
             if path.startswith("/api/history"):
@@ -1825,7 +1825,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._gnblog_stream(qs)
             if path == "/api/control":
                 if not CONTROLLER:
-                    return self._send(404, {"error": "aba Controle desligada (DASHBOARD_CONTROL)"})
+                    return self._send(404, {"error": "Control tab disabled (DASHBOARD_CONTROL)"})
                 return self._send(200, CONTROLLER.view())
             if path == "/api/ru":
                 if not RU:
@@ -1843,27 +1843,27 @@ class Handler(BaseHTTPRequestHandler):
                 d = HOSTS_STATE.detail(urllib.parse.unquote(path[len("/api/hosts/"):]), win)
                 if d and ENERGY and d["name"] == ENERGY_METER_HOST:
                     d["energy"] = ENERGY.detail(win)
-                return self._send(200, d) if d else self._send(404, {"error": "máquina desconhecida"})
-            return self._send(404, {"error": "não encontrado"})
+                return self._send(200, d) if d else self._send(404, {"error": "unknown machine"})
+            return self._send(404, {"error": "not found"})
         except (BrokenPipeError, ConnectionResetError):
             return None
         except urllib.error.HTTPError as e:
             return self._send(e.code, {"error": e.read().decode("utf-8", "replace")[:500]})
         except Exception as e:  # noqa: BLE001
-            log("erro", path, repr(e))
+            log("error", path, repr(e))
             return self._send(500, {"error": str(e)})
 
     def _history_get(self, path, qs):
         if HISTORY is None:
             return self._send(200 if path == "/api/history/status" else 404,
-                              {"enabled": False, "error": "histórico desligado (DASHBOARD_PERSIST=false)"})
+                              {"enabled": False, "error": "history disabled (DASHBOARD_PERSIST=false)"})
         if path == "/api/history/status":
             return self._send(200, HISTORY.status())
         if path == "/api/history/experiments":
             return self._send(200, {"experiments": HISTORY.experiments(), "running": HISTORY.running()})
         if path == "/api/history/experiment":
             e = HISTORY.experiment(_q(qs, "id", 0, int))
-            return self._send(200, e) if e else self._send(404, {"error": "experimento não encontrado"})
+            return self._send(200, e) if e else self._send(404, {"error": "experiment not found"})
         t0, t1 = _range(qs)
         if path == "/api/history/series":
             return self._send(200, {"series": HISTORY.series_list(t0, t1)})
@@ -1889,14 +1889,14 @@ class Handler(BaseHTTPRequestHandler):
                         w.writerow((ts, s, imsi, k, x))
             return self._send(200, out.getvalue(), "text/csv; charset=utf-8",
                               {"Content-Disposition": 'attachment; filename="historico-%d.csv"' % int(t0)})
-        return self._send(404, {"error": "não encontrado"})
+        return self._send(404, {"error": "not found"})
 
     def _history_post(self, path):
         if not self._auth_ok():
-            return self._send(401, {"error": "autenticação necessária"},
+            return self._send(401, {"error": "authentication required"},
                               extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
         if HISTORY is None:
-            return self._send(404, {"error": "histórico desligado (DASHBOARD_PERSIST=false)"})
+            return self._send(404, {"error": "history disabled (DASHBOARD_PERSIST=false)"})
         try:
             body = self._json_body(64 * 1024)
         except (ValueError, configedit.ConfigError) as e:
@@ -1907,51 +1907,51 @@ class Handler(BaseHTTPRequestHandler):
         HISTORY.flush()
         if act == "start":
             if not name:
-                return self._send(400, {"error": "dê um nome ao experimento"})
+                return self._send(400, {"error": "give the experiment a name"})
             cfg, setup = experiment_setup()
             eid = HISTORY.start(name, notes, cfg, setup)
-            log("histórico: experimento %d '%s' iniciado" % (eid, name))
+            log("history: experiment %d '%s' started" % (eid, name))
             return self._send(200, {"ok": True, "id": eid})
         if act == "stop":
             HISTORY.stop()
-            log("histórico: experimento encerrado")
+            log("history: experiment stopped")
             return self._send(200, {"ok": True})
         if act == "update":
-            HISTORY.update(int(body.get("id", 0)), name or "sem nome", notes)
+            HISTORY.update(int(body.get("id", 0)), name or "unnamed", notes)
             return self._send(200, {"ok": True})
         if act == "delete":
-            # Apagar exige a senha de administrador (os dados medidos continuam; some só o marcador)
+            # Deleting requires the administrator password (the measured data stays; only the marker goes)
             if not (CONFIG and ADMIN.check(self.headers.get("X-Admin-Token", ""))):
-                return self._send(403, {"error": "apagar experimento exige login de administrador (botão Admin no topo)"})
+                return self._send(403, {"error": "deleting an experiment needs an administrator login (Admin button at the top)"})
             HISTORY.delete(int(body.get("id", 0)))
             return self._send(200, {"ok": True})
-        return self._send(400, {"error": "ação desconhecida"})
+        return self._send(400, {"error": "unknown action"})
 
     def _admin(self):
-        """Exige a sessão de administrador (cabeçalho X-Admin-Token). Responde 401/404 se faltar."""
+        """Requires the administrator session (X-Admin-Token header). Answers 401/404 if missing."""
         if not CONFIG:
-            self._send(404, {"error": "edição do config.env desligada (sem senha de administrador)"})
+            self._send(404, {"error": "config.env editing disabled (no administrator password)"})
             return False
         if not ADMIN.check(self.headers.get("X-Admin-Token", "")):
-            self._send(401, {"error": "entre com a senha de administrador", "admin": True})
+            self._send(401, {"error": "sign in with the administrator password", "admin": True})
             return False
         return True
 
     def _json_body(self, limit=1024 * 1024):
         n = int(self.headers.get("Content-Length", "0") or 0)
         if n > limit:
-            raise configedit.ConfigError("pedido grande demais")
+            raise configedit.ConfigError("request too large")
         d = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
         if not isinstance(d, dict):
-            raise configedit.ConfigError("JSON inválido")
+            raise configedit.ConfigError("invalid JSON")
         return d
 
     def _control_post(self):
         if not self._auth_ok():
-            return self._send(401, {"error": "autenticação necessária"},
+            return self._send(401, {"error": "authentication required"},
                               extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
         if not CONTROLLER:
-            return self._send(404, {"error": "aba Controle desligada (DASHBOARD_CONTROL)"})
+            return self._send(404, {"error": "Control tab disabled (DASHBOARD_CONTROL)"})
         if not self._admin():
             return None
         try:
@@ -1966,7 +1966,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _settings_post(self, path):
         if not self._auth_ok():
-            return self._send(401, {"error": "autenticação necessária"},
+            return self._send(401, {"error": "authentication required"},
                               extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
         try:
             body = self._json_body()
@@ -1974,12 +1974,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(e)})
         if path == "/api/admin/login":
             if not CONFIG:
-                return self._send(404, {"error": "edição do config.env desligada"})
+                return self._send(404, {"error": "config.env editing disabled"})
             tok = ADMIN.login(body.get("password", ""))
             if not tok:
-                log("config: senha de administrador errada de", self.client_address[0])
-                return self._send(403, {"error": "senha incorreta (aguarde 2 s para tentar de novo)"})
-            log("config: login de administrador de", self.client_address[0])
+                log("config: wrong administrator password from", self.client_address[0])
+                return self._send(403, {"error": "wrong password (wait 2 s to try again)"})
+            log("config: administrator login from", self.client_address[0])
             return self._send(200, {"token": tok, "ttl": Admin.TTL})
         if path == "/api/admin/logout":
             ADMIN.logout(self.headers.get("X-Admin-Token", ""))
@@ -1992,17 +1992,17 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/settings/preview":
                     return self._send(200, plan)
                 if not plan["changed"]:
-                    return self._send(400, {"error": "nada mudou", **plan})
+                    return self._send(400, {"error": "nothing changed", **plan})
                 if plan["validation"]["ok"] is False:
-                    return self._send(422, {"error": "a validação do install recusou o arquivo novo", **plan})
+                    return self._send(422, {"error": "the install validation rejected the new file", **plan})
                 backup = CONFIG.write(new, body.get("hash", ""))
-            log("config: %s gravado por %s: %s (backup %s)" % (
+            log("config: %s saved by %s: %s (backup %s)" % (
                 CONFIG_PATH, self.client_address[0], ", ".join(plan["changed"]), backup))
             return self._send(200, {"ok": True, "backup": backup, **plan})
         except configedit.ConfigError as e:
-            return self._send(409 if "mudou" in str(e) or "substituído" in str(e) else 400, {"error": str(e)})
+            return self._send(409 if "changed since" in str(e) or "was replaced" in str(e) else 400, {"error": str(e)})
         except OSError as e:
-            return self._send(500, {"error": "não foi possível gravar o config.env: %s" % e})
+            return self._send(500, {"error": "could not write config.env: %s" % e})
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
@@ -2013,32 +2013,32 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/control":
             return self._control_post()
         if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host", "/api/ingest/ru", "/api/ingest/gnb-ctl"):
-            return self._send(404, {"error": "não encontrado"})
+            return self._send(404, {"error": "not found"})
         if not INGEST_TOKEN:
-            return self._send(403, {"error": "ingestão desligada (INGEST_TOKEN vazio)"})
+            return self._send(403, {"error": "ingestion disabled (INGEST_TOKEN empty)"})
         tok = self.headers.get("X-Ingest-Token", "")
         if not hmac.compare_digest(tok, INGEST_TOKEN):
-            return self._send(403, {"error": "token inválido"})
+            return self._send(403, {"error": "invalid token"})
         n = int(self.headers.get("Content-Length", "0") or 0)
         if n > 8 * 1024 * 1024:
-            return self._send(413, {"error": "lote grande demais"})
+            return self._send(413, {"error": "batch too large"})
         body = self.rfile.read(n).decode("utf-8", "replace")
         if u.path == "/api/ingest/gnb-ctl":
             if not GNBCTL:
-                return self._send(404, {"error": "controle do gNB desligado"})
+                return self._send(404, {"error": "gNB control disabled"})
             try:
                 d = json.loads(body)
             except ValueError:
-                return self._send(400, {"error": "JSON inválido"})
+                return self._send(400, {"error": "invalid JSON"})
             cmd = GNBCTL.push(d.get("status"), d.get("result"))
             return self._send(200, {"ok": True, "command": cmd})
         if u.path == "/api/ingest/ru":
             if not RU:
-                return self._send(404, {"error": "aba RU desligada (RU_NAME vazio)"})
+                return self._send(404, {"error": "RU tab disabled (RU_NAME empty)"})
             try:
                 d = json.loads(body)
             except ValueError:
-                return self._send(400, {"error": "JSON inválido"})
+                return self._send(400, {"error": "invalid JSON"})
             RU.push(d.get("sample"), str(d["error"])[:300] if d.get("error") else None)
             return self._send(200, {"ok": True})
         if u.path == "/api/ingest/host":
@@ -2046,8 +2046,8 @@ class Handler(BaseHTTPRequestHandler):
                 d = json.loads(body)
                 name = str(d["name"])[:64]
             except (ValueError, KeyError, TypeError):
-                return self._send(400, {"error": "JSON inválido"})
-            HOSTS_STATE.push(name, str(d.get("role") or "")[:80], "agente", d.get("sample"), d.get("error"))
+                return self._send(400, {"error": "invalid JSON"})
+            HOSTS_STATE.push(name, str(d.get("role") or "")[:80], "agent", d.get("sample"), d.get("error"))
             return self._send(200, {"ok": True})
         lines = [ANSI.sub("", l) for l in body.splitlines() if l.strip()]
         if self.headers.get("X-Ident-Only") == "1":
@@ -2059,7 +2059,7 @@ class Handler(BaseHTTPRequestHandler):
     def _static(self, name):
         p = os.path.join(STATIC_DIR, name)
         if name not in STATIC_FILES or not os.path.isfile(p):
-            return self._send(404, {"error": "não encontrado"})
+            return self._send(404, {"error": "not found"})
         with open(p, "rb") as f:
             data = f.read()
         ext = os.path.splitext(name)[1]
@@ -2079,8 +2079,12 @@ class Handler(BaseHTTPRequestHandler):
         gst = (gv or {}).get("status") or {}
         return {
             "now": time.time(),
-            # nó do rádio (agente do gNB): GPS (ts2phc) e serviços PTP, para o botão Status
-            "radio": {"online": gv["online"], "gps": gst.get("gps"), "ptp": gst.get("ptp")} if gv else None,
+            # radio node (gNB agent): GPS (ts2phc) and PTP services, for the Status button
+            "radio": {"online": gv["online"], "gps": gst.get("gps"), "ptp": gst.get("ptp"),
+                      # was the gNB started? (stopped on purpose is not a failure)
+                      "gnb": {"active": (gst.get("active") or {}).get("sub"), "failed": bool(gst.get("failed")),
+                              "manual": len(gst.get("manual") or []),
+                              "waiting_boot": bool((gst.get("k8s") or {}).get("waiting_boot"))}} if gv else None,
             "core_active": CORES.active(), "core_name": CORES.cur_def()["label"],
             "gnb": {"status": ran["status"], "cell": cell_last,
                     "ues": [dict({k: u[k] for k in ("id", "pci", "rnti", "active", "last", "first_seen", "last_seen")},
@@ -2115,9 +2119,9 @@ class Handler(BaseHTTPRequestHandler):
         pod = _q(qs, "pod", "")
         container = _q(qs, "container", "")
         if not re.match(r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$", pod or ""):
-            raise ValueError("pod inválido")
+            raise ValueError("invalid pod")
         if container and not re.match(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", container):
-            raise ValueError("container inválido")
+            raise ValueError("invalid container")
         return pod, container
 
     @staticmethod
@@ -2145,10 +2149,10 @@ class Handler(BaseHTTPRequestHandler):
         resp = K8S.open("/api/v1/namespaces/%s/pods/%s/log" % (self._log_ns(qs), pod), params, timeout=None)
         self._sse_start()
         try:
-            self._sse("conectado", "status")
+            self._sse("connected", "status")
             for raw in resp:
                 self._sse(ANSI.sub("", raw.decode("utf-8", "replace").rstrip("\n")))
-            self._sse("o log terminou (pod reiniciou ou foi removido)", "status")
+            self._sse("the log ended (pod restarted or was removed)", "status")
         finally:
             resp.close()
 
@@ -2176,18 +2180,18 @@ def main():
             HISTORY = history.History(PERSIST_PATH, PERSIST_DAYS, PERSIST_MAX_MB, PERSIST_CHUNK,
                                       meta_fn=history_meta, log=log)
 
-            def _bye(signum, frame):   # pod parando: grava o que está no buffer (até 60 s)
+            def _bye(signum, frame):   # pod stopping: write what is in the buffer (up to 60 s)
                 try:
                     HISTORY.flush()
-                    log("histórico: buffer gravado antes de sair")
+                    log("history: buffer written before exiting")
                 finally:
                     os._exit(0)
             signal.signal(signal.SIGTERM, _bye)
             threading.Thread(target=HISTORY.run, daemon=True, name="historico").start()
-            log("histórico persistente: %s (retenção %d dias, máx. %d MB)" % (PERSIST_PATH, PERSIST_DAYS, PERSIST_MAX_MB))
+            log("persistent history: %s (retention %d days, max %d MB)" % (PERSIST_PATH, PERSIST_DAYS, PERSIST_MAX_MB))
         except Exception as e:  # noqa: BLE001
-            log("histórico persistente DESLIGADO — erro ao abrir %s: %s" % (PERSIST_PATH, e))
-    log("painel: cores=%s ativo=%s gNB=%s métricas do core=%s porta=%s" % (
+            log("persistent history DISABLED: error opening %s: %s" % (PERSIST_PATH, e))
+    log("dashboard: cores=%s active=%s gNB=%s core metrics=%s port=%s" % (
         ",".join("%s(%s)" % (n, d["namespace"]) for n, d in CORES.defs.items()), CORES.active(),
         GNB_METRICS_URL or "(desligado)", CORE_METRICS, PORT))
     if GNB_METRICS_URL:

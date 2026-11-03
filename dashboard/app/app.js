@@ -1,8 +1,8 @@
-/* Innova Center Dashboard — InnovaNetwork (sem dependências além do uPlot) */
+/* Innova Center Dashboard — InnovaNetwork (no dependencies besides uPlot) */
 "use strict";
 
 // ---------------------------------------------------------------------------
-//  Utilidades
+//  Utilities
 // ---------------------------------------------------------------------------
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -10,32 +10,32 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const store = {
   get(k, d) { try { const v = localStorage.getItem("icd." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("icd." + k, JSON.stringify(v)); } catch { /* sem storage */ } },
+  set(k, v) { try { localStorage.setItem("icd." + k, JSON.stringify(v)); } catch { /* no storage */ } },
 };
 const PALETTE = ["#1554c0", "#6b7280", "#0ea5e9", "#f59e0b", "#7c3aed", "#10b981", "#ef4444", "#94a3b8"];
 const colorFor = (i) => PALETTE[i % PALETTE.length];
-// Nome curto e função de cada pod (o nome completo do pod fica no tooltip)
+// Short name and role of each pod (the full pod name goes in the tooltip)
 const NF_INFO = {
-  amf: ["AMF", "acesso e mobilidade (N2)"], smf: ["SMF", "sessões PDU"], upf: ["UPF", "plano de usuário (N3/N6)"],
-  nrf: ["NRF", "registro de funções"], scp: ["SCP", "roteamento de sinalização"], ausf: ["AUSF", "autenticação"],
-  udm: ["UDM", "dados de assinante"], udr: ["UDR", "repositório de dados"], pcf: ["PCF", "políticas"],
-  bsf: ["BSF", "vínculo de sessões"], nssf: ["NSSF", "seleção de slice"], mongodb: ["MongoDB", "banco de assinantes"],
-  webui: ["WebUI", "cadastro de assinantes"], populate: ["Populate", "cadastro inicial"],
-  chf: ["CHF", "tarifação"], nef: ["NEF", "exposição de rede"],
-  gnb: ["gNB simulado", "UERANSIM"], ues: ["UEs simulados", "UERANSIM"], dashboard: ["Painel", "este site"],
+  amf: ["AMF", "access and mobility (N2)"], smf: ["SMF", "PDU sessions"], upf: ["UPF", "user plane (N3/N6)"],
+  nrf: ["NRF", "function registry"], scp: ["SCP", "signalling routing"], ausf: ["AUSF", "authentication"],
+  udm: ["UDM", "subscriber data"], udr: ["UDR", "data repository"], pcf: ["PCF", "policies"],
+  bsf: ["BSF", "session binding"], nssf: ["NSSF", "slice selection"], mongodb: ["MongoDB", "subscriber database"],
+  webui: ["WebUI", "subscriber management"], populate: ["Populate", "initial provisioning"],
+  chf: ["CHF", "charging"], nef: ["NEF", "network exposure"],
+  gnb: ["Simulated gNB", "UERANSIM"], ues: ["Simulated UEs", "UERANSIM"], dashboard: ["Dashboard", "this site"],
 };
 function nfInfo(p) {
   const k = (p.label || p.component || "").toLowerCase();
-  if (k === "webui" && CONFIG.core_kind === "free5gc") return ["WebConsole", "cadastro de assinantes"];
+  if (k === "webui" && CONFIG.core_kind === "free5gc") return ["WebConsole", "subscriber management"];
   return NF_INFO[k] || [p.label || p.component || p.name, ""];
 }
-// Nome do core ativo nos textos (troca quando o core ativo muda)
+// Active core name in the texts (changes when the active core changes)
 function paintCore() {
   $$(".core-name").forEach((e) => (e.textContent = CONFIG.core_name || "Open5GS"));
   document.body.dataset.core = CONFIG.core || "open5gs";
 }
 
-// Identificação do UE no rádio: nome / IMSI / IP (o gNB só conhece o RNTI)
+// UE identification on the radio: name / IMSI / IP (the gNB only knows the RNTI)
 function ueTitle(u) {
   const id = u.ident || {};
   return id.name || (id.imsi ? "IMSI " + id.imsi : "RNTI " + u.rnti);
@@ -50,10 +50,10 @@ function ueIps(u) {
 }
 function ueKindTag(u) {
   const id = u.ident || {};
-  if (!id.imsi) return '<span class="tag" title="ainda sem o vínculo RNTI → IMSI (precisa do log do gNB; aparece quando o UE troca mensagens com o core)">não identificado</span>';
-  return id.kind === "ueransim" ? '<span class="tag">UERANSIM</span>' : '<span class="tag real">SIM real</span>';
+  if (!id.imsi) return '<span class="tag" title="no RNTI → IMSI link yet (needs the gNB log; appears when the UE exchanges messages with the core)">not identified</span>';
+  return id.kind === "ueransim" ? '<span class="tag">UERANSIM</span>' : '<span class="tag real">real SIM</span>';
 }
-const UE_STALE_SECONDS = 120;   // RNTIs parados há mais que isso ficam escondidos por padrão
+const UE_STALE_SECONDS = 120;   // RNTIs idle for longer than this are hidden by default
 
 function fmtRate(bps) {
   if (bps == null || isNaN(bps)) return "–";
@@ -72,13 +72,13 @@ function ago(t) {
   return (s / 86400).toFixed(1) + " d";
 }
 const isoToEpoch = (s) => (s ? Date.parse(s) / 1000 : null);
-const hhmmss = (s) => (s ? new Date(s).toLocaleTimeString("pt-BR", { hour12: false }) : "–");
+const hhmmss = (s) => (s ? new Date(s).toLocaleTimeString(I18N.locale, { hour12: false }) : "–");
 
 async function api(path) {
   const r = await fetch(path, { cache: "no-store" });
   if (!r.ok) {
     let msg = r.status + " " + r.statusText;
-    try { msg = (await r.json()).error || msg; } catch { /* corpo não-JSON */ }
+    try { msg = (await r.json()).error || msg; } catch { /* non-JSON body */ }
     throw new Error(msg);
   }
   return r.json();
@@ -89,7 +89,7 @@ function banner(msg) {
 }
 
 // ---------------------------------------------------------------------------
-//  Tema e abas
+//  Theme and tabs
 // ---------------------------------------------------------------------------
 function applyTheme(t) {
   if (t) document.documentElement.setAttribute("data-theme", t);
@@ -116,7 +116,7 @@ function showTab(name) {
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
 // ---------------------------------------------------------------------------
-//  Gráficos (uPlot)
+//  Charts (uPlot)
 // ---------------------------------------------------------------------------
 const Charts = {
   list: {},
@@ -145,7 +145,7 @@ const Charts = {
         ...(opts.y2 ? [{ ...axis, side: 1, scale: "y2", size: 55, grid: { show: false } }] : []),
       ],
       series: [
-        { label: opts.xrel ? "Tempo" : "Hora", value: (u, v) => (v == null ? "–" : Charts.xfmt(opts)(v)) },
+        { label: opts.xrel ? "Time" : "Clock", value: (u, v) => (v == null ? "–" : Charts.xfmt(opts)(v)) },
         ...series.map((s, i) => ({
           label: s.label, stroke: s.color || colorFor(i), width: s.width || 1.6,
           scale: s.scale || "y", dash: s.dash, spanGaps: !!opts.spanGaps,
@@ -162,7 +162,7 @@ const Charts = {
   xfmt(opts) {
     if (opts.xfmt) return opts.xfmt;
     if (opts.xrel) return (v) => { const s = Math.round(v); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-    return (v) => new Date(v * 1000).toLocaleTimeString("pt-BR", { hour12: false });
+    return (v) => new Date(v * 1000).toLocaleTimeString(I18N.locale, { hour12: false });
   },
   set(id, data) {
     const u = this.list[id];
@@ -175,7 +175,7 @@ const Charts = {
     }
   },
   restyle() {
-    // Recria os gráficos com as cores do tema atual
+    // Rebuild the charts with the current theme colors
     for (const [id, u] of Object.entries(this.list)) {
       const { series, opts } = u._opts;
       const data = u.data;
@@ -188,7 +188,7 @@ const Charts = {
 };
 window.addEventListener("resize", () => { clearTimeout(Charts._t); Charts._t = setTimeout(() => Charts.resizeAll(), 120); });
 
-// Alinha várias séries em baldes de 1 s (eixo X comum)
+// Align several series in 1 s buckets (common X axis)
 function align(seriesList, field, scale = 1) {
   const buckets = new Map();
   seriesList.forEach((s, idx) => {
@@ -209,7 +209,7 @@ function cols(s, fields, scale = {}) {
 }
 
 // ---------------------------------------------------------------------------
-//  Estado global e atualização periódica
+//  Global state and periodic refresh
 // ---------------------------------------------------------------------------
 let CONFIG = {};
 let LAST_OVERVIEW = null;
@@ -234,7 +234,7 @@ async function refreshNow() {
     }
     banner(null);
   } catch (e) {
-    banner("Falha ao falar com o painel: " + e.message);
+    banner("Cannot reach the dashboard: " + e.message);
   } finally {
     busy = false;
   }
@@ -243,16 +243,27 @@ async function refreshNow() {
 function updatePills(ov) {
   const g = ov.gnb.status;
   const pg = $("#pill-gnb");
-  if (!g.enabled) { pg.className = "pill"; pg.textContent = "gNB: desligado"; }
-  else if (g.connected && g.last_msg && Date.now() / 1000 - g.last_msg < 10) {
+  // gNB state from the control agent: stopped on purpose is neutral, not a failure
+  const rg = (ov.radio && ov.radio.online && ov.radio.gnb) || null;
+  const fresh = g.connected && g.last_msg && Date.now() / 1000 - g.last_msg < 10;
+  const gnbOn = fresh || (rg ? !!(rg.active || rg.manual) : true);   // no agent: assume it is on (as before)
+  pg.title = "gNB metrics";
+  if (!g.enabled) { pg.className = "pill"; pg.textContent = "gNB: disabled"; }
+  else if (fresh) {
     const n = ov.gnb.ues.filter((u) => u.active).length;
     pg.className = "pill ok"; pg.textContent = `gNB ok · ${n} UE${n === 1 ? "" : "s"}`;
-  } else { pg.className = "pill err"; pg.textContent = "gNB sem dados"; pg.title = g.error || ""; }
+  } else if (rg && rg.failed) { pg.className = "pill err"; pg.textContent = "gNB failed"; }
+  else if (!gnbOn) {
+    pg.className = "pill off";
+    pg.textContent = rg.waiting_boot ? "gNB stopped · waiting for start" : "gNB stopped";
+    pg.title = rg.waiting_boot ? "The radio node rebooted: check GPS/PTP/RU and start it from the Control tab" : "Start it from the Control tab";
+  } else if (rg && rg.active === "activating") { pg.className = "pill warn"; pg.textContent = "gNB starting"; }
+  else { pg.className = "pill err"; pg.textContent = "gNB no data"; pg.title = g.error || ""; }
   const c = ov.core;
   const pc = $("#pill-core");
   pc.textContent = `${ov.core_name || "core"} ${c.pods_ready}/${c.pods_total}`;
-  pc.title = "Pods do core ativo (" + (ov.core_name || "") + ")";
-  // o core ativo mudou (troca pela aba Controle ou por fora): recarrega a configuração e os textos
+  pc.title = "Active core pods (" + (ov.core_name || "") + ")";
+  // the active core changed (from the Control tab or elsewhere): reload the configuration and the texts
   if (ov.core_active && CONFIG.core && ov.core_active !== CONFIG.core) reloadConfig();
   pc.className = "pill " + (c.pods_error ? "err" : c.pods_ready === c.pods_total && c.pods_total ? "ok" : "warn");
   const r = ov.ru;
@@ -261,40 +272,43 @@ function updatePills(ov) {
   if (r) {
     const good = (v) => v === "Ready" || v === "SYNCHRONIZED";
     const radio = good(r.sync) && good(r.rf) && good(r.dpd);
-    pr.textContent = !r.online ? "RU sem dados" : !radio ? "RU com falha" : good(r.du) ? "RU ok · DU conectado" : "RU pronta · sem DU";
-    pr.className = "pill " + (!r.online || !radio ? "err" : good(r.du) ? "ok" : "warn");
+    // with the gNB stopped, an RU without DU or contact is expected (neutral), not a failure
+    pr.textContent = !r.online ? (gnbOn ? "RU no data" : "RU not reachable") : !radio ? "RU fault"
+      : good(r.du) ? "RU ok · DU connected" : gnbOn ? "RU ready · no DU" : "RU ready";
+    pr.className = "pill " + (!r.online ? (gnbOn ? "err" : "off") : !radio ? (gnbOn ? "err" : "warn") : good(r.du) || !gnbOn ? "ok" : "warn");
     pr.title = r.error || `sync ${r.sync} · RF ${r.rf} · DPD ${r.dpd} · DU ${r.du}`;
   }
-  // GPS / PTP do nó do rádio
+  // GPS / PTP of the radio node
   const rh = ov.radio;
   $("#row-gps").classList.toggle("hidden", !rh);
   if (rh) {
-    const gi = rh.online ? gpsInfo(rh.gps, rh.ptp) : { v: "agente sem contato", s: "", c: "err" };
+    const gi = rh.online ? gpsInfo(rh.gps, rh.ptp) : { v: "agent not reachable", s: "", c: "err" };
     const pgps = $("#pill-gps");
     pgps.textContent = gi.v;
     pgps.className = "pill " + gi.c;
     $("#status-gps-detail").textContent = gi.s;
   } else $("#status-gps-detail").textContent = "";
-  // botão Status: a cor do pior item visível
+  // Status button: the color of the worst visible item
   const rows = $$("#status-pop .strow:not(.hidden) .pill");
   const n = (c) => rows.filter((p) => p.classList.contains(c)).length;
   const sb = $("#status-btn");
-  sb.className = "pill " + (n("err") ? "err" : n("warn") ? "warn" : "ok");
-  sb.textContent = n("err") ? `Status · ${n("err")} falha${n("err") > 1 ? "s" : ""}` : n("warn") ? `Status · ${n("warn")} alerta${n("warn") > 1 ? "s" : ""}` : "Status · tudo ok";
+  sb.className = "pill " + (n("err") ? "err" : n("warn") ? "warn" : n("off") ? "off" : "ok");
+  sb.textContent = n("err") ? `Status · ${n("err")} failure${n("err") > 1 ? "s" : ""}` : n("warn") ? `Status · ${n("warn")} warning${n("warn") > 1 ? "s" : ""}`
+    : n("off") ? `Status · ${n("off")} stopped` : "Status · all ok";
 }
-// GPS do nó do rádio (ts2phc): texto, detalhe e classe (ok/warn/err)
+// GPS of the radio node (ts2phc): text, detail and class (ok/warn/err)
 function gpsInfo(g, ptp) {
   const pv = Object.values(ptp || {});
   const ptpOk = pv.length && pv.every((x) => x === "active");
-  if (!g) return { v: "GPS sem dados", s: "", c: "" };
-  const sub = [g.offset_ns != null ? `offset ${g.offset_ns} ns` : "", g.age != null ? `última leitura há ${Math.round(g.age)} s` : ""]
+  if (!g) return { v: "GPS no data", s: "", c: "" };
+  const sub = [g.offset_ns != null ? `offset ${g.offset_ns} ns` : "", g.age != null ? `last reading ${Math.round(g.age)} s ago` : ""]
     .filter(Boolean).join(" · ");
   switch (g.state) {
-    case "travado": return { v: ptpOk ? "GPS travado · PTP ok" : "GPS travado · PTP parado", s: sub, c: ptpOk ? "ok" : "warn" };
-    case "procurando": return { v: "GPS procurando satélites", s: "ts2phc sem hora válida do GPS: espere antes de ligar o gNB", c: "warn" };
-    case "ajustando": case "sem_trava": return { v: "GPS ajustando", s: sub, c: "warn" };
-    case "parado": return { v: "ts2phc sem mensagens", s: sub, c: "err" };
-    default: return { v: "GPS sem dados", s: g.line || "", c: "" };
+    case "locked": case "travado": return { v: ptpOk ? "GPS locked · PTP ok" : "GPS locked · PTP stopped", s: sub, c: ptpOk ? "ok" : "warn" };
+    case "searching": case "procurando": return { v: "GPS searching for satellites", s: "ts2phc has no valid GPS time: wait before starting the gNB", c: "warn" };
+    case "adjusting": case "unlocked": case "ajustando": case "sem_trava": return { v: "GPS adjusting", s: sub, c: "warn" };
+    case "stalled": case "parado": return { v: "ts2phc silent", s: sub, c: "err" };
+    default: return { v: "GPS no data", s: g.line || "", c: "" };
   }
 }
 $("#status-btn").addEventListener("click", (e) => { e.stopPropagation(); $("#status-pop").classList.toggle("hidden"); });
@@ -302,7 +316,7 @@ document.addEventListener("click", (e) => { if (!e.target.closest("#status-box")
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#status-pop").classList.add("hidden"); });
 
 // ---------------------------------------------------------------------------
-//  Visão geral
+//  Overview
 // ---------------------------------------------------------------------------
 const Overview = {
   async refresh(pillsOnly = false) {
@@ -322,15 +336,15 @@ const Overview = {
     const c = ov.core;
     const regs = c.ues.filter((u) => u.registered).length;
     const k = [
-      { l: "UEs no rádio", v: ov.gnb.status.enabled ? act.length : "–", s: ov.gnb.status.connected ? "gNB conectado" : "gNB sem dados", c: ov.gnb.status.connected ? "" : "err" },
-      { l: "Downlink da célula", v: fmtRate(cell.dl_brate), s: "agora" },
-      { l: "Uplink da célula", v: fmtRate(cell.ul_brate), s: "agora" },
-      { l: "gNBs no AMF (N2)", v: c.nof_gnbs ?? "–", s: (c.gnbs || []).map((g) => g.addr).join(", ") || "–" },
-      { l: "UEs registrados", v: regs, s: `${c.ues.filter((u) => u.registered && u.kind === "real").length} real(is) · ${c.ues.filter((u) => u.registered && u.kind === "ueransim").length} simulado(s) · ${c.sessions.length} sessões` },
-      { l: "Pods do core", v: `${c.pods_ready}/${c.pods_total}`, s: `${c.restarts} reinício(s) no total`, c: c.pods_ready === c.pods_total ? "ok" : "warn" },
+      { l: "UEs on the radio", v: ov.gnb.status.enabled ? act.length : "–", s: ov.gnb.status.connected ? "gNB connected" : "gNB no data", c: ov.gnb.status.connected ? "" : "err" },
+      { l: "Cell downlink", v: fmtRate(cell.dl_brate), s: "now" },
+      { l: "Cell uplink", v: fmtRate(cell.ul_brate), s: "now" },
+      { l: "gNBs on the AMF (N2)", v: c.nof_gnbs ?? "–", s: (c.gnbs || []).map((g) => g.addr).join(", ") || "–" },
+      { l: "Registered UEs", v: regs, s: `${c.ues.filter((u) => u.registered && u.kind === "real").length} real · ${c.ues.filter((u) => u.registered && u.kind === "ueransim").length} simulated · ${c.sessions.length} sessions` },
+      { l: "Core pods", v: `${c.pods_ready}/${c.pods_total}`, s: `${c.restarts} restart(s) in total`, c: c.pods_ready === c.pods_total ? "ok" : "warn" },
       CONFIG.core_kind === "free5gc"
-        ? { l: "Sessões recusadas (SMF)", v: c.counters.dnn_not_subscribed || 0, s: "DNN/slice fora da configuração", c: c.counters.dnn_not_subscribed ? "warn" : "ok" }
-        : { l: "Erros PFCP (UPF)", v: c.counters.pfcp_cannot_find || 0, s: "Cannot find PFCP-Node", c: c.counters.pfcp_cannot_find ? "err" : "ok" },
+        ? { l: "Rejected sessions (SMF)", v: c.counters.dnn_not_subscribed || 0, s: "DNN/slice outside the configuration", c: c.counters.dnn_not_subscribed ? "warn" : "ok" }
+        : { l: "PFCP errors (UPF)", v: c.counters.pfcp_cannot_find || 0, s: "Cannot find PFCP-Node", c: c.counters.pfcp_cannot_find ? "err" : "ok" },
     ];
     $("#kpis").innerHTML = k.map((x) => `<div class="kpi ${x.c || ""}"><div class="label">${esc(x.l)}</div>
       <div class="value">${esc(x.v)}</div><div class="sub">${esc(x.s)}</div></div>`).join("");
@@ -338,10 +352,10 @@ const Overview = {
   ranUes(ov) {
     const now = Date.now() / 1000;
     const ues = ov.gnb.ues.filter((u) => u.active || now - u.last_seen <= UE_STALE_SECONDS);
-    $("#ov-ran-sub").textContent = ov.gnb.status.enabled ? `(${CONFIG.gnb_name || "gNB"} · só UEs reais; o UERANSIM não passa pelo rádio)` : "(métricas do gNB desligadas)";
-    if (!ues.length) { $("#ov-ran-ues").innerHTML = `<tr><td class="empty">Nenhum UE visto pelo gNB na última janela.</td></tr>`; return; }
+    $("#ov-ran-sub").textContent = ov.gnb.status.enabled ? `(${CONFIG.gnb_name || "gNB"} · real UEs only; UERANSIM does not use the radio)` : "(gNB metrics disabled)";
+    if (!ues.length) { $("#ov-ran-ues").innerHTML = `<tr><td class="empty">No UE seen by the gNB in the last window.</td></tr>`; return; }
     $("#ov-ran-ues").innerHTML = `<tr><th>UE</th><th>IP</th><th class="num">DL</th><th class="num">UL</th><th class="num">MCS DL/UL</th>
-      <th class="num">CQI</th><th class="num">RI</th><th class="num">BLER DL/UL (10 s)</th><th class="num">SNR</th><th>Visto</th></tr>` +
+      <th class="num">CQI</th><th class="num">RI</th><th class="num">BLER DL/UL (10 s)</th><th class="num">SNR</th><th>Seen</th></tr>` +
       ues.map((u) => {
         const l = u.last || {};
         const bl = (v) => (v == null ? "–" : `<span class="tag ${v > 10 ? "err" : v > 3 ? "warn" : "ok"}">${fmt(v)}%</span>`);
@@ -349,22 +363,22 @@ const Overview = {
           <td>${esc(ueIps(u)) || '<span class="muted">–</span>'}</td>
           <td class="num">${fmtRate(l.dl_brate)}</td><td class="num">${fmtRate(l.ul_brate)}</td>
           <td class="num">${fmt(l.dl_mcs, 0)} / ${fmt(l.ul_mcs, 0)}</td><td class="num">${fmt(l.cqi, 0)}</td>
-          <td class="num">${fmt(l.dl_ri, 1)}</td><td class="num" title="últimos 10 s: ${l.dl_tbs_win || 0} blocos DL, ${l.ul_tbs_win || 0} UL">${bl(l.dl_bler_win)} ${bl(l.ul_bler_win)}</td>
-          <td class="num">${fmt(l.pusch_snr_db)} dB</td><td>${u.active ? "agora" : "há " + ago(u.last_seen)}</td></tr>`;
+          <td class="num">${fmt(l.dl_ri, 1)}</td><td class="num" title="last 10 s: ${l.dl_tbs_win || 0} DL blocks, ${l.ul_tbs_win || 0} UL">${bl(l.dl_bler_win)} ${bl(l.ul_bler_win)}</td>
+          <td class="num">${fmt(l.pusch_snr_db)} dB</td><td>${u.active ? "now" : ago(u.last_seen) + " ago"}</td></tr>`;
       }).join("");
   },
   coreUes(ov) {
     const ues = ov.core.ues;
-    if (!ues.length) { $("#ov-core-ues").innerHTML = `<tr><td class="empty">Nenhum assinante visto nos logs do AMF.</td></tr>`; return; }
-    $("#ov-core-ues").innerHTML = `<tr><th>IMSI</th><th>Tipo</th><th>Estado</th><th>Sessões (DNN → IP)</th><th>Último evento</th></tr>` +
+    if (!ues.length) { $("#ov-core-ues").innerHTML = `<tr><td class="empty">No subscriber seen in the AMF logs.</td></tr>`; return; }
+    $("#ov-core-ues").innerHTML = `<tr><th>IMSI</th><th>Type</th><th>State</th><th>Sessions (DNN → IP)</th><th>Last event</th></tr>` +
       ues.map((u) => `<tr><td><b>${esc(u.imsi)}</b>${u.name ? `<br><span class="muted">${esc(u.name)}</span>` : ""}</td>
-        <td>${u.kind === "ueransim" ? '<span class="tag">UERANSIM (simulado)</span>' : '<span class="tag real">SIM real</span>'}</td>
-        <td>${u.registered ? '<span class="tag ok">registrado</span>' : '<span class="tag">fora</span>'}</td>
-        <td>${u.sessions.length ? u.sessions.map((s) => `${esc(s.dnn)} → <b>${esc(s.ipv4 || s.ipv6)}</b>`).join("<br>") : '<span class="muted">nenhuma</span>'}</td>
+        <td>${u.kind === "ueransim" ? '<span class="tag">UERANSIM (simulated)</span>' : '<span class="tag real">real SIM</span>'}</td>
+        <td>${u.registered ? '<span class="tag ok">registered</span>' : '<span class="tag">away</span>'}</td>
+        <td>${u.sessions.length ? u.sessions.map((s) => `${esc(s.dnn)} → <b>${esc(s.ipv4 || s.ipv6)}</b>`).join("<br>") : '<span class="muted">none</span>'}</td>
         <td>${esc(u.event || "")} <span class="muted">${hhmmss(u.ts)}</span></td></tr>`).join("");
   },
   pods(ov) {
-    $("#ov-pods").innerHTML = `<tr><th>Componente</th><th>Estado</th><th class="num">Prontos</th><th class="num">Reinícios</th><th>Idade</th><th>IP</th><th>Link RAN</th></tr>` +
+    $("#ov-pods").innerHTML = `<tr><th>Component</th><th>State</th><th class="num">Ready</th><th class="num">Restarts</th><th>Age</th><th>IP</th><th>RAN link</th></tr>` +
       ov.pods.map((p) => {
         const st = p.phase === "Running" && p.all_ready ? "ok" : p.phase === "Running" ? "warn" : "err";
         const [nm, role] = nfInfo(p);
@@ -378,12 +392,12 @@ const Overview = {
     $("#ov-events").innerHTML = ev.length ? ev.map((e) => `<div class="ev ${esc(e.level)}">
       <span class="t">${hhmmss(e.ts)}</span><span class="src">${esc(e.src)}</span>
       <span class="msg">${esc(e.msg)}</span><span class="cnt">${e.count > 1 ? "×" + e.count : ""}</span></div>`).join("")
-      : `<div class="empty">Sem eventos.</div>`;
+      : `<div class="empty">No events.</div>`;
   },
 };
 
 // ---------------------------------------------------------------------------
-//  Rádio (gNB)
+//  Radio (gNB)
 // ---------------------------------------------------------------------------
 const Ran = {
   paused: false,
@@ -393,15 +407,15 @@ const Ran = {
     const win = +$("#ran-window").value;
     const seq = (this._seq = (this._seq || 0) + 1);
     const d = await api("api/ran?window=" + win);
-    if (seq !== this._seq) return;   // chegou depois de uma resposta mais nova
+    if (seq !== this._seq) return;   // arrived after a newer response
     this.last = d;
     this.render(d);
   },
   render(d) {
     const st = d.status;
-    $("#ran-status").textContent = !st.enabled ? "métricas do gNB desligadas (GNB_METRICS_URL vazio)"
-      : st.connected ? `conectado a ${st.url} · ${st.messages} mensagens · última há ${ago(st.last_msg)}`
-        : `sem conexão com ${st.url}: ${st.error || "aguardando"}`;
+    $("#ran-status").textContent = !st.enabled ? "gNB metrics disabled (GNB_METRICS_URL empty)"
+      : st.connected ? `connected to ${st.url} · ${st.messages} messages · last ${ago(st.last_msg)} ago`
+        : `no connection to ${st.url}: ${st.error || "waiting"}`;
     const all = d.ues;
     const now = Date.now() / 1000;
     const stale = all.filter((u) => !u.active && now - u.last_seen > UE_STALE_SECONDS);
@@ -409,42 +423,42 @@ const Ran = {
     ues.sort((a, b) => (b.active - a.active) || (b.last_seen - a.last_seen));
     const ob = $("#ran-old");
     ob.classList.toggle("hidden", !stale.length);
-    ob.textContent = this.showOld ? `Esconder ${stale.length} antigos` : `Mostrar ${stale.length} antigos`;
+    ob.textContent = this.showOld ? `Hide ${stale.length} old` : `Show ${stale.length} old`;
     $("#ran-ident-note").classList.toggle("hidden", d.ident_source || !all.length);
-    // seletor de UE
+    // UE selector
     const sel = $("#ran-ue");
     const ids = ues.map((u) => u.id);
     if (!ids.includes(this.selected)) this.selected = (ues.find((u) => u.active) || ues[0] || {}).id || null;
-    const optsHtml = ues.map((u) => `<option value="${esc(u.id)}" ${u.id === this.selected ? "selected" : ""}>${esc(ueTitle(u))} · RNTI ${esc(u.rnti)}${u.active ? "" : " (inativo)"}</option>`).join("");
-    // só recria a lista quando ela muda e não está aberta (recriar uma lista aberta fecha a lista)
-    if (this._opts !== optsHtml && document.activeElement !== sel) { sel.innerHTML = optsHtml || "<option>sem UEs</option>"; this._opts = optsHtml; }
-    // cartões dos UEs
+    const optsHtml = ues.map((u) => `<option value="${esc(u.id)}" ${u.id === this.selected ? "selected" : ""}>${esc(ueTitle(u))} · RNTI ${esc(u.rnti)}${u.active ? "" : " (inactive)"}</option>`).join("");
+    // rebuild the list only when it changes and is not open (rebuilding an open list closes it)
+    if (this._opts !== optsHtml && document.activeElement !== sel) { sel.innerHTML = optsHtml || "<option>no UEs</option>"; this._opts = optsHtml; }
+    // UE cards
     $("#ran-uecards").innerHTML = ues.map((u) => {
       const l = u.last || {};
       return `<div class="uecard ${u.id === this.selected ? "sel" : ""} ${u.active ? "" : "inactive"}" data-id="${esc(u.id)}">
-        <div class="h"><span class="t" title="${esc((u.ident && u.ident.imsi) || "")}">${esc(ueTitle(u))}</span><span class="muted">${u.active ? "ativo" : "há " + ago(u.last_seen)}</span></div>
+        <div class="h"><span class="t" title="${esc((u.ident && u.ident.imsi) || "")}">${esc(ueTitle(u))}</span><span class="muted">${u.active ? "active" : ago(u.last_seen) + " ago"}</span></div>
         <div class="id">${ueKindTag(u)} ${ueIps(u) ? `<span class="ip">${esc(ueIps(u))}</span>` : ""}
           <span class="muted">RNTI ${esc(u.rnti)}${u.ident && u.ident.name && u.ident.imsi ? " · …" + esc(u.ident.imsi.slice(-6)) : ""}</span></div>
         <div class="m"><div><span>DL</span> ${fmtRate(l.dl_brate)}</div><div><span>UL</span> ${fmtRate(l.ul_brate)}</div><div><span>CQI</span> ${fmt(l.cqi, 0)}</div>
-        <div><span>MCS</span> ${fmt(l.dl_mcs, 0)}/${fmt(l.ul_mcs, 0)}</div><div title="últimos 10 s"><span>BLER</span> ${fmt(l.dl_bler_win)}/${fmt(l.ul_bler_win)}%</div><div><span>SNR</span> ${fmt(l.pusch_snr_db)}</div></div></div>`;
-    }).join("") || `<div class="empty">Nenhum UE visto pelo gNB nesta janela.</div>`;
+        <div><span>MCS</span> ${fmt(l.dl_mcs, 0)}/${fmt(l.ul_mcs, 0)}</div><div title="last 10 s"><span>BLER</span> ${fmt(l.dl_bler_win)}/${fmt(l.ul_bler_win)}%</div><div><span>SNR</span> ${fmt(l.pusch_snr_db)}</div></div></div>`;
+    }).join("") || `<div class="empty">No UE seen by the gNB in this window.</div>`;
 
     const mbps = (v) => fmt(v, 1);
-    // célula
+    // cell
     const cell = d.cells[0];
     Charts.make("c-cell-tput", [{ label: "DL", fill: true, fmt: mbps }, { label: "UL", color: "#6b7280", fill: true, fmt: mbps }]);
     Charts.set("c-cell-tput", cell ? cols(cell.series, ["dl_brate", "ul_brate"], { dl_brate: 1e-6, ul_brate: 1e-6 }) : [[], [], []]);
     Charts.make("c-cell-prb", [{ label: "PDSCH (DL)", dec: 0 }, { label: "PUSCH (UL)", color: "#6b7280", dec: 0 }]);
     Charts.set("c-cell-prb", cell ? cols(cell.series, ["pdsch_prbs", "pusch_prbs"]) : [[], [], []]);
-    // por UE
+    // per UE
     const ueSeries = ues.map((u, i) => ({ label: ueShort(u), color: colorFor(i), fmt: mbps }));
     Charts.make("c-ue-dl", ueSeries);
     Charts.set("c-ue-dl", align(ues.map((u) => u.series), "dl_brate", 1e-6));
     Charts.make("c-ue-ul", ueSeries);
     Charts.set("c-ue-ul", align(ues.map((u) => u.series), "ul_brate", 1e-6));
-    // UE selecionado
+    // selected UE
     const u = ues.find((x) => x.id === this.selected);
-    $("#ran-sel").textContent = u ? `${ueTitle(u)}${ueIps(u) ? " · " + ueIps(u) : ""} · RNTI ${u.rnti} · visto desde ${new Date(u.first_seen * 1000).toLocaleTimeString("pt-BR")}` : "";
+    $("#ran-sel").textContent = u ? `${ueTitle(u)}${ueIps(u) ? " · " + ueIps(u) : ""} · RNTI ${u.rnti} · seen since ${new Date(u.first_seen * 1000).toLocaleTimeString(I18N.locale)}` : "";
     const s = u ? u.series : { t: [] };
     Charts.make("c-bler", [{ label: "BLER DL" }, { label: "BLER UL", color: "#6b7280" }], { spanGaps: true, scales: { y: { range: [0, 100] } } });
     Charts.set("c-bler", cols(s, ["dl_bler", "ul_bler"]));
@@ -459,16 +473,16 @@ const Ran = {
     Charts.set("c-bs", cols(s, ["bsr", "dl_bs"]));
     Charts.make("c-ta", [{ label: "TA", dec: 0 }, { label: "PHR", color: "#6b7280", scale: "y2", dec: 0 }], { y2: true });
     Charts.set("c-ta", cols(s, ["ta_ns", "last_phr"]));
-    // escalonador
-    Charts.make("c-lat", [{ label: "média (célula)", dec: 0 }, { label: "máx (célula)", color: "#6b7280", dec: 0 }, { label: "MAC DL média", color: "#0ea5e9", dec: 1 }]);
+    // scheduler
+    Charts.make("c-lat", [{ label: "mean (cell)", dec: 0 }, { label: "max (cell)", color: "#6b7280", dec: 0 }, { label: "MAC DL mean", color: "#0ea5e9", dec: 1 }]);
     const cs = cell ? cell.series : { t: [] };
     const la = align([cs, cs, d.du.series], "avg_latency");
     la[2] = align([cs, cs, d.du.series], "max_latency")[2];
     la[3] = align([cs, cs, d.du.series], "mac_dl_avg_latency_us")[3];
     Charts.set("c-lat", la);
-    Charts.make("c-fail", [{ label: "HARQ DL atrasado", dec: 0 }, { label: "HARQ UL atrasado", color: "#6b7280", dec: 0 },
-      { label: "PDCCH DL falho", color: "#f59e0b", dec: 0 }, { label: "PDCCH UL falho", color: "#7c3aed", dec: 0 },
-      { label: "UCI falho", color: "#ef4444", dec: 0 }]);
+    Charts.make("c-fail", [{ label: "late DL HARQ", dec: 0 }, { label: "late UL HARQ", color: "#6b7280", dec: 0 },
+      { label: "failed DL PDCCH", color: "#f59e0b", dec: 0 }, { label: "failed UL PDCCH", color: "#7c3aed", dec: 0 },
+      { label: "failed UCI", color: "#ef4444", dec: 0 }]);
     Charts.set("c-fail", cell ? cols(cell.series, ["late_dl_harqs", "late_ul_harqs", "failed_dl_pdcch", "failed_ul_pdcch", "failed_uci_allocs"]) : [[], [], [], [], [], []]);
   },
   showOld: false,
@@ -477,13 +491,13 @@ const Ran = {
     this.selected = id;
     store.set("ran.ue", id);
     $("#ran-ue").value = id;
-    if (this.last) this.render(this.last);   // mostra na hora com os dados que já temos
+    if (this.last) this.render(this.last);   // show it right away with the data we already have
     else this.refresh();
   },
 };
 $("#ran-ue").addEventListener("change", (e) => { Ran.select(e.target.value); e.target.blur(); });
-// Cartões dos UEs: um ouvinte só, no contêiner, no "pointerdown". Os cartões são recriados a cada 2 s, e um
-// "click" que começa num cartão e termina no cartão novo se perde.
+// UE cards: a single listener on the container, on "pointerdown". The cards are rebuilt every 2 s, and a
+// "click" that starts on one card and ends on the new card is lost.
 $("#ran-uecards").addEventListener("pointerdown", (e) => {
   const c = e.target.closest(".uecard");
   if (c && e.button === 0) Ran.select(c.dataset.id);
@@ -491,7 +505,7 @@ $("#ran-uecards").addEventListener("pointerdown", (e) => {
 $("#ran-window").addEventListener("change", () => { store.set("ran.window", $("#ran-window").value); Ran.refresh(); });
 $("#ran-pause").addEventListener("click", (e) => {
   Ran.paused = !Ran.paused;
-  e.target.textContent = Ran.paused ? "Continuar" : "Pausar";
+  e.target.textContent = Ran.paused ? "Resume" : "Pause";
   e.target.classList.toggle("on", Ran.paused);
   if (!Ran.paused) Ran.refresh();
 });
@@ -514,7 +528,7 @@ const Logs = {
       const saved = store.get("logs.src", null);
       const pods = LAST_OVERVIEW.pods;
       if (saved && saved.kind === "pod") {
-        // pod pode ter sido recriado (nome novo): procura pelo mesmo papel (label) e contêiner
+        // the pod may have been recreated (new name): look for the same role (label) and container
         const p = pods.find((p) => p.name === saved.pod) ||
           pods.find((p) => p.label === saved.plabel && p.containers.includes(saved.container));
         if (p) {
@@ -531,7 +545,7 @@ const Logs = {
     const pods = (LAST_OVERVIEW && LAST_OVERVIEW.pods) || [];
     const core = pods.filter((p) => (p.group || "core") === "core");
     const groups = {};
-    pods.filter((p) => (p.group || "core") !== "core").forEach((p) => (groups[p.instance || "outros"] ||= []).push(p));
+    pods.filter((p) => (p.group || "core") !== "core").forEach((p) => (groups[p.instance || "others"] ||= []).push(p));
     const item = (p, c) => {
       const nm = nfInfo(p)[0];
       const label = p.containers.length > 1 ? `${nm} · ${c}` : nm;
@@ -546,7 +560,7 @@ const Logs = {
     $("#log-sources").innerHTML =
       `<div class="grp">RAN</div><button class="src ${gnbAct}" data-gnb="1"><span>${esc(CONFIG.gnb_name || "gNB")} (real)</span><span class="dot ${gdot}"></span></button>` +
       `<div class="grp">Core 5G (${esc(CONFIG.core_name || "Open5GS")})</div>` + core.flatMap((p) => p.containers.map((c) => item(p, c))).join("") +
-      Object.entries(groups).map(([g, ps]) => `<div class="grp">${esc(g === "ueransim" ? "UERANSIM (simulador)" : g)}</div>` + ps.flatMap((p) => p.containers.map((c) => item(p, c))).join("")).join("");
+      Object.entries(groups).map(([g, ps]) => `<div class="grp">${esc(g === "ueransim" ? "UERANSIM (simulator)" : g)}</div>` + ps.flatMap((p) => p.containers.map((c) => item(p, c))).join("")).join("");
     $$("#log-sources .src").forEach((b) => b.addEventListener("click", () => {
       if (b.dataset.gnb) this.open({ kind: "gnb", label: (CONFIG.gnb_name || "gNB") + " (real)" });
       else this.open({ kind: "pod", pod: b.dataset.pod, container: b.dataset.c, component: b.dataset.comp, plabel: b.dataset.plabel, label: b.dataset.label });
@@ -567,13 +581,13 @@ const Logs = {
     const view = $("#log-view");
     if (src.kind === "gnb") {
       if (!CONFIG.gnb_log_ingest) {
-        this.sys("O log do gNB real chega por um agente no servidor do gNB (dashboard/agent/gnb-log-agent.py).");
-        this.sys("Ingestão desligada: defina DASHBOARD_INGEST_TOKEN no config.env e instale o agente (ver docs/componentes/painel.md).");
+        this.sys("The real gNB log arrives through an agent on the gNB server (dashboard/agent/gnb-log-agent.py).");
+        this.sys("Ingestion disabled: set DASHBOARD_INGEST_TOKEN in config.env and install the agent (see docs/components/dashboard.md).");
         return;
       }
       if ($("#log-follow").checked) return this.follow("api/gnb-log/stream?tail=" + tail);
       const d = await api("api/gnb-log?tail=" + tail);
-      if (!d.lines.length) this.sys("Nenhuma linha recebida do agente ainda.");
+      if (!d.lines.length) this.sys("No line received from the agent yet.");
       this.add(d.lines);
       return;
     }
@@ -582,7 +596,7 @@ const Logs = {
     try {
       const d = await api("api/logs?" + q);
       this.add(d.lines);
-    } catch (e) { this.sys("Erro: " + e.message); }
+    } catch (e) { this.sys("Error: " + e.message); }
     view.scrollTop = view.scrollHeight;
   },
   follow(url) {
@@ -592,7 +606,7 @@ const Logs = {
     es.addEventListener("status", (e) => this.sys(e.data));
     es.onerror = () => {
       if (this.es !== es) return;
-      this.sys("conexão perdida; tentando de novo…");
+      this.sys("connection lost; retrying…");
     };
   },
   schedule() {
@@ -629,10 +643,10 @@ const Logs = {
     const m = /^(\d{4}-\d\d-\d\dT[\d:.]+Z) (.*)$/.exec(l);
     if (m) {
       rest = m[2];
-      // Se a linha já tem horário próprio (Open5GS: "10/21 19:02:13.271:"), não repete o do Kubernetes
-      // free5GC: "2026-10-22T20:25:09.5Z [INFO]..." (também já tem horário)
+      // If the line already has its own time (Open5GS: "10/21 19:02:13.271:"), do not repeat the Kubernetes one
+      // free5GC: "2026-10-22T20:25:09.5Z [INFO]..." (also has its own time)
       if (/^\d{4}-\d\d-\d\dT[\d:.]+Z /.test(rest)) rest = rest.replace(/^\S+ /, "");
-      if (!/^\d\d\/\d\d \d\d:\d\d:\d\d/.test(rest)) ts = new Date(m[1]).toLocaleTimeString("pt-BR", { hour12: false }) + "." + (m[1].split(".")[1] || "000").slice(0, 3) + " ";
+      if (!/^\d\d\/\d\d \d\d:\d\d:\d\d/.test(rest)) ts = new Date(m[1]).toLocaleTimeString(I18N.locale, { hour12: false }) + "." + (m[1].split(".")[1] || "000").slice(0, 3) + " ";
     }
     let body = esc(rest);
     if (this.filterRe) {
@@ -648,14 +662,14 @@ const Logs = {
     if (full || !newLines) {
       const shown = this.lines.filter((l) => this.passes(l));
       view.innerHTML = shown.slice(-MAX_LINES).map((l) => this.fmtLine(l)).join("\n");
-      $("#log-count").textContent = `${shown.length} de ${this.lines.length} linhas`;
+      $("#log-count").textContent = `${shown.length} of ${this.lines.length} lines`;
     } else {
       const shown = newLines.filter((l) => this.passes(l));
       if (shown.length) view.insertAdjacentHTML("beforeend", (view.innerHTML ? "\n" : "") + shown.map((l) => this.fmtLine(l)).join("\n"));
-      // poda o DOM quando passa do limite
+      // trim the DOM when it goes over the limit
       if (view.childElementCount > MAX_LINES * 2.2) return this.render(true);
       const total = this.lines.filter((l) => this.passes(l)).length;
-      $("#log-count").textContent = `${total} de ${this.lines.length} linhas`;
+      $("#log-count").textContent = `${total} of ${this.lines.length} lines`;
     }
     if (atBottom || full) view.scrollTop = view.scrollHeight;
   },
@@ -687,7 +701,7 @@ $("#log-reload").addEventListener("click", () => Logs.src && Logs.open(Logs.src)
 $("#log-download").addEventListener("click", () => Logs.download());
 
 // ---------------------------------------------------------------------------
-//  Core (processos e tráfego do core ativo; Prometheus só no Open5GS)
+//  Core (processes and traffic of the active core; Prometheus only on Open5GS)
 // ---------------------------------------------------------------------------
 const Core = {
   view: "metrics",
@@ -717,18 +731,18 @@ const Core = {
     const memTot = nfs.reduce((a, x) => a + x.rss, 0);
     const errs = (c.amf_error || 0) + (c.smf_error || 0) + (c.upf_error || 0);
     const k = [
-      { l: "gNBs conectados (N2)", v: lg.nof_gnbs ?? lg.gnbs?.length ?? "–", s: (lg.gnbs || []).map((g) => g.addr).join(", ") },
-      { l: "UEs registrados", v: lg.ues_registered ?? "–", s: `${lg.ues_total ?? 0} assinantes vistos` },
-      { l: "Sessões PDU", v: lg.sessions ?? "–", s: "abertas no SMF" },
-      { l: "Downlink agora", v: fmtRate(sum(n6, "tx_bps")), s: "saindo do UPF para os UEs" },
-      { l: "Uplink agora", v: fmtRate(sum(n6, "rx_bps")), s: "vindo dos UEs" },
-      { l: "CPU do core", v: fmt(cpuTot, 0) + "%", s: `${nfs.length} processos · ${fmtBytes(memTot)} de RAM` },
-      { l: "Erros nos logs", v: errs, s: "AMF/SMF/UPF desde que iniciaram", cls: errs ? "warn" : "ok" },
+      { l: "Connected gNBs (N2)", v: lg.nof_gnbs ?? lg.gnbs?.length ?? "–", s: (lg.gnbs || []).map((g) => g.addr).join(", ") },
+      { l: "Registered UEs", v: lg.ues_registered ?? "–", s: `${lg.ues_total ?? 0} subscribers seen` },
+      { l: "PDU sessions", v: lg.sessions ?? "–", s: "open on the SMF" },
+      { l: "Downlink now", v: fmtRate(sum(n6, "tx_bps")), s: "from the UPF to the UEs" },
+      { l: "Uplink now", v: fmtRate(sum(n6, "rx_bps")), s: "from the UEs" },
+      { l: "Core CPU", v: fmt(cpuTot, 0) + "%", s: `${nfs.length} processes · ${fmtBytes(memTot)} of RAM` },
+      { l: "Errors in the logs", v: errs, s: "AMF/SMF/UPF since they started", cls: errs ? "warn" : "ok" },
     ];
     $("#core-live-kpis").innerHTML = k.map((x) => `<div class="kpi ${x.cls || ""}"><div class="label">${esc(x.l)}</div>
       <div class="value">${esc(x.v)}</div><div class="sub">${esc(x.s || "")}</div></div>`).join("");
-    $("#core-live-status").textContent = d.enabled === false ? "leitura do host desligada" : d.error ? "erro: " + d.error : "atualiza a cada 2 s · sem Prometheus, sem reiniciar o core";
-    // N6 por DNN
+    $("#core-live-status").textContent = d.enabled === false ? "host reading disabled" : d.error ? "error: " + d.error : "updates every 2 s · no Prometheus, no core restart";
+    // N6 per DNN
     const tr = d.traffic || { t: [] };
     const tuns = Object.keys(tr).filter((x) => /^(ogstun|upfgtp)/.test(x) && x.endsWith("_tx")).map((x) => x.slice(0, -3)).sort();
     const dnn = (t) => (d.devs || {})[t] || t;
@@ -740,18 +754,18 @@ const Core = {
       n6cols.push((tr[t + "_tx"] || []).map((v) => (v == null ? null : v / 1e6)));
       n6cols.push((tr[t + "_rx"] || []).map((v) => (v == null ? null : v / 1e6)));
     });
-    Charts.make("c-upf-n6", n6s.length ? n6s : [{ label: "sem túneis" }]);
+    Charts.make("c-upf-n6", n6s.length ? n6s : [{ label: "no tunnels" }]);
     Charts.set("c-upf-n6", n6s.length ? n6cols : [tr.t, tr.t.map(() => null)]);
-    Charts.make("c-upf-n3", [{ label: "DL para o gNB", fill: true, fmt: mb }, { label: "UL do gNB", color: "#6b7280", fill: true, fmt: mb }]);
+    Charts.make("c-upf-n3", [{ label: "DL to the gNB", fill: true, fmt: mb }, { label: "UL from the gNB", color: "#6b7280", fill: true, fmt: mb }]);
     Charts.set("c-upf-n3", [tr.t, (tr.net1_tx || []).map((v) => (v == null ? null : v / 1e6)), (tr.net1_rx || []).map((v) => (v == null ? null : v / 1e6))]);
     const cpu = d.cpu || { t: [] };
     const names = Object.keys(cpu).filter((x) => x !== "t").sort();
     Charts.make("c-nf-cpu", names.map((n, i) => ({ label: n.toUpperCase(), color: colorFor(i), dec: 1 })));
     Charts.set("c-nf-cpu", [cpu.t, ...names.map((n) => cpu[n])]);
-    // tabelas
+    // tables
     const ce = (nf, l) => c[nf + "_" + l];
-    $("#core-nfs").innerHTML = `<tr><th>Função</th><th class="num">CPU</th><th class="num">Memória</th><th class="num">Threads</th>
-      <th class="num">PID</th><th class="num">Erros / avisos</th></tr>` + nfs.map((x) => {
+    $("#core-nfs").innerHTML = `<tr><th>Function</th><th class="num">CPU</th><th class="num">Memory</th><th class="num">Threads</th>
+      <th class="num">PID</th><th class="num">Errors / warnings</th></tr>` + nfs.map((x) => {
         const info = NF_INFO[x.nf] || [x.nf.toUpperCase(), ""];
         const e = ce(x.nf, "error"), w = ce(x.nf, "warning");
         return `<tr><td><b>${esc(info[0])}</b> <span class="muted">${esc(info[1])}</span></td><td class="num">${fmt(x.cpu, 1)}%</td>
@@ -759,48 +773,48 @@ const Core = {
           <td class="num">${e == null && w == null ? '<span class="muted">–</span>'
             : `<span class="tag ${e ? "err" : "ok"}">${e || 0}</span> <span class="tag ${w ? "warn" : "ok"}">${w || 0}</span>`}</td></tr>`;
       }).join("");
-    $("#core-ifaces").innerHTML = `<tr><th>Interface</th><th>Papel</th><th class="num">rx</th><th class="num">tx</th><th class="num">Total rx / tx</th></tr>` +
+    $("#core-ifaces").innerHTML = `<tr><th>Interface</th><th>Role</th><th class="num">rx</th><th class="num">tx</th><th class="num">Total rx / tx</th></tr>` +
       ifs.map((x) => `<tr><td><code>${esc(x.iface)}</code></td><td class="muted">${esc(x.role)}</td>
         <td class="num">${fmtRate(x.rx_bps)}</td><td class="num">${fmtRate(x.tx_bps)}</td>
         <td class="num">${fmtBytes(x.rx_bytes)} / ${fmtBytes(x.tx_bytes)}</td></tr>`).join("");
   },
   async refresh() {
-    if (this.view === "webui") return;   // a WebUI se atualiza sozinha; não recarregar o iframe
+    if (this.view === "webui") return;   // the WebUI refreshes itself; do not reload the iframe
     await this.live();
     const d = await api("api/core/metrics?window=" + $("#core-window").value);
     $("#core-disabled").classList.toggle("hidden", d.enabled || CONFIG.core_kind !== "open5gs");
     $("#core-enabled").classList.toggle("hidden", !d.enabled);
     if (!d.enabled) return;
     const nfs = d.nfs;
-    $("#core-status").textContent = "coleta a cada ~5 s · " + Object.entries(nfs).map(([k, v]) => `${k.toUpperCase()}: ${v.error ? "erro" : "ok"}`).join(" · ");
+    $("#core-status").textContent = "collected every ~5 s · " + Object.entries(nfs).map(([k, v]) => `${k.toUpperCase()}: ${v.error ? "error" : "ok"}`).join(" · ");
     const L = (nf, name) => {
       const m = nfs[nf] && nfs[nf].latest[name];
       return m ? m.reduce((a, x) => a + x.value, 0) : null;
     };
     const k = [
       { l: "gNBs (AMF)", v: L("amf", "gnb") },
-      { l: "UEs no RAN (AMF)", v: L("amf", "ran_ue") },
-      { l: "Sessões AMF", v: L("amf", "amf_session") },
-      { l: "UEs ativos (SMF)", v: L("smf", "ues_active") },
-      { l: "Sessões PDU (SMF)", v: L("smf", "fivegs_smffunction_sm_sessionnbr") },
-      { l: "Sessões N4 (UPF)", v: L("upf", "fivegs_upffunction_upf_sessionnbr") },
+      { l: "UEs in the RAN (AMF)", v: L("amf", "ran_ue") },
+      { l: "AMF sessions", v: L("amf", "amf_session") },
+      { l: "Active UEs (SMF)", v: L("smf", "ues_active") },
+      { l: "PDU sessions (SMF)", v: L("smf", "fivegs_smffunction_sm_sessionnbr") },
+      { l: "N4 sessions (UPF)", v: L("upf", "fivegs_upffunction_upf_sessionnbr") },
     ];
     $("#core-kpis").innerHTML = k.map((x) => `<div class="kpi"><div class="label">${esc(x.l)}</div><div class="value">${x.v == null ? "–" : esc(x.v)}</div></div>`).join("");
-    // Tráfego do UPF: taxa a partir dos contadores de volume do N3
+    // UPF traffic: rate from the N3 volume counters
     const s = (nfs.upf && nfs.upf.series) || { t: [] };
     const rate = (name) => {
       const v = s[name] || [];
       return s.t.map((t, i) => (i && v[i] != null && v[i - 1] != null && t > s.t[i - 1] ? Math.max(0, (v[i] - v[i - 1]) * 8 / (t - s.t[i - 1]) / 1e6) : null));
     };
-    Charts.make("c-upf", [{ label: "Uplink (entra no UPF)" }, { label: "Downlink (sai do UPF)", color: "#6b7280" }]);
+    Charts.make("c-upf", [{ label: "Uplink (into the UPF)" }, { label: "Downlink (out of the UPF)", color: "#6b7280" }]);
     Charts.set("c-upf", [s.t, rate("fivegs_ep_n3_gtp_indatavolumeqosleveln3upf"), rate("fivegs_ep_n3_gtp_outdatavolumeqosleveln3upf")]);
     const ss = (nf) => (nfs[nf] && nfs[nf].series) || { t: [] };
-    Charts.make("c-core-counts", [{ label: "ran_ue (AMF)", dec: 0 }, { label: "sessões (SMF)", color: "#6b7280", dec: 0 }, { label: "sessões N4 (UPF)", color: "#0ea5e9", dec: 0 }]);
+    Charts.make("c-core-counts", [{ label: "ran_ue (AMF)", dec: 0 }, { label: "sessions (SMF)", color: "#6b7280", dec: 0 }, { label: "N4 sessions (UPF)", color: "#0ea5e9", dec: 0 }]);
     const a = align([ss("amf"), ss("smf"), ss("upf")], "ran_ue");
     const b = align([ss("amf"), ss("smf"), ss("upf")], "fivegs_smffunction_sm_sessionnbr");
     const c = align([ss("amf"), ss("smf"), ss("upf")], "fivegs_upffunction_upf_sessionnbr");
     Charts.set("c-core-counts", [a[0], a[1], b[2], c[3]]);
-    // tabela
+    // table
     const f = ($("#core-filter").value || "").toLowerCase();
     const rows = [];
     for (const [nf, v] of Object.entries(nfs)) {
@@ -810,14 +824,14 @@ const Core = {
         for (const x of vals) rows.push(`<tr><td>${nf.toUpperCase()}</td><td>${esc(name)}</td><td class="muted">${esc(x.labels)}</td><td class="num">${esc(x.value)}</td></tr>`);
       }
     }
-    $("#core-table").innerHTML = `<tr><th>NF</th><th>Métrica</th><th>Rótulos</th><th class="num">Valor</th></tr>` + rows.join("");
+    $("#core-table").innerHTML = `<tr><th>NF</th><th>Metric</th><th>Labels</th><th class="num">Value</th></tr>` + rows.join("");
   },
 };
 $("#core-window").addEventListener("change", () => Core.refresh());
 $("#core-filter").addEventListener("input", () => Core.refresh());
 
 // ---------------------------------------------------------------------------
-//  Início
+//  Startup
 // ---------------------------------------------------------------------------
 (async function init() {
   applyTheme(store.get("theme", null));
@@ -825,13 +839,13 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
   if (store.get("logs.wrap", false)) { $("#log-wrap").checked = true; $("#log-view").classList.add("wrap"); }
   try {
     await reloadConfig(true);
-  } catch (e) { banner("Falha ao carregar a configuração: " + e.message); }
+  } catch (e) { banner("Failed to load the configuration: " + e.message); }
   const start = (location.hash || "").slice(1) || store.get("tab", "overview");
   showTab(["overview", "ran", "logs", "core", "ru", "control", "hosts", "history", "docs", "settings"].includes(start) ? start : "overview");
   setInterval(refreshNow, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();
-// Configuração do painel; recarregada quando o core ativo muda (os textos e a WebUI acompanham)
+// Dashboard configuration; reloaded when the active core changes (texts and WebUI follow)
 async function reloadConfig(first = false) {
   if (reloadConfig._busy) return;
   reloadConfig._busy = true;
@@ -849,14 +863,14 @@ async function reloadConfig(first = false) {
       Hist.refreshHeader();
       if (CONFIG.webui_port && store.get("core.view", "metrics") === "webui") Core.setView("webui");
     } else if (prev && prev !== CONFIG.core) {
-      // outro core: a WebUI/WebConsole e a fonte de log mudam
+      // another core: the WebUI/WebConsole and the log source change
       $("#webui-frame").removeAttribute("src");
       if (!CONFIG.webui_port) Core.setView("metrics");
       else if (Core.view === "webui") $("#webui-frame").src = Core.webuiUrl();
       if (Logs.src && Logs.src.kind === "pod") { Logs.stop(); Logs.src = null; store.set("logs.src", null); if (currentTab === "logs") Logs.ensureSources(); }
     }
     $("#netname").textContent = CONFIG.network_name ? "· " + CONFIG.network_name : "";
-    $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · InnovaNetwork · core ativo: ${CONFIG.core_name} (namespace ${CONFIG.namespace}) · histórico em memória: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "desligado"}`;
+    $("#footer").textContent = `Innova Center Dashboard v${CONFIG.version || "?"} · InnovaNetwork · active core: ${CONFIG.core_name} (namespace ${CONFIG.namespace}) · in-memory history: ${Math.round(CONFIG.history_seconds / 60)} min · gNB: ${CONFIG.gnb_url || "disabled"}`;
   } finally { reloadConfig._busy = false; }
 }
 $("#ran-old").addEventListener("click", () => { Ran.showOld = !Ran.showOld; Ran.refresh(); });

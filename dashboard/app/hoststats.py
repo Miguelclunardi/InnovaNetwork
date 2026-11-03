@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  dashboard/app/hoststats.py — CPU, memória, temperaturas, rede, discos e
-#  processos de uma máquina, lidos de /proc e /sys (só leitura, só stdlib).
+#  dashboard/app/hoststats.py — CPU, memory, temperatures, network, disks and
+#  processes of a machine, read from /proc and /sys (read only, stdlib only).
 #
-#  Usado de dois jeitos:
-#    - pelo painel (server.py), lendo a máquina do core montada em /host;
-#    - por SSH numa máquina remota SEM instalar nada lá: o agente da máquina do
-#      core manda este arquivo pela entrada padrão:
+#  Used in two ways:
+#    - by the dashboard (server.py), reading the core machine mounted at /host;
+#    - over SSH on a remote machine WITHOUT installing anything there: the agent on
+#      the core machine sends this file on standard input:
 #        ssh host nice -n 19 python3 - --loop 2 < hoststats.py
-#      e recebe uma linha JSON a cada 2 s.
+#      and gets one JSON line every 2 s.
 # =============================================================================
 import json
 import os
@@ -29,7 +29,7 @@ def _read(path, default=""):
 
 class Collector:
     def __init__(self, root="/", fsroot=None):
-        # root: onde estão proc/ e sys/ da máquina; fsroot: onde está o / dela (discos, /etc)
+        # root: where the machine's proc/ and sys/ are; fsroot: where its / is (disks, /etc)
         self.root = root.rstrip("/") or ""
         self.fsroot = (root if fsroot is None else fsroot).rstrip("/") or ""
         self.proc = self.root + "/proc"
@@ -37,7 +37,7 @@ class Collector:
         self.prev = None
         self.static = self._static()
 
-    # ----- informações fixas
+    # ----- fixed information
     def _static(self):
         model, mhz = "", []
         for line in _read(self.proc + "/cpuinfo").splitlines():
@@ -153,7 +153,7 @@ class Collector:
                         "pct": round(100.0 * used / total, 1)})
         return out[:16]
 
-    # ----- amostra (com taxas desde a anterior)
+    # ----- sample (with rates since the previous one)
     def sample(self):
         now = time.time()
         cpu, procs, net = self._cpu_times(), self._procs(), self._net()

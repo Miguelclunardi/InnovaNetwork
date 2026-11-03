@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  dashboard/agent/host-agent.py — CPU/memória/temperatura/rede/discos/processos
-#  das outras máquinas do sistema para o painel (aba Máquinas).
+#  dashboard/agent/host-agent.py — CPU/memory/temperature/network/disks/processes
+#  of the other machines of the system for the dashboard (Machines tab).
 #
-#  Roda na máquina do core. Para cada máquina abre UMA sessão SSH e manda o
-#  coletor (hoststats.py) pela entrada padrão — nada é instalado na máquina
-#  remota; lá roda só `nice -n 19 python3 -` lendo /proc e /sys a cada 2 s.
+#  Runs on the core machine. For each machine it opens ONE SSH session and sends the
+#  collector (hoststats.py) on standard input — nothing is installed on the remote
+#  machine; only `nice -n 19 python3 -` runs there, reading /proc and /sys every 2 s.
 #
-#  Uso:
+#  Usage:
 #    DASHBOARD_URL=http://127.0.0.1:30998 INGEST_TOKEN=... \
 #    HOSTS="innovaserver|innovaserver@10.10.0.1|gNB OCUDU + LiteOn" \
-#      python3 host-agent.py /caminho/hoststats.py
-#  HOSTS: "nome|usuario@host|papel" separados por ";".
+#      python3 host-agent.py /path/hoststats.py
+#  HOSTS: "name|user@host|role" separated by ";".
 # =============================================================================
 import json
 import os
@@ -51,21 +51,21 @@ def follow(name, target, role, script):
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             p.stdin.write(script)
             p.stdin.close()
-            log(name, "conectado", target)
+            log(name, "connected", target)
             for line in p.stdout:
                 try:
                     post({"name": name, "role": role, "sample": json.loads(line)})
                 except ValueError:
                     continue
                 except (urllib.error.URLError, OSError) as e:
-                    log(name, "painel indisponível:", e)
+                    log(name, "dashboard unavailable:", e)
             err = p.stderr.read().decode("utf-8", "replace").strip()[-300:]
             p.wait()
-            log(name, "ssh terminou (código %s): %s" % (p.returncode, err))
+            log(name, "ssh ended (exit code %s): %s" % (p.returncode, err))
         except OSError as e:
             err = str(e)
         try:
-            post({"name": name, "role": role, "error": "sem conexão SSH com %s: %s" % (target, err or "encerrada")})
+            post({"name": name, "role": role, "error": "no SSH connection to %s: %s" % (target, err or "closed")})
         except (urllib.error.URLError, OSError):
             pass
         backoff = 2 if time.time() - t0 > 60 else min(backoff * 2, 60)
@@ -75,7 +75,7 @@ def follow(name, target, role, script):
 def main():
     hosts = [h.split("|") for h in os.environ.get("HOSTS", "").split(";") if h.count("|") == 2]
     if len(sys.argv) != 2 or not URL or not TOKEN or not hosts:
-        print("uso: DASHBOARD_URL=... INGEST_TOKEN=... HOSTS='nome|usuario@host|papel;...' host-agent.py hoststats.py",
+        print("usage: DASHBOARD_URL=... INGEST_TOKEN=... HOSTS='name|user@host|role;...' host-agent.py hoststats.py",
               file=sys.stderr)
         sys.exit(2)
     with open(sys.argv[1], "rb") as f:

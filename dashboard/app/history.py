@@ -1,14 +1,14 @@
 # =============================================================================
-#  dashboard/app/history.py — histórico persistente das métricas (DASHBOARD_PERSIST).
+#  dashboard/app/history.py — persistent metrics history (DASHBOARD_PERSIST).
 #
-#  SQLite (biblioteca padrão) num diretório do host. Cada série (célula, UE, máquina,
-#  CPU dos NFs, tráfego do UPF...) é guardada em blocos de ~60 s, com resolução cheia
-#  (1 s no rádio), comprimidos com zlib: ~1 KB/s com 2–3 UEs.
-#  Tabelas:
-#    chunks(series, t0, t1, n, meta, data)   amostras {"t": [...], campo: [...]}
-#    events(ts, src, level, msg)             eventos do core (registro, sessão, erros)
+#  SQLite (standard library) in a host folder. Each series (cell, UE, machine,
+#  NF CPU, UPF traffic...) is stored in blocks of ~60 s, at full resolution
+#  (1 s for the radio), compressed with zlib: ~1 KB/s with 2–3 UEs.
+#  Tables:
+#    chunks(series, t0, t1, n, meta, data)   samples {"t": [...], field: [...]}
+#    events(ts, src, level, msg)             core events (registration, session, errors)
 #    experiments(id, name, notes, t_start, t_end, config, setup)
-#  Retenção por dias e por tamanho máximo do arquivo (apaga os blocos mais antigos).
+#  Retention by days and by maximum file size (deletes the oldest blocks).
 # =============================================================================
 import json
 import math
@@ -56,7 +56,7 @@ class History:
         self.meta_fn = meta_fn
         self.log = log
         self.lock = threading.Lock()      # buffers
-        self.dblock = threading.Lock()    # conexão
+        self.dblock = threading.Lock()    # connection
         self.buf = {}
         self.error = None
         self.written = 0
@@ -69,9 +69,9 @@ class History:
         self.db.execute("PRAGMA synchronous = NORMAL")
         self.db.executescript(SCHEMA)
         self.db.commit()
-        # Experimento que ficou aberto quando o painel caiu continua aberto (é só um intervalo de tempo)
+        # An experiment left open when the dashboard went down stays open (it is just a time range)
 
-    # ------------------------------------------------------------------ gravação
+    # ------------------------------------------------------------------ writing
     def add(self, series, t, values):
         vals = {k: v for k, v in values.items() if isinstance(v, (int, float)) and not isinstance(v, bool)
                 and math.isfinite(v)}
@@ -132,7 +132,7 @@ class History:
                 self.db.execute("DELETE FROM chunks WHERE t1 < ?", (time.time() - self.retention,))
                 self.db.execute("DELETE FROM events WHERE t < ?", (time.time() - self.retention,))
             self.db.commit()
-            # Teto de tamanho: apaga os blocos mais antigos (10% de cada vez) até caber
+            # Size cap: delete the oldest blocks (10% at a time) until it fits
             for _ in range(20):
                 if not self.max_bytes or self.size() <= self.max_bytes:
                     break
@@ -159,11 +159,11 @@ class History:
                 self.error = None
             except Exception as e:  # noqa: BLE001
                 self.error = str(e)
-                self.log("histórico: erro ao gravar:", e)
+                self.log("history: write error:", e)
 
-    # ------------------------------------------------------------------ leitura
+    # ------------------------------------------------------------------ reading
     def _load(self, t0, t1, series=None, prefix=None):
-        """{série: {"meta": ..., "rows": [(t, {campo: v})]}} do período, incluindo o que ainda está no buffer."""
+        """{series: {"meta": ..., "rows": [(t, {field: v})]}} of the period, including what is still in the buffer."""
         q = "SELECT series, meta, data FROM chunks WHERE t1 >= ? AND t0 <= ?"
         args = [t0, t1]
         if series:
@@ -206,7 +206,7 @@ class History:
         return [{"series": s, "t0": a, "t1": b, "n": n, "meta": json.loads(m) if m else None} for s, a, b, n, m in res]
 
     def data(self, t0, t1, series=None, prefix=None, points=1200, rel=False):
-        """Séries reamostradas em até `points` baldes: média e máximo de cada campo."""
+        """Series resampled into up to `points` buckets: mean and max of each field."""
         raw = self._load(t0, t1, series, prefix)
         span = max(t1 - t0, 1.0)
         step = max(1.0, span / points)
@@ -246,7 +246,7 @@ class History:
                 "counts": [{"src": s, "level": l, "n": n} for s, l, n in cnt]}
 
     def summary(self, t0, t1):
-        """KPIs do período para comparar setups (calculados com a resolução cheia)."""
+        """KPIs of the period to compare setups (computed at full resolution)."""
         raw = self._load(t0, t1)
 
         def stats(vals, scale=1.0):
@@ -294,7 +294,7 @@ class History:
                     out["ru"]["ok_" + k] = st["avg"] if st else None
             elif s == "energy":
                 out["energy"] = {k: stats(col(k)) for k in ("power", "voltage", "current")}
-        # UEs: junta as séries do mesmo IMSI (o RNTI muda a cada conexão)
+        # UEs: merge the series of the same IMSI (the RNTI changes on every connection)
         merged = {}
         for u in out["ues"]:
             merged.setdefault(u["imsi"] or u["series"], []).append(u)

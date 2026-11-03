@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  dashboard/agent/gnb-log-agent.py — envia o log do gNB real ao painel.
+#  dashboard/agent/gnb-log-agent.py — sends the real gNB log to the dashboard.
 #
-#  Roda na máquina do core (torre2), não na do gNB: o OCUDU fica livre.
-#  Dois modos:
-#    - remoto (padrão do projeto): GNB_LOG_SSH=usuario@host => lê o arquivo do
-#      gNB com `ssh host tail -F` (só leitura) e reconecta sozinho se cair;
-#    - local: sem GNB_LOG_SSH, acompanha um arquivo desta máquina.
-#  Manda lotes de linhas por HTTP POST para o painel a cada ~1 s.
+#  Runs on the core machine, not on the gNB one: OCUDU stays free.
+#  Two modes:
+#    - remote (project default): GNB_LOG_SSH=user@host => reads the gNB file
+#      with `ssh host tail -F` (read only) and reconnects by itself if it drops;
+#    - local: without GNB_LOG_SSH, follows a file of this machine.
+#  Sends batches of lines by HTTP POST to the dashboard every ~1 s.
 #
-#  Uso:
+#  Usage:
 #    DASHBOARD_URL=http://127.0.0.1:30998 INGEST_TOKEN=... GNB_LOG_SSH=innova@10.10.0.1 \
 #      python3 gnb-log-agent.py /tmp/gnb.log
 #
-#  O arquivo é o `log: filename:` da configuração do gNB (OCUDU).
-#  Só biblioteca padrão. Se o painel cair, guarda até MAX_BUFFER linhas.
+#  The file is the `log: filename:` of the gNB (OCUDU) configuration.
+#  Standard library only. If the dashboard is down, it buffers up to MAX_BUFFER lines.
 # =============================================================================
 import collections
 import json
@@ -31,18 +31,18 @@ import urllib.request
 
 URL = os.environ.get("DASHBOARD_URL", "").rstrip("/")
 TOKEN = os.environ.get("INGEST_TOKEN", "")
-SSH = os.environ.get("GNB_LOG_SSH", "").strip()            # usuario@host (vazio = arquivo local)
+SSH = os.environ.get("GNB_LOG_SSH", "").strip()            # user@host (empty = local file)
 SSH_OPTS = os.environ.get("GNB_LOG_SSH_OPTS", "-o BatchMode=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o ConnectTimeout=10")
 SOURCE = os.environ.get("SOURCE_NAME", SSH.split("@")[-1] if SSH else socket.gethostname())
-# Linhas descartadas aqui (na máquina do core), ex.: PHY nível info, que é ~95% do volume.
+# Lines dropped here (on the core machine), e.g. PHY info level, which is ~95% of the volume.
 DROP = os.environ.get("GNB_LOG_DROP", "")
 DROP_RE = re.compile(DROP) if DROP else None
 INTERVAL = float(os.environ.get("INTERVAL", "1"))
 MAX_BATCH = 5000
 MAX_BUFFER = 50000
-START_LINES = int(os.environ.get("START_LINES", "500"))  # linhas do fim do arquivo enviadas ao iniciar
-# Vínculo RNTI -> UE para o painel: ao iniciar (e quando o painel reinicia) procura nos últimos
-# IDENT_BYTES do log as linhas RRC/NGAP que ligam c-rnti e amf_ue. Só leitura, com nice.
+START_LINES = int(os.environ.get("START_LINES", "500"))  # lines from the end of the file sent at start
+# RNTI -> UE link for the dashboard: at start (and when the dashboard restarts) looks in the last
+# IDENT_BYTES of the log for the RRC/NGAP lines that link c-rnti and amf_ue. Read only, with nice.
 IDENT_BYTES = int(os.environ.get("IDENT_BYTES", str(300 * 1024 * 1024)))
 IDENT_GREP = ("tail -c %d %s | grep -a -E 'c-rnti=0x|amf_ue=' | grep -a -E '\\[(RRC|CU-CP|NGAP) *\\]' | tail -n 20000")
 
@@ -52,7 +52,7 @@ def log(*a):
 
 
 def last_lines(path, n):
-    """Últimas n linhas do arquivo (lendo de trás para frente)."""
+    """Last n lines of the file (reading backwards)."""
     with open(path, "rb") as f:
         f.seek(0, os.SEEK_END)
         end = pos = f.tell()
@@ -98,21 +98,21 @@ class Follower:
             self.partial = lines.pop()
             out.extend(lines)
         else:
-            # Arquivo recriado (novo inode) ou truncado: reabre do começo
+            # File recreated (new inode) or truncated: reopen from the start
             try:
                 st = os.stat(self.path)
                 if st.st_ino != self.ino or st.st_size < self.f.tell():
                     self.f.close()
                     self.f, self.partial = None, ""
                     self._open(False)
-                    out.append("--- (agente) arquivo de log recomeçou ---")
+                    out.append("--- (agent) log file restarted ---")
             except FileNotFoundError:
                 pass
         return out
 
 
 class SshFollower:
-    """`ssh host tail -F` numa thread; reconecta com espera crescente."""
+    """`ssh host tail -F` in a thread; reconnects with a growing wait."""
 
     def __init__(self, path):
         self.path = path
@@ -128,18 +128,18 @@ class SshFollower:
             t0 = time.time()
             try:
                 p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
-                log("ssh conectado:", SSH, self.path)
+                log("ssh connected:", SSH, self.path)
                 for raw in p.stdout:
                     with self.lock:
                         self.q.append(raw.decode("utf-8", "replace").rstrip("\n"))
                 err = p.stderr.read().decode("utf-8", "replace").strip()
                 p.wait()
-                log("ssh terminou (código %s): %s" % (p.returncode, err[-300:]))
+                log("ssh ended (exit code %s): %s" % (p.returncode, err[-300:]))
             except OSError as e:
-                log("ssh falhou:", e)
+                log("ssh failed:", e)
             first = False
             with self.lock:
-                self.q.append("--- (agente) conexão com %s caiu; reconectando ---" % SSH)
+                self.q.append("--- (agent) connection to %s lost; reconnecting ---" % SSH)
             backoff = 2 if time.time() - t0 > 60 else min(backoff * 2, 60)
             time.sleep(backoff)
 
@@ -166,7 +166,7 @@ def post(lines, ident_only=False):
 
 
 def ident_bootstrap(path):
-    """Manda ao painel as linhas recentes que ligam RNTI ao UE (não aparecem na tela de log)."""
+    """Sends the dashboard the recent lines that link RNTI to UE (they do not show in the log view)."""
     if IDENT_BYTES <= 0:
         return
     cmd = "nice -n 19 sh -c %s" % shlex.quote(IDENT_GREP % (IDENT_BYTES, shlex.quote(path)))
@@ -176,20 +176,20 @@ def ident_bootstrap(path):
         lines = p.stdout.decode("utf-8", "replace").splitlines()
         if lines:
             post(lines, ident_only=True)
-        log("vínculos RNTI -> UE enviados ao painel: %d linhas" % len(lines))
+        log("RNTI -> UE links sent to the dashboard: %d lines" % len(lines))
     except (subprocess.TimeoutExpired, OSError, urllib.error.URLError) as e:
-        log("busca de vínculos RNTI -> UE falhou:", e)
+        log("RNTI -> UE link lookup failed:", e)
 
 
 def main():
     if len(sys.argv) != 2 or not URL or not TOKEN:
-        print("uso: DASHBOARD_URL=... INGEST_TOKEN=... [GNB_LOG_SSH=usuario@host] gnb-log-agent.py <arquivo-de-log>", file=sys.stderr)
+        print("usage: DASHBOARD_URL=... INGEST_TOKEN=... [GNB_LOG_SSH=user@host] gnb-log-agent.py <log-file>", file=sys.stderr)
         sys.exit(2)
     fol = SshFollower(sys.argv[1]) if SSH else Follower(sys.argv[1])
     buf = collections.deque(maxlen=MAX_BUFFER)
     first, failing = True, False
     last_boot = 0.0
-    log("acompanhando", (SSH + ":" if SSH else "") + sys.argv[1], "->", URL)
+    log("following", (SSH + ":" if SSH else "") + sys.argv[1], "->", URL)
     while True:
         buf.extend(l for l in fol.read(first) if l.strip() and not (DROP_RE and DROP_RE.search(l)))
         first = False
@@ -197,17 +197,17 @@ def main():
             batch = [buf.popleft() for _ in range(min(MAX_BATCH, len(buf)))]
             try:
                 r = post(batch)
-                # Painel sem vínculos (acabou de subir/reiniciar): manda os recentes (no máx. a cada 5 min)
+                # Dashboard without links (just started/restarted): send the recent ones (at most every 5 min)
                 if r.get("ident") == 0 and time.time() - last_boot > 300:
                     last_boot = time.time()
                     threading.Thread(target=ident_bootstrap, args=(sys.argv[1],), daemon=True).start()
                 if failing:
-                    log("painel voltou")
+                    log("dashboard is back")
                     failing = False
             except (urllib.error.URLError, OSError) as e:
                 buf.extendleft(reversed(batch))
                 if not failing:
-                    log("painel indisponível (%s); guardando até %d linhas" % (e, MAX_BUFFER))
+                    log("dashboard unavailable (%s); buffering up to %d lines" % (e, MAX_BUFFER))
                     failing = True
                 break
         time.sleep(INTERVAL)

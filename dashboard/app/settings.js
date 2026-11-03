@@ -1,8 +1,8 @@
-/* Aba Configuração: editar o config.env (senha de administrador) */
+/* Settings tab: edit config.env (administrator password) */
 "use strict";
 
 const Settings = {
-  // sessão de administrador única: o mesmo token serve a todas as abas do painel e do navegador
+  // single administrator session: the same token serves every dashboard tab and browser tab
   token: (() => { try { return localStorage.getItem("icd.admin") || ""; } catch { return ""; } })(),
   data: null,
   edits: {},
@@ -17,7 +17,7 @@ const Settings = {
       body: body ? JSON.stringify(body) : undefined,
     });
     let d = {};
-    try { d = await r.json(); } catch { /* sem corpo */ }
+    try { d = await r.json(); } catch { /* no body */ }
     if (r.status === 401 && d.admin) { this.setToken(""); Admin.changed(); }
     if (!r.ok) { const e = new Error(d.error || r.status + " " + r.statusText); e.data = d; e.status = r.status; throw e; }
     return d;
@@ -27,7 +27,7 @@ const Settings = {
     try {
       t ? localStorage.setItem("icd.admin", t) : localStorage.removeItem("icd.admin");
       sessionStorage.removeItem("icd.admin");
-    } catch { /* sem storage */ }
+    } catch { /* no storage */ }
   },
   msg(html, kind = "") {
     const m = $("#cfg-msg");
@@ -36,7 +36,7 @@ const Settings = {
     m.classList.toggle("hidden", !html);
   },
 
-  // Chamado pelo ciclo de atualização: só carrega uma vez (edição não pode ser atropelada)
+  // Called by the refresh loop: loads only once (an edit in progress must not be overwritten)
   async refresh() {
     if (!this.loaded) await this.load();
   },
@@ -54,21 +54,21 @@ const Settings = {
     this.render();
   },
   async logout() {
-    try { await this.call("POST", "api/admin/logout", {}); } catch { /* já expirou */ }
+    try { await this.call("POST", "api/admin/logout", {}); } catch { /* already expired */ }
     this.setToken("");
     Admin.changed();
   },
 
-  // ---- desenho
+  // ---- rendering
   render() {
     const logged = !!this.token && !!this.data;
     $("#cfg-login").classList.toggle("hidden", logged);
     $("#cfg-main").classList.toggle("hidden", !logged);
     if (!logged) return;
     const d = this.data;
-    $("#cfg-sub").innerHTML = `${d.writable ? "" : '<span class="tag err">arquivo sem permissão de escrita para o painel</span> '}` +
-      (d.revealed ? '<span class="tag warn">segredos visíveis</span>' : "");
-    $("#cfg-reveal").textContent = d.revealed ? "Esconder segredos" : "Mostrar segredos";
+    $("#cfg-sub").innerHTML = `${d.writable ? "" : '<span class="tag err">the dashboard cannot write the file</span> '}` +
+      (d.revealed ? '<span class="tag warn">secrets visible</span>' : "");
+    $("#cfg-reveal").textContent = d.revealed ? "Hide secrets" : "Show secrets";
     const q = $("#cfg-filter").value.trim().toLowerCase();
     $("#cfg-sections").innerHTML = d.sections.map((s) => {
       const vars = s.vars.filter((v) => !q || v.name.toLowerCase().includes(q) || (v.doc || "").toLowerCase().includes(q)
@@ -76,7 +76,7 @@ const Settings = {
       if (!vars.length) return "";
       return `<div class="card cfgsec"><h2>${esc(s.title)}${s.notes ? ` <span class="muted">${esc(s.notes)}</span>` : ""}</h2>
         ${vars.map((v) => this.row(v)).join("")}</div>`;
-    }).join("") || '<div class="card muted">Nenhuma variável com esse filtro.</div>';
+    }).join("") || '<div class="card muted">No variable matches this filter.</div>';
     $$("#cfg-sections [data-var]").forEach((el) => el.addEventListener("input", () => this.changed(el)));
     this.counter();
     this.backups();
@@ -94,15 +94,15 @@ const Settings = {
     } else if (v.kind === "array") {
       const val = cur ?? v.items;
       input = `<textarea data-var="${esc(v.name)}" rows="${Math.max(2, Math.min(10, val.length + 1))}" spellcheck="false"
-        placeholder="um item por linha" ${locked ? "disabled" : ""}>${esc(val.join("\n"))}</textarea>`;
+        placeholder="one item per line" ${locked ? "disabled" : ""}>${esc(val.join("\n"))}</textarea>`;
     } else {
       const val = cur ?? v.value;
       input = `<input type="text" data-var="${esc(v.name)}" value="${esc(val)}" spellcheck="false" ${locked ? "disabled" : ""}>`;
     }
     const mod = v.name in this.edits;
     return `<div class="cfgrow${mod ? " mod" : ""}" id="cfgrow-${esc(v.name)}">
-      <div class="cfgname"><code>${esc(v.name)}</code>${v.secret ? ' <span class="tag warn">segredo</span>' : ""}
-        ${v.kind === "array" ? ' <span class="tag">lista</span>' : ""}</div>
+      <div class="cfgname"><code>${esc(v.name)}</code>${v.secret ? ' <span class="tag warn">secret</span>' : ""}
+        ${v.kind === "array" ? ' <span class="tag">list</span>' : ""}</div>
       <div class="cfgval">${input}${help ? `<div class="cfghelp">${esc(help)}</div>` : ""}</div></div>`;
   },
   original(name) {
@@ -124,7 +124,7 @@ const Settings = {
   },
   counter() {
     const n = Object.keys(this.edits).length;
-    $("#cfg-count").textContent = n ? `${n} ${n > 1 ? "alterações não salvas" : "alteração não salva"}` : "sem alterações";
+    $("#cfg-count").textContent = n ? `${n} unsaved change${n > 1 ? "s" : ""}` : "no changes";
     $("#cfg-preview").disabled = !n;
     $("#cfg-discard").disabled = !n;
   },
@@ -132,7 +132,7 @@ const Settings = {
     const b = this.data.backups || [];
     $("#cfg-backups").innerHTML = b.length
       ? b.map((x) => `<li><button class="link" data-bk="${esc(x.name)}">${esc(this.bkDate(x.name))}</button></li>`).join("")
-      : '<li class="muted">nenhum backup ainda (cada gravação guarda o arquivo anterior)</li>';
+      : '<li class="muted">no backup yet (every save keeps the previous file)</li>';
     $$("#cfg-backups [data-bk]").forEach((b) => b.addEventListener("click", () => this.previewRestore(b.dataset.bk)));
   },
   bkDate(n) {
@@ -140,16 +140,16 @@ const Settings = {
     return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}:${m[6]}` : n;
   },
 
-  // ---- revisar / gravar
+  // ---- review / save
   async preview() {
     this.restore = null;
     await this.review({ changes: this.edits, hash: this.data.hash });
   },
   async previewRestore(name) {
     this.restore = name;
-    await this.review({ restore: name, hash: this.data.hash }, `Restaurar o backup de ${this.bkDate(name)}`);
+    await this.review({ restore: name, hash: this.data.hash }, `Restore the backup of ${this.bkDate(name)}`);
   },
-  async review(body, title = "Revisar alterações") {
+  async review(body, title = "Review changes") {
     this.msg("");
     $("#cfg-review-title").textContent = title;
     try {
@@ -161,11 +161,11 @@ const Settings = {
     $("#cfg-diff").innerHTML = p.diff ? p.diff.split("\n").map((l) => {
       const c = l.startsWith("+++") || l.startsWith("---") ? "h" : l[0] === "+" ? "add" : l[0] === "-" ? "del" : l[0] === "@" ? "h" : "";
       return `<span class="${c}">${esc(l)}</span>`;
-    }).join("\n") : '<span class="muted">nada muda</span>';
+    }).join("\n") : '<span class="muted">nothing changes</span>';
     const val = p.validation || {};
-    $("#cfg-valid").innerHTML = val.ok === true ? '<span class="tag ok">validação do install: ok</span>'
-      : val.ok === false ? `<span class="tag err">a validação do install recusou</span><pre class="cfgout">${esc(val.output)}</pre>`
-      : `<span class="tag warn">validação indisponível</span> <span class="muted">${esc(val.output)}</span>`;
+    $("#cfg-valid").innerHTML = val.ok === true ? '<span class="tag ok">install validation: ok</span>'
+      : val.ok === false ? `<span class="tag err">the install validation rejected it</span><pre class="cfgout">${esc(val.output)}</pre>`
+      : `<span class="tag warn">validation unavailable</span> <span class="muted">${esc(val.output)}</span>`;
     $("#cfg-impact").innerHTML = this.impactHtml(p.impact);
     $("#cfg-save").disabled = !p.changed.length || val.ok === false || !this.data.writable;
     $("#cfg-review").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -173,18 +173,18 @@ const Settings = {
   impactHtml(im) {
     if (!im || !im.command) return `<span class="muted">${esc(im ? im.text : "")}</span>`;
     const cls = { dashboard: "ok", test: "ok", deploy: "warn", full: "err" }[im.level] || "";
-    return `<div><span class="tag ${cls}">para aplicar</span> <code class="cmd">${esc(im.command)}</code>
-      <button class="btn small" data-copy="${esc(im.command)}">copiar</button></div><div class="muted">${esc(im.text)}</div>`;
+    return `<div><span class="tag ${cls}">to apply</span> <code class="cmd">${esc(im.command)}</code>
+      <button class="btn small" data-copy="${esc(im.command)}">copy</button></div><div class="muted">${esc(im.text)}</div>`;
   },
   async save() {
     if (!this.plan) return;
     $("#cfg-save").disabled = true;
     try {
       const d = await this.call("POST", "api/settings/save", this.plan.body);
-      const what = this.restore ? "Backup restaurado" : "config.env salvo";
+      const what = this.restore ? "Backup restored" : "config.env saved";
       await this.load(this.data.revealed);
-      this.msg(`<b>${what}.</b> Alterado: ${d.changed.map((n) => `<code>${esc(n)}</code>`).join(", ")}.
-        Backup do anterior: ${esc(this.bkDate(d.backup))}.<br>Ainda <b>não</b> está aplicado — rode na máquina do core:
+      this.msg(`<b>${what}.</b> Changed: ${d.changed.map((n) => `<code>${esc(n)}</code>`).join(", ")}.
+        Backup of the previous one: ${esc(this.bkDate(d.backup))}.<br>It is <b>not</b> applied yet: run on the core machine:
         <div style="margin-top:6px">${this.impactHtml(d.impact)}</div>`, "ok");
     } catch (e) {
       this.msg(esc(e.message) + (e.data && e.data.validation && e.data.validation.output
@@ -196,11 +196,11 @@ const Settings = {
 
 $("#cfg-logout").addEventListener("click", () => Settings.logout());
 $("#cfg-reveal").addEventListener("click", () => {
-  if (Object.keys(Settings.edits).length && !confirm("Descartar as alterações não salvas?")) return;
+  if (Object.keys(Settings.edits).length && !confirm("Discard the unsaved changes?")) return;
   Settings.load(!Settings.data.revealed);
 });
 $("#cfg-reload").addEventListener("click", () => {
-  if (Object.keys(Settings.edits).length && !confirm("Descartar as alterações não salvas?")) return;
+  if (Object.keys(Settings.edits).length && !confirm("Discard the unsaved changes?")) return;
   Settings.load(Settings.data && Settings.data.revealed);
 });
 $("#cfg-discard").addEventListener("click", () => { Settings.edits = {}; Settings.plan = null; $("#cfg-review").classList.add("hidden"); Settings.render(); });
@@ -211,29 +211,29 @@ $("#cfg-cancel").addEventListener("click", () => { Settings.plan = null; $("#cfg
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-copy]");
   if (!b) return;
-  navigator.clipboard?.writeText(b.dataset.copy).then(() => { b.textContent = "copiado"; setTimeout(() => (b.textContent = "copiar"), 1500); },
-    () => { /* sem clipboard (http): o texto está visível */ });
+  navigator.clipboard?.writeText(b.dataset.copy).then(() => { b.textContent = "copied"; setTimeout(() => (b.textContent = "copy"), 1500); },
+    () => { /* no clipboard (http): the text is visible */ });
 });
 window.addEventListener("beforeunload", (e) => { if (Object.keys(Settings.edits).length) e.preventDefault(); });
 
-/* Botão "Admin" no topo: login único para Controle, Configuração e as outras abas do navegador */
+/* "Admin" button at the top: single login for Control, Settings and the other browser tabs */
 const Admin = {
   enabled: false,
   async init() {
     try {
       const d = await (await fetch("api/admin", { cache: "no-store", headers: { "X-Admin-Token": Settings.token } })).json();
       this.enabled = !!d.enabled;
-      if (Settings.token && !d.admin) Settings.setToken("");   // expirou ou o painel reiniciou
-    } catch { /* painel antigo */ }
+      if (Settings.token && !d.admin) Settings.setToken("");   // expired or the dashboard restarted
+    } catch { /* old dashboard */ }
     this.render();
   },
   render() {
     $("#admin-box").classList.toggle("hidden", !this.enabled);
     const on = !!Settings.token;
     const b = $("#admin-btn");
-    b.textContent = on ? "🔓 Admin · Sair" : "🔒 Admin";
+    b.textContent = on ? "🔓 Admin · Sign out" : "🔒 Admin";
     b.classList.toggle("on", on);
-    b.title = on ? "Sair da sessão de administrador (em todas as abas)" : "Login de administrador: vale para todas as abas";
+    b.title = on ? "Sign out of the administrator session (in every tab)" : "Administrator login: valid for every tab";
   },
   open() {
     $("#admin-pop").classList.remove("hidden");
@@ -249,7 +249,7 @@ const Admin = {
       this.changed();
     } catch (e) { $("#admin-msg").textContent = e.message; }
   },
-  // sessão mudou (aqui ou em outra aba do navegador): redesenha quem depende dela
+  // the session changed (here or in another browser tab): redraw whatever depends on it
   changed() {
     Settings.data = null;
     Settings.loaded = false;

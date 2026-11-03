@@ -1,14 +1,15 @@
-/* Innova Center Dashboard — aba Documentação: os .md do projeto (o mesmo conteúdo do git),
-   lidos da pasta do projeto na máquina do core. Markdown renderizado aqui, sem bibliotecas. */
+/* Innova Center Dashboard — Documentation tab: the project .md files (the same content as git),
+   read from the project folder on the core machine. Markdown rendered here, without libraries.
+   In Portuguese mode, a doc with a translation (<name>.pt-BR.md) opens in Portuguese. */
 "use strict";
 
 const Md = {
   inline(t) {
-    // `código` primeiro (nada dentro dele é formatado)
+    // `code` first (nothing inside it is formatted)
     const codes = [];
     t = t.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0001${codes.length - 1}\u0001`; });
     t = esc(t)
-      .replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, alt) => `<span class="muted">[imagem: ${alt}]</span>`)
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, alt) => `<span class="muted">[image: ${alt}]</span>`)
       .replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, (_, txt, href) => {
         const h = href.replace(/&amp;/g, "&");
         if (/^https?:\/\//.test(h)) return `<a href="${esc(h)}" target="_blank" rel="noopener">${txt}</a>`;
@@ -21,7 +22,7 @@ const Md = {
       .replace(/(^|[\s(])_([^_\s][^_]*)_(?=[\s.,;:)!?]|$)/g, "$1<i>$2</i>");
     return t.replace(/\u0001(\d+)\u0001/g, (_, i) => `<code>${esc(codes[+i])}</code>`);
   },
-  slug(t) {   // como o GitHub: minúsculas, sem pontuação (acentos ficam), cada espaço vira "-"
+  slug(t) {   // like GitHub: lowercase, no punctuation (accents stay), each space becomes "-"
     return t.replace(/<[^>]+>/g, "").toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s/g, "-");
   },
   render(src) {
@@ -33,7 +34,7 @@ const Md = {
     while (i < lines.length) {
       const l = lines[i];
       let m;
-      if (/^\s*```/.test(l)) {                               // bloco de código (também recuado)
+      if (/^\s*```/.test(l)) {                               // code block (also indented)
         const ind = l.match(/^\s*/)[0].length;
         const lang = l.trim().slice(3).trim();
         const buf = [];
@@ -42,13 +43,13 @@ const Md = {
         out.push(`<pre class="code" data-lang="${esc(lang)}"><code>${esc(buf.join("\n"))}</code></pre>`);
         continue;
       }
-      if ((m = /^(#{1,6})\s+(.*)$/.exec(l))) {                // título
+      if ((m = /^(#{1,6})\s+(.*)$/.exec(l))) {                // heading
         const n = m[1].length, txt = m[2].replace(/\s+#+\s*$/, "");
         out.push(`<h${n} id="${esc(this.slug(txt.replace(/[`*]/g, "")))}">${this.inline(txt)}</h${n}>`);
         i++; continue;
       }
       if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { out.push("<hr>"); i++; continue; }
-      if (l.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {   // tabela
+      if (l.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {   // table
         const head = cells(l);
         i += 2;
         const rows = [];
@@ -57,13 +58,13 @@ const Md = {
           rows.map((r) => `<tr>${r.map((c) => `<td>${this.inline(c)}</td>`).join("")}</tr>`).join("") + "</table></div>");
         continue;
       }
-      if (/^\s*>/.test(l)) {                                  // citação
+      if (/^\s*>/.test(l)) {                                  // blockquote
         const buf = [];
         for (; i < lines.length && /^\s*>/.test(lines[i]); i++) buf.push(lines[i].replace(/^\s*>\s?/, ""));
         out.push(`<blockquote>${this.render(buf.join("\n"))}</blockquote>`);
         continue;
       }
-      if (/^\s*([-*+]|\d+[.)])\s+/.test(l)) {                 // listas (com sub-níveis por recuo)
+      if (/^\s*([-*+]|\d+[.)])\s+/.test(l)) {                 // lists (nested by indentation)
         const buf = [];
         const item = (x) => /^\s*([-*+]|\d+[.)])\s+/.test(x);
         let fence = false;
@@ -71,7 +72,7 @@ const Md = {
           const x = lines[i];
           if (fence) { buf.push(x); if (/^\s*```/.test(x)) fence = false; continue; }
           if (item(x) || /^\s{2,}\S/.test(x)) { buf.push(x); if (/^\s*```/.test(x)) fence = true; continue; }
-          // linha em branco: a lista continua se a próxima for item ou estiver recuada
+          // blank line: the list continues if the next line is an item or indented
           if (!x.trim() && i + 1 < lines.length && (item(lines[i + 1]) || /^\s{2,}\S/.test(lines[i + 1]))) { buf.push(x); continue; }
           break;
         }
@@ -79,7 +80,7 @@ const Md = {
         continue;
       }
       if (!l.trim()) { i++; continue; }
-      const buf = [];                                         // parágrafo
+      const buf = [];                                         // paragraph
       for (; i < lines.length && lines[i].trim() && !/^(#{1,6}\s|\s*```|\s*>|\s*([-*+]|\d+[.)])\s+)/.test(lines[i]) &&
         !(lines[i].includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])); i++) buf.push(lines[i]);
       out.push(`<p>${this.inline(buf.join(" "))}</p>`);
@@ -124,13 +125,15 @@ const Docs = {
     if (this.loaded) return;
     const d = await api("api/docs");
     this.loaded = true;
-    this.list = d.docs || [];
+    // <name>.pt-BR.md are translations: not listed, opened instead of <name>.md in Portuguese mode
+    this.all = new Set((d.docs || []).map((x) => x.path));
+    this.list = (d.docs || []).filter((x) => !/\.pt-BR\.md$/i.test(x.path));
     this.git = d.git || {};
     const g = this.git;
-    $("#docs-git").innerHTML = !d.enabled ? "pasta do projeto não montada no painel (precisa da senha de administrador no config.env)"
+    $("#docs-git").innerHTML = !d.enabled ? "project folder not mounted in the dashboard (needs the administrator password in config.env)"
       : `git: ${g.branch ? `branch <b>${esc(g.branch)}</b>` : "?"}${g.commit ? ` · commit <code>${esc(g.commit)}</code>` : ""}` +
-        (g.remote ? ` · <a href="${esc(g.remote)}" target="_blank" rel="noopener">repositório</a>` : "") +
-        "<br>o mesmo conteúdo do repositório, lido da máquina do core";
+        (g.remote ? ` · <a href="${esc(g.remote)}" target="_blank" rel="noopener">repository</a>` : "") +
+        "<br>the same content as the repository, read from the core machine";
     this.renderList();
     if (!this.cur) this.open(store.get("docs.cur", null) || (this.list[0] || {}).path);
   },
@@ -139,25 +142,27 @@ const Docs = {
     const groups = {};
     for (const d of this.list) {
       if (f && !(d.title + " " + d.path).toLowerCase().includes(f)) continue;
-      const g = d.path.includes("/") ? d.path.split("/").slice(0, -1).join("/") : "projeto";
+      const g = d.path.includes("/") ? d.path.split("/").slice(0, -1).join("/") : "project";
       (groups[g] ||= []).push(d);
     }
-    const name = { projeto: "Projeto", docs: "docs/", free5gc: "free5GC" };
+    const name = { project: "Project", docs: "docs/", free5gc: "free5GC" };
     $("#docs-list").innerHTML = Object.entries(groups).map(([g, ds]) => `<div class="grp">${esc(name[g] || g + "/")}</div>` +
       ds.map((d) => `<button class="src ${d.path === this.cur ? "active" : ""}" data-path="${esc(d.path)}" title="${esc(d.path)}">
-        <span>${esc(d.title)}</span></button>`).join("")).join("") || '<div class="empty">nada encontrado</div>';
+        <span>${esc(d.title)}</span></button>`).join("")).join("") || '<div class="empty">nothing found</div>';
   },
   async open(path, anchor) {
-    if (!path) { $("#docs-view").innerHTML = '<div class="empty">Nenhum documento.</div>'; return; }
+    if (!path) { $("#docs-view").innerHTML = '<div class="empty">No document.</div>'; return; }
     try {
-      const d = await api("api/docs/file?path=" + encodeURIComponent(path));
+      const pt = path.replace(/\.md$/i, ".pt-BR.md");
+      const src = I18N.lang === "pt" && this.all && this.all.has(pt) ? pt : path;
+      const d = await api("api/docs/file?path=" + encodeURIComponent(src));
       this.cur = path;
       store.set("docs.cur", path);
-      $("#docs-path").textContent = path;
+      $("#docs-path").textContent = src;
       const g = this.git;
       const raw = $("#docs-raw");
       raw.classList.toggle("hidden", !(g.remote && g.branch));
-      if (g.remote && g.branch) raw.href = `${g.remote}/blob/${encodeURIComponent(g.branch)}/${path}`;
+      if (g.remote && g.branch) raw.href = `${g.remote}/blob/${encodeURIComponent(g.branch)}/${src}`;
       $("#docs-view").innerHTML = Md.render(d.text);
       this.renderList();
       if (anchor) { const el = document.getElementById(anchor); if (el) el.scrollIntoView(); }

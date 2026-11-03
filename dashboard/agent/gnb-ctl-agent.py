@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  dashboard/agent/gnb-ctl-agent.py — controle do gNB OCUDU pelo painel (aba Controle).
+#  dashboard/agent/gnb-ctl-agent.py — OCUDU gNB control from the dashboard (Control tab).
 #
-#  Roda na máquina do core (usuário do install). A cada poucos segundos lê, por
-#  SSH, o estado do serviço ocudu-gnb@<arquivo> no host do gNB, manda ao painel e
-#  recebe de volta o próximo comando (iniciar/parar/reiniciar), que executa com
-#  "systemctl" SEM sudo: no host do gNB uma regra do polkit deixa este usuário
-#  mexer só nas units ocudu-gnb@*.service (scripts/ocudu/setup-gnb-service.sh).
+#  Runs on the core machine (install user). Every few seconds it reads, over
+#  SSH, the state of the ocudu-gnb@<file> service on the gNB host, sends it to the
+#  dashboard and gets back the next command (start/stop/restart), which it runs with
+#  "systemctl" WITHOUT sudo: on the gNB host a polkit rule lets this user touch
+#  only the ocudu-gnb@*.service units (scripts/ocudu/setup-gnb-service.sh).
 #
-#  Modo k8s (GNB_CTL_MODE=k8s, InnovaNetwork v3): o gNB é o pod "ocudu-gnb" (namespace
-#  ocudu) no nó do rádio. Iniciar/parar = ran/ocudu/gnb.sh (GNB_CTL_GNBSH) aqui, com o
-#  kubectl do usuário; o estado vem do Kubernetes + processo gnb no nó (por SSH).
+#  k8s mode (GNB_CTL_MODE=k8s, InnovaNetwork v3): the gNB is the "ocudu-gnb" pod (namespace
+#  ocudu) on the radio node. Start/stop = ran/ocudu/gnb.sh (GNB_CTL_GNBSH) here, with the
+#  user's kubectl; the state comes from Kubernetes + the gnb process on the node (over SSH).
 #
-#  Uso:
+#  Usage:
 #    DASHBOARD_URL=http://10.254.254.1:30998 INGEST_TOKEN=... \
 #    GNB_CTL_SSH=innovaserver@10.10.0.1 GNB_CTL_DIR=/home/innovaserver/ocudu python3 gnb-ctl-agent.py
 # =============================================================================
@@ -38,7 +38,7 @@ SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliv
        "-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/gnbctl-%C", "-o", "ControlPersist=120"]
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 
-# Lido no host do gNB (python3 -): só leitura.
+# Read on the gNB host (python3 -): read only.
 STATUS = r'''
 import glob, json, os, re, subprocess, sys, time
 D = sys.argv[1]
@@ -48,7 +48,7 @@ def sh(*a):
     except Exception:
         return ""
 def polkit_rule():
-    # rules.d costuma ser root:polkitd 0750: um usuário comum não lista -> desconhecido (None), não "falta"
+    # rules.d is usually root:polkitd 0750: a regular user cannot list it -> unknown (None), not "missing"
     try:
         return "50-ocudu-gnb.rules" in os.listdir("/etc/polkit-1/rules.d")
     except OSError:
@@ -111,11 +111,11 @@ out["nics"] = {n: os.path.basename(os.path.realpath("/sys/bus/pci/devices/%s/dri
                if os.path.exists("/sys/bus/pci/devices/%s/driver" % n) else None for n in nics}
 out["ptp"] = {s: sh("systemctl", "is-active", s).strip() for s in ("ptp4l-gm", "ts2phc", "phc2sys")}
 def gps_state():
-    # ts2phc: "offset N sX" (s2 = travado no GPS) ou "source ts not valid" (GPS ainda sem hora válida)
+    # ts2phc: "offset N sX" (s2 = locked to the GPS) or "source ts not valid" (GPS has no valid time yet)
     lines = [l for l in sh("journalctl", "-u", "ts2phc", "-n", "20", "--no-pager", "-o", "short-unix").splitlines()
              if l[:1].isdigit()]
     if not lines:
-        return {"state": "sem_dados"}
+        return {"state": "no_data"}
     last = lines[-1]
     try:
         age = round(time.time() - float(last.split()[0]), 1)
@@ -124,13 +124,13 @@ def gps_state():
     msg = re.sub(r"^\S+\s+\S+\s+\S+?:\s*", "", last)
     m = re.search(r"offset\s+(-?\d+)\s+s(\d)", msg)
     if "not valid" in msg:
-        st = "procurando"
+        st = "searching"
     elif m:
-        st = {"2": "travado", "1": "ajustando", "0": "sem_trava"}.get(m.group(2), "ajustando")
+        st = {"2": "locked", "1": "adjusting", "0": "unlocked"}.get(m.group(2), "adjusting")
     else:
-        st = "desconhecido"
+        st = "unknown"
     if age is not None and age > 60:
-        st = "parado"
+        st = "stalled"
     g = {"state": st, "age": age, "line": msg[-120:]}
     if m:
         g["offset_ns"] = int(m.group(1))
@@ -139,29 +139,29 @@ out["gps"] = gps_state()
 print(json.dumps(out))
 '''
 
-# Executado no host do gNB (bash -s acao nome dir): só systemctl nas units ocudu-gnb@*.
+# Run on the gNB host (bash -s action name dir): only systemctl on the ocudu-gnb@* units.
 COMMAND = r'''
 set -u
 A="$1"; N="$2"; D="$3"
 running() { systemctl list-units --plain --no-legend --state=active,activating 'ocudu-gnb@*' | awk '{print $1}'; }
 case "$A" in
   start)
-    [[ "$N" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "nome de arquivo inválido: $N"; exit 2; }
-    [[ -r "$D/configs/$N.yml" ]] || { echo "não existe: $D/configs/$N.yml"; exit 2; }
-    for u in $(running); do echo "parando $u"; systemctl stop "$u" || exit 1; done
+    [[ "$N" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "invalid file name: $N"; exit 2; }
+    [[ -r "$D/configs/$N.yml" ]] || { echo "does not exist: $D/configs/$N.yml"; exit 2; }
+    for u in $(running); do echo "stopping $u"; systemctl stop "$u" || exit 1; done
     systemctl reset-failed 'ocudu-gnb@*' 2>/dev/null || true
-    echo "iniciando ocudu-gnb@$N.service"
+    echo "starting ocudu-gnb@$N.service"
     systemctl start "ocudu-gnb@$N.service" || { journalctl -u "ocudu-gnb@$N.service" -n 15 --no-pager -o cat 2>/dev/null; exit 1; }
     ;;
   stop)
-    u=$(running); [[ -n "$u" ]] || { echo "nenhum gNB rodando pelo serviço"; exit 0; }
-    for x in $u; do echo "parando $x"; systemctl stop "$x" || exit 1; done
+    u=$(running); [[ -n "$u" ]] || { echo "no gNB running through the service"; exit 0; }
+    for x in $u; do echo "stopping $x"; systemctl stop "$x" || exit 1; done
     ;;
   restart)
-    u=$(running); [[ -n "$u" ]] || { echo "nenhum gNB rodando pelo serviço"; exit 1; }
-    for x in $u; do echo "reiniciando $x"; systemctl restart "$x" || exit 1; done
+    u=$(running); [[ -n "$u" ]] || { echo "no gNB running through the service"; exit 1; }
+    for x in $u; do echo "restarting $x"; systemctl restart "$x" || exit 1; done
     ;;
-  *) echo "ação inválida"; exit 2 ;;
+  *) echo "invalid action"; exit 2 ;;
 esac
 '''
 
@@ -186,7 +186,7 @@ def remote(cmd, stdin, timeout):
 def status():
     rc, out, err = remote("python3 - %s" % shlex.quote(DIR), STATUS, 20)
     if rc != 0:
-        raise OSError((err or out or "ssh código %d" % rc).strip()[-300:])
+        raise OSError((err or out or "ssh exit code %d" % rc).strip()[-300:])
     st = json.loads(out)
     return k8s_status(st) if MODE == "k8s" else st
 
@@ -207,16 +207,16 @@ def _since(iso):
 
 
 def k8s_status(st):
-    """Troca a parte "serviço systemd" do estado pela do Deployment/pod ocudu-gnb (mesmo formato p/ o painel)."""
+    """Replaces the "systemd service" part of the state with the ocudu-gnb Deployment/pod (same format for the dashboard)."""
     st["mode"] = "k8s"
-    st["unit_installed"] = None   # sem unit/polkit no modo k8s: o aviso de instalação não se aplica
+    st["unit_installed"] = None   # no unit/polkit in k8s mode: the install warning does not apply
     st["polkit"] = None
     dep = json.loads(kubectl("get", "deploy", "ocudu-gnb", "-o", "json"))
     env = {e["name"]: e.get("value") for e in dep["spec"]["template"]["spec"]["containers"][0].get("env", [])}
     cfg, reps = env.get("GNB_CONFIG") or "", dep["spec"].get("replicas") or 0
     pods = json.loads(kubectl("get", "pods", "-l", "app.kubernetes.io/name=ocudu-gnb", "-o", "json"))["items"]
     pods = [p for p in pods if not p["metadata"].get("deletionTimestamp")]
-    # gnb do pod: "-c /configs/…" (o nativo usa o caminho completo da pasta do OCUDU)
+    # pod gnb: "-c /configs/…" (the native one uses the full path of the OCUDU folder)
     mine = [x for x in st.get("gnb_pids", []) if " -c /configs/" in " " + x["cmd"]]
     st["manual"] = [x for x in st.get("gnb_pids", []) if x not in mine]
     st["active"] = st["failed"] = None
@@ -231,7 +231,7 @@ def k8s_status(st):
         journal = kubectl("logs", name, "--tail=25", timeout=10).splitlines()[-25:]
     except (OSError, subprocess.TimeoutExpired):
         journal = []
-    waiting = any("NÃO liga sozinho" in l for l in journal) and not mine
+    waiting = any("NÃO liga sozinho" in l or "does NOT start by itself" in l for l in journal) and not mine
     st["k8s"].update(pod=name, phase=pod["status"].get("phase"), restarts=cs.get("restartCount", 0),
                      waiting_boot=waiting, node=pod["spec"].get("nodeName"))
     info = {"unit": "pod/" + name, "config": cfg, "pid": mine[0]["pid"] if mine else 0,
@@ -248,9 +248,9 @@ def k8s_status(st):
 
 def execute_k8s(cmd):
     action, name = cmd.get("action"), cmd.get("config") or ""
-    args = {"start": ["iniciar", name], "stop": ["parar"], "restart": ["iniciar"]}[action]
+    args = {"start": ["start", name], "stop": ["stop"], "restart": ["start"]}[action]
     if action == "start" and not name:
-        return {"id": cmd.get("id"), "ok": False, "output": "falta o arquivo .yml"}
+        return {"id": cmd.get("id"), "ok": False, "output": "missing .yml file"}
     try:
         p = subprocess.run([GNBSH] + args, capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
@@ -261,7 +261,7 @@ def execute_k8s(cmd):
 def execute(cmd):
     action, name = cmd.get("action"), cmd.get("config") or ""
     if action not in ("start", "stop", "restart") or (name and not NAME.match(name)):
-        return {"id": cmd.get("id"), "ok": False, "output": "comando recusado pelo agente"}
+        return {"id": cmd.get("id"), "ok": False, "output": "command refused by the agent"}
     if MODE == "k8s":
         return execute_k8s(cmd)
     try:
@@ -271,16 +271,16 @@ def execute(cmd):
         return {"id": cmd.get("id"), "ok": False, "output": "tempo esgotado (120 s)"}
     text = (out + err).strip()
     if "Interactive authentication required" in text or "Access denied" in text:
-        text += "\n(falta a regra do polkit no host do gNB: rode scripts/ocudu/setup-gnb-service.sh lá, com sudo)"
+        text += "\n(missing polkit rule on the gNB host: run scripts/ocudu/setup-gnb-service.sh there, with sudo)"
     return {"id": cmd.get("id"), "ok": rc == 0, "output": text[-3000:]}
 
 
 def main():
     if MODE == "k8s" and not os.access(GNBSH, os.X_OK):
-        print("modo k8s: GNB_CTL_GNBSH deve apontar para ran/ocudu/gnb.sh", file=sys.stderr)
+        print("k8s mode: GNB_CTL_GNBSH must point to ran/ocudu/gnb.sh", file=sys.stderr)
         sys.exit(2)
     if not URL or not TOKEN or not TARGET or not DIR:
-        print("uso: DASHBOARD_URL=... INGEST_TOKEN=... GNB_CTL_SSH=usuario@host GNB_CTL_DIR=/caminho/ocudu gnb-ctl-agent.py",
+        print("usage: DASHBOARD_URL=... INGEST_TOKEN=... GNB_CTL_SSH=user@host GNB_CTL_DIR=/path/ocudu gnb-ctl-agent.py",
               file=sys.stderr)
         sys.exit(2)
     result = None
@@ -290,24 +290,24 @@ def main():
         try:
             st = status()
             if last_err:
-                log("conectado de novo a", TARGET)
+                log("connected again to", TARGET)
                 last_err = None
         except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as e:
             st = {"error": str(e)[-300:]}
             if str(e) != last_err:
-                log("estado do gNB:", e)
+                log("gNB state:", e)
                 last_err = str(e)
         try:
             r = post({"status": st, "result": result})
             result = None
             cmd = r.get("command")
             if cmd:
-                log("comando:", cmd.get("action"), cmd.get("config") or "")
+                log("command:", cmd.get("action"), cmd.get("config") or "")
                 result = execute(cmd)
-                log("resultado:", "ok" if result["ok"] else "falhou", result["output"][-200:].replace("\n", " | "))
-                continue   # manda o resultado e o estado novo já
+                log("result:", "ok" if result["ok"] else "failed", result["output"][-200:].replace("\n", " | "))
+                continue   # send the result and the new state right away
         except (urllib.error.URLError, OSError, ValueError) as e:
-            log("painel indisponível:", e)
+            log("dashboard unavailable:", e)
         time.sleep(max(0.5, INTERVAL - (time.time() - t0)))
 
 

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,110 +16,111 @@
     <span class="muted" id="netname"></span>
   </div>
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="overview" class="active">Visão geral</button>
-    <button role="tab" data-tab="control" class="hidden" id="tabbtn-control">Controle</button>
-    <button role="tab" data-tab="ran">Rádio (gNB)</button>
+    <button role="tab" data-tab="overview" class="active">Overview</button>
+    <button role="tab" data-tab="control" class="hidden" id="tabbtn-control">Control</button>
+    <button role="tab" data-tab="ran">Radio (gNB)</button>
     <button role="tab" data-tab="core">Core</button>
     <button role="tab" data-tab="ru" class="hidden" id="tabbtn-ru">RU</button>
     <button role="tab" data-tab="logs">Logs</button>
-    <button role="tab" data-tab="hosts">Máquinas</button>
-    <button role="tab" data-tab="history">Histórico</button>
-    <button role="tab" data-tab="docs">Documentação</button>
-    <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Configuração</button>
+    <button role="tab" data-tab="hosts">Machines</button>
+    <button role="tab" data-tab="history">History</button>
+    <button role="tab" data-tab="docs">Documentation</button>
+    <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Settings</button>
   </nav>
   <div class="topright">
     <div class="statusbox" id="status-box">
-      <button class="pill" id="status-btn" title="Estado da rede: clique para ver os detalhes">Status …</button>
+      <button class="pill" id="status-btn" title="Network status: click for details">Status …</button>
       <div class="statuspop card hidden" id="status-pop">
-        <b>Estado da rede</b>
-        <div class="strow"><span class="stl">gNB</span><span class="pill" id="pill-gnb" title="Métricas do gNB">gNB …</span></div>
-        <div class="strow"><span class="stl">Core</span><span class="pill" id="pill-core" title="Pods do core">core …</span></div>
-        <div class="strow hidden" id="row-ru"><span class="stl">RU</span><span class="pill" id="pill-ru" title="Estado da RU">RU …</span></div>
+        <b>Network status</b>
+        <div class="strow"><span class="stl">gNB</span><span class="pill" id="pill-gnb" title="gNB metrics">gNB …</span></div>
+        <div class="strow"><span class="stl">Core</span><span class="pill" id="pill-core" title="Core pods">core …</span></div>
+        <div class="strow hidden" id="row-ru"><span class="stl">RU</span><span class="pill" id="pill-ru" title="RU status">RU …</span></div>
         <div class="strow hidden" id="row-gps"><span class="stl">GPS / PTP</span><span class="pill" id="pill-gps">GPS …</span></div>
         <div class="muted" id="status-gps-detail"></div>
       </div>
     </div>
-    <button class="rec hidden" id="rec">● Gravar experimento</button>
+    <button class="rec hidden" id="rec">● Record experiment</button>
     <div class="adminbox hidden" id="admin-box">
-      <button class="rec" id="admin-btn" title="Login de administrador: vale para todas as abas">🔒 Admin</button>
+      <button class="rec" id="admin-btn" title="Administrator login: valid for every tab">🔒 Admin</button>
       <form class="adminpop card hidden" id="admin-pop">
-        <b>Administrador</b>
-        <p class="muted" style="margin:4px 0 8px">Um login vale para Controle, Configuração e as outras abas do navegador (8 h).</p>
-        <input type="password" id="admin-pass" placeholder="senha de administrador" autocomplete="current-password">
-        <div class="toolbar" style="margin-top:8px"><button class="btn on" type="submit">Entrar</button>
-          <button class="btn" type="button" id="admin-cancel">Cancelar</button></div>
+        <b>Administrator</b>
+        <p class="muted" style="margin:4px 0 8px">One login covers Control, Settings and the other browser tabs (8 h).</p>
+        <input type="password" id="admin-pass" placeholder="administrator password" autocomplete="current-password">
+        <div class="toolbar" style="margin-top:8px"><button class="btn on" type="submit">Sign in</button>
+          <button class="btn" type="button" id="admin-cancel">Cancel</button></div>
         <div class="muted err" id="admin-msg"></div>
       </form>
     </div>
-    <button class="icon" id="theme" title="Tema claro/escuro" aria-label="Alternar tema">◐</button>
+    <button class="icon lang" id="lang" title="Idioma / Language" aria-label="Idioma / Language">EN</button>
+    <button class="icon" id="theme" title="Light/dark theme" aria-label="Toggle theme">◐</button>
   </div>
 </header>
 
 <div id="banner" class="banner hidden"></div>
 
 <main>
-  <!-- ======================= VISÃO GERAL ======================= -->
+  <!-- ======================= OVERVIEW ======================= -->
   <section id="tab-overview" class="tab active">
     <div class="kpis" id="kpis"></div>
     <div class="grid2">
       <div class="card">
-        <h2>UEs no rádio <span class="muted" id="ov-ran-sub"></span></h2>
+        <h2>UEs on the radio <span class="muted" id="ov-ran-sub"></span></h2>
         <div class="tablewrap"><table id="ov-ran-ues"></table></div>
       </div>
       <div class="card">
-        <h2>Assinantes vistos pelo core</h2>
+        <h2>Subscribers seen by the core</h2>
         <div class="tablewrap"><table id="ov-core-ues"></table></div>
       </div>
     </div>
     <div class="grid2">
       <div class="card">
-        <h2>Pods do core</h2>
+        <h2>Core pods</h2>
         <div class="tablewrap"><table id="ov-pods"></table></div>
       </div>
       <div class="card">
-        <h2>Eventos do core <span class="muted">(avisos e erros iguais são agrupados)</span></h2>
+        <h2>Core events <span class="muted">(identical warnings and errors are grouped)</span></h2>
         <div class="events" id="ov-events"></div>
       </div>
     </div>
   </section>
 
-  <!-- ======================= RÁDIO ======================= -->
+  <!-- ======================= RADIO ======================= -->
   <section id="tab-ran" class="tab">
     <div class="toolbar">
       <label>UE <select id="ran-ue"></select></label>
-      <label>Janela <select id="ran-window">
+      <label>Window <select id="ran-window">
         <option value="60">1 min</option><option value="300" selected>5 min</option>
         <option value="900">15 min</option></select></label>
-      <button id="ran-pause" class="btn">Pausar</button>
-      <a class="btn" id="ran-csv" href="api/ran.csv" download>Exportar CSV</a>
+      <button id="ran-pause" class="btn">Pause</button>
+      <a class="btn" id="ran-csv" href="api/ran.csv" download>Export CSV</a>
       <button id="ran-old" class="btn hidden"></button>
       <span class="muted" id="ran-status"></span>
     </div>
-    <div class="note hidden" id="ran-ident-note">O gNB só informa o <b>RNTI</b>. Para mostrar nome, IMSI e IP, o painel
-      cruza o log do gNB (RNTI → AMF_UE_NGAP_ID) com o log do AMF (→ IMSI) e do SMF (→ IP). Ligue o log do gNB
-      (<code>GNB_LOG_SSH</code> no config.env + <code>sudo ./install.sh --dashboard-only</code>).
+    <div class="note hidden" id="ran-ident-note">The gNB only reports the <b>RNTI</b>. To show name, IMSI and IP, the dashboard
+      matches the gNB log (RNTI → AMF_UE_NGAP_ID) with the AMF log (→ IMSI) and the SMF log (→ IP). Enable the gNB log
+      (<code>GNB_LOG_SSH</code> in config.env + <code>sudo ./install.sh --dashboard-only</code>).
     </div>
     <div class="ue-strip" id="ran-uecards"></div>
-    <h3 class="sect">Célula</h3>
+    <h3 class="sect">Cell</h3>
     <div class="charts two">
-      <div class="chart card"><h4>Vazão total da célula <span class="unit">Mbit/s</span></h4><div id="c-cell-tput"></div></div>
-      <div class="chart card"><h4>PRBs usados <span class="unit">soma por slot TDD</span></h4><div id="c-cell-prb"></div></div>
-      <div class="chart card"><h4>Vazão de downlink por UE <span class="unit">Mbit/s</span></h4><div id="c-ue-dl"></div></div>
-      <div class="chart card"><h4>Vazão de uplink por UE <span class="unit">Mbit/s</span></h4><div id="c-ue-ul"></div></div>
+      <div class="chart card"><h4>Total cell throughput <span class="unit">Mbit/s</span></h4><div id="c-cell-tput"></div></div>
+      <div class="chart card"><h4>PRBs used <span class="unit">sum per TDD slot</span></h4><div id="c-cell-prb"></div></div>
+      <div class="chart card"><h4>Downlink throughput per UE <span class="unit">Mbit/s</span></h4><div id="c-ue-dl"></div></div>
+      <div class="chart card"><h4>Uplink throughput per UE <span class="unit">Mbit/s</span></h4><div id="c-ue-ul"></div></div>
     </div>
-    <h3 class="sect">UE selecionado <span class="muted" id="ran-sel"></span></h3>
+    <h3 class="sect">Selected UE <span class="muted" id="ran-sel"></span></h3>
     <div class="charts">
       <div class="chart card"><h4>BLER <span class="unit">%</span></h4><div id="c-bler"></div></div>
       <div class="chart card"><h4>MCS</h4><div id="c-mcs"></div></div>
-      <div class="chart card"><h4>CQI e rank</h4><div id="c-cqi"></div></div>
-      <div class="chart card"><h4>SNR e RSRP do PUSCH <span class="unit">dB</span></h4><div id="c-snr"></div></div>
+      <div class="chart card"><h4>CQI and rank</h4><div id="c-cqi"></div></div>
+      <div class="chart card"><h4>PUSCH SNR and RSRP <span class="unit">dB</span></h4><div id="c-snr"></div></div>
       <div class="chart card"><h4>Buffer <span class="unit">bytes</span></h4><div id="c-bs"></div></div>
-      <div class="chart card"><h4>Timing advance <span class="unit">ns</span> e PHR <span class="unit">dB</span></h4><div id="c-ta"></div></div>
+      <div class="chart card"><h4>Timing advance <span class="unit">ns</span> and PHR <span class="unit">dB</span></h4><div id="c-ta"></div></div>
     </div>
-    <h3 class="sect">Saúde do escalonador</h3>
+    <h3 class="sect">Scheduler health</h3>
     <div class="charts">
-      <div class="chart card"><h4>Latência do escalonador <span class="unit">µs</span></h4><div id="c-lat"></div></div>
-      <div class="chart card"><h4>Falhas por período <span class="unit">contagem</span></h4><div id="c-fail"></div></div>
+      <div class="chart card"><h4>Scheduler latency <span class="unit">µs</span></h4><div id="c-lat"></div></div>
+      <div class="chart card"><h4>Failures per period <span class="unit">count</span></h4><div id="c-fail"></div></div>
     </div>
   </section>
 
@@ -127,19 +128,19 @@
   <section id="tab-logs" class="tab">
     <div class="logs-layout">
       <aside class="card sources">
-        <h2>Fontes</h2>
+        <h2>Sources</h2>
         <div id="log-sources"></div>
       </aside>
       <div class="card logpane">
         <div class="toolbar">
-          <strong id="log-title">Escolha uma fonte</strong>
-          <label>Linhas <select id="log-tail"><option>200</option><option selected>1000</option><option>5000</option><option>20000</option></select></label>
-          <label>Nível <select id="log-level"><option value="">todos</option><option value="warn">avisos e erros</option><option value="error">só erros</option></select></label>
-          <input id="log-filter" type="search" placeholder="Filtrar (texto ou /regex/)" spellcheck="false">
-          <label class="chk"><input type="checkbox" id="log-follow" checked> Ao vivo</label>
-          <label class="chk"><input type="checkbox" id="log-wrap"> Quebrar linhas</label>
-          <button class="btn" id="log-reload">Recarregar</button>
-          <button class="btn" id="log-download">Baixar</button>
+          <strong id="log-title">Choose a source</strong>
+          <label>Lines <select id="log-tail"><option>200</option><option selected>1000</option><option>5000</option><option>20000</option></select></label>
+          <label>Level <select id="log-level"><option value="">all</option><option value="warn">warnings and errors</option><option value="error">errors only</option></select></label>
+          <input id="log-filter" type="search" placeholder="Filter (text or /regex/)" spellcheck="false">
+          <label class="chk"><input type="checkbox" id="log-follow" checked> Live</label>
+          <label class="chk"><input type="checkbox" id="log-wrap"> Wrap lines</label>
+          <button class="btn" id="log-reload">Reload</button>
+          <button class="btn" id="log-download">Download</button>
           <span class="muted" id="log-count"></span>
         </div>
         <pre id="log-view" class="logview" tabindex="0"></pre>
@@ -150,77 +151,77 @@
   <!-- ======================= CORE ======================= -->
   <section id="tab-core" class="tab">
     <div class="seg" id="core-seg">
-      <button class="btn on" data-view="metrics">Métricas</button>
-      <button class="btn hidden" data-view="webui" id="core-seg-webui">Assinantes (<span class="core-name">Open5GS</span>)</button>
+      <button class="btn on" data-view="metrics">Metrics</button>
+      <button class="btn hidden" data-view="webui" id="core-seg-webui">Subscribers (<span class="core-name">Open5GS</span>)</button>
     </div>
     <div id="core-webui" class="hidden">
       <div class="toolbar">
-        <span class="muted">Página original de assinantes do <span class="core-name">Open5GS</span> (usuário <code>admin</code>) — cadastro de assinantes, slices, QoS.</span>
-        <button class="btn" id="webui-reload">Recarregar</button>
+        <span class="muted">Original subscriber page of <span class="core-name">Open5GS</span> (user <code>admin</code>): subscribers, slices, QoS.</span>
+        <button class="btn" id="webui-reload">Reload</button>
       </div>
-      <iframe id="webui-frame" title="Assinantes do core ativo" class="webui"></iframe>
+      <iframe id="webui-frame" title="Subscribers of the active core" class="webui"></iframe>
     </div>
     <div id="core-metrics">
     <div class="toolbar">
-      <label>Janela <select id="core-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
+      <label>Window <select id="core-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
       <span class="muted" id="core-live-status"></span>
     </div>
     <div class="kpis" id="core-live-kpis"></div>
     <div class="charts" style="margin-top:12px">
-      <div class="chart card"><h4>Tráfego dos UEs no UPF (N6, por DNN) <span class="unit">Mbit/s</span></h4><div id="c-upf-n6"></div></div>
-      <div class="chart card"><h4>Link com o gNB (N3, GTP-U) <span class="unit">Mbit/s</span></h4><div id="c-upf-n3"></div></div>
-      <div class="chart card"><h4>CPU por função do core <span class="unit">% de 1 núcleo</span></h4><div id="c-nf-cpu"></div></div>
+      <div class="chart card"><h4>UE traffic at the UPF (N6, per DNN) <span class="unit">Mbit/s</span></h4><div id="c-upf-n6"></div></div>
+      <div class="chart card"><h4>Link to the gNB (N3, GTP-U) <span class="unit">Mbit/s</span></h4><div id="c-upf-n3"></div></div>
+      <div class="chart card"><h4>CPU per core function <span class="unit">% of 1 core</span></h4><div id="c-nf-cpu"></div></div>
     </div>
     <div class="grid2">
-      <div class="card"><h2>Funções do <span class="core-name">core</span> <span class="muted">(processos no host)</span></h2><div class="tablewrap"><table id="core-nfs"></table></div></div>
-      <div class="card"><h2>Interfaces do UPF</h2><div class="tablewrap"><table id="core-ifaces"></table></div></div>
+      <div class="card"><h2>Functions of the <span class="core-name">core</span> <span class="muted">(host processes)</span></h2><div class="tablewrap"><table id="core-nfs"></table></div></div>
+      <div class="card"><h2>UPF interfaces</h2><div class="tablewrap"><table id="core-ifaces"></table></div></div>
     </div>
     <div id="core-disabled" class="card hidden note-card">
-      <h2>Métricas Prometheus do Open5GS <span class="muted">(opcional)</span></h2>
-      <p class="muted">Tudo acima vem do <code>/proc</code> do host e dos logs, sem mexer no core. Para ter também os
-        contadores internos dos NFs (sessões N4, volumes por QoS, etc.), defina <code>OPEN5GS_METRICS=true</code> e rode
-        <code>sudo ./install.sh --deploy-only</code> numa janela sem usuários (reinicia AMF/SMF/UPF/PCF uma vez).</p>
+      <h2>Open5GS Prometheus metrics <span class="muted">(optional)</span></h2>
+      <p class="muted">Everything above comes from the host <code>/proc</code> and the logs, without touching the core. To also get the
+        internal NF counters (N4 sessions, volumes per QoS, etc.), set <code>OPEN5GS_METRICS=true</code> and run
+        <code>sudo ./install.sh --deploy-only</code> in a window without users (restarts AMF/SMF/UPF/PCF once).</p>
     </div>
     <div id="core-enabled" class="hidden">
-      <h3 class="sect">Métricas Prometheus <span class="muted" id="core-status"></span></h3>
+      <h3 class="sect">Prometheus metrics <span class="muted" id="core-status"></span></h3>
       <div class="kpis" id="core-kpis"></div>
       <div class="charts">
-        <div class="chart card"><h4>Tráfego no UPF (N3) <span class="unit">Mbit/s</span></h4><div id="c-upf"></div></div>
-        <div class="chart card"><h4>UEs e sessões</h4><div id="c-core-counts"></div></div>
+        <div class="chart card"><h4>UPF traffic (N3) <span class="unit">Mbit/s</span></h4><div id="c-upf"></div></div>
+        <div class="chart card"><h4>UEs and sessions</h4><div id="c-core-counts"></div></div>
       </div>
       <div class="card">
-        <div class="toolbar"><h2>Todas as métricas</h2>
-          <input id="core-filter" type="search" placeholder="Filtrar métricas" spellcheck="false"></div>
+        <div class="toolbar"><h2>All metrics</h2>
+          <input id="core-filter" type="search" placeholder="Filter metrics" spellcheck="false"></div>
         <div class="tablewrap"><table id="core-table"></table></div>
       </div>
     </div>
     </div>
   </section>
-  <!-- ======================= MÁQUINAS ======================= -->
+  <!-- ======================= MACHINES ======================= -->
   <!-- ======================= RU ======================= -->
   <section id="tab-ru" class="tab">
     <div class="toolbar">
       <h2 id="ru-title" class="hd-title">RU</h2>
       <span class="muted" id="ru-sub"></span>
-      <label>Janela <select id="ru-window"><option value="300">5 min</option><option value="900" selected>15 min</option></select></label>
+      <label>Window <select id="ru-window"><option value="300">5 min</option><option value="900" selected>15 min</option></select></label>
     </div>
     <div class="kpis" id="ru-state"></div>
     <div class="kpis" id="ru-kpis" style="margin-top:10px"></div>
     <div class="charts" style="margin-top:12px">
-      <div class="chart card"><h4>Potência e temperatura <span class="unit">W · °C</span></h4><div id="c-ru-pt"></div></div>
-      <div class="chart card"><h4>Fronthaul: pacotes U-plane por janela do PM <span class="unit">pacotes</span></h4><div id="c-ru-fh"></div></div>
-      <div class="chart card"><h4>Portas de gestão <span class="unit">Mbit/s</span></h4><div id="c-ru-net"></div></div>
+      <div class="chart card"><h4>Power and temperature <span class="unit">W · °C</span></h4><div id="c-ru-pt"></div></div>
+      <div class="chart card"><h4>Fronthaul: U-plane packets per PM window <span class="unit">packets</span></h4><div id="c-ru-fh"></div></div>
+      <div class="chart card"><h4>Management ports <span class="unit">Mbit/s</span></h4><div id="c-ru-net"></div></div>
     </div>
     <div class="grid2">
-      <div class="card"><h2>Configuração de rádio</h2><div class="tablewrap"><table id="ru-cfg"></table></div>
-        <details style="margin-top:8px"><summary class="muted">Todos os parâmetros</summary>
+      <div class="card"><h2>Radio configuration</h2><div class="tablewrap"><table id="ru-cfg"></table></div>
+        <details style="margin-top:8px"><summary class="muted">All parameters</summary>
           <div class="tablewrap"><table id="ru-cfg-raw"></table></div></details></div>
-      <div class="card"><h2>Mudanças de estado</h2><div class="events" id="ru-events"></div></div>
+      <div class="card"><h2>State changes</h2><div class="events" id="ru-events"></div></div>
     </div>
-    <div class="card" style="margin-top:12px"><h2>Interfaces da RU</h2><div class="tablewrap"><table id="ru-eth"></table></div>
+    <div class="card" style="margin-top:12px"><h2>RU interfaces</h2><div class="tablewrap"><table id="ru-eth"></table></div>
       <div class="muted" id="ru-system" style="margin-top:6px;font-size:12px"></div></div>
-    <p class="note">Somente leitura: o painel entra na RU por SSH (porta RJ45) e roda apenas comandos <code>show</code>.
-      O fronthaul (C/U-plane, VLAN da configuração) passa pela SFP+ direto no FPGA e não aparece nas portas de gestão.</p>
+    <p class="note">Read only: the dashboard logs into the RU over SSH (RJ45 port) and runs only <code>show</code> commands.
+      The fronthaul (C/U-plane, configured VLAN) goes through the SFP+ straight to the FPGA and does not show on the management ports.</p>
   </section>
 
   <section id="tab-hosts" class="tab">
@@ -229,132 +230,132 @@
       <div class="toolbar">
         <h2 id="hd-title" class="hd-title"></h2>
         <span class="muted" id="hd-sub"></span>
-        <label>Janela <select id="hd-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
+        <label>Window <select id="hd-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
       </div>
       <div class="kpis" id="hd-kpis"></div>
       <div class="card energy hidden" id="hd-energy" style="margin-top:12px">
-        <h2>Energia <span class="muted" id="hd-energy-sub"></span></h2>
+        <h2>Energy <span class="muted" id="hd-energy-sub"></span></h2>
         <div class="kpis" id="hd-energy-kpis"></div>
         <div class="charts" style="margin-top:12px">
-          <div class="chart"><h4>Potência ativa <span class="unit">W</span></h4><div id="c-energy-p"></div></div>
-          <div class="chart"><h4>Tensão e corrente <span class="unit">V · A</span></h4><div id="c-energy-vi"></div></div>
+          <div class="chart"><h4>Active power <span class="unit">W</span></h4><div id="c-energy-p"></div></div>
+          <div class="chart"><h4>Voltage and current <span class="unit">V · A</span></h4><div id="c-energy-vi"></div></div>
         </div>
-        <details style="margin-top:8px"><summary class="muted">Todas as grandezas do medidor</summary>
+        <details style="margin-top:8px"><summary class="muted">All meter readings</summary>
           <div class="tablewrap"><table id="hd-energy-fields"></table></div></details>
       </div>
       <div class="card" style="margin-top:12px">
-        <h2>Núcleos <span class="muted" id="hd-cores-sub"></span></h2>
+        <h2>Cores <span class="muted" id="hd-cores-sub"></span></h2>
         <div class="coregrid" id="hd-cores"></div>
       </div>
       <div class="charts" style="margin-top:12px">
-        <div class="chart card"><h4>CPU e temperatura <span class="unit">% · °C</span></h4><div id="c-host-cpu"></div></div>
-        <div class="chart card"><h4>Memória e carga <span class="unit">% · load 1 min</span></h4><div id="c-host-mem"></div></div>
-        <div class="chart card"><h4>Rede: recebido <span class="unit">Mbit/s</span></h4><div id="c-host-rx"></div></div>
-        <div class="chart card"><h4>Rede: enviado <span class="unit">Mbit/s</span></h4><div id="c-host-tx"></div></div>
+        <div class="chart card"><h4>CPU and temperature <span class="unit">% · °C</span></h4><div id="c-host-cpu"></div></div>
+        <div class="chart card"><h4>Memory and load <span class="unit">% · load 1 min</span></h4><div id="c-host-mem"></div></div>
+        <div class="chart card"><h4>Network: received <span class="unit">Mbit/s</span></h4><div id="c-host-rx"></div></div>
+        <div class="chart card"><h4>Network: sent <span class="unit">Mbit/s</span></h4><div id="c-host-tx"></div></div>
       </div>
       <div class="grid2">
-        <div class="card"><h2>Processos que mais usam CPU <span class="muted">(100% = 1 núcleo)</span></h2><div class="tablewrap"><table id="hd-procs"></table></div></div>
-        <div class="card"><h2>Temperaturas</h2><div class="tablewrap"><table id="hd-temps"></table></div></div>
+        <div class="card"><h2>Top CPU processes <span class="muted">(100% = 1 core)</span></h2><div class="tablewrap"><table id="hd-procs"></table></div></div>
+        <div class="card"><h2>Temperatures</h2><div class="tablewrap"><table id="hd-temps"></table></div></div>
       </div>
       <div class="grid2">
-        <div class="card"><h2>Discos</h2><div class="tablewrap"><table id="hd-disks"></table></div></div>
-        <div class="card"><h2>Interfaces de rede</h2><div class="tablewrap"><table id="hd-net"></table></div></div>
+        <div class="card"><h2>Disks</h2><div class="tablewrap"><table id="hd-disks"></table></div></div>
+        <div class="card"><h2>Network interfaces</h2><div class="tablewrap"><table id="hd-net"></table></div></div>
       </div>
     </div>
   </section>
-  <!-- ======================= HISTÓRICO ======================= -->
+  <!-- ======================= HISTORY ======================= -->
   <section id="tab-history" class="tab">
     <div id="hist-off" class="card hidden">
-      <h2>Histórico desligado</h2>
-      <p>Para guardar <b>todas</b> as métricas (rádio, core, máquinas) e os eventos do core e poder comparar setups depois,
-        defina <code>DASHBOARD_PERSIST=true</code> no <code>config.env</code> e rode <code>sudo ./install.sh --dashboard-only</code>.</p>
+      <h2>History disabled</h2>
+      <p>To keep <b>all</b> the metrics (radio, core, machines) and the core events, to compare setups later,
+        set <code>DASHBOARD_PERSIST=true</code> in <code>config.env</code> and run <code>sudo ./install.sh --dashboard-only</code>.</p>
     </div>
     <div id="hist-on" class="hidden">
       <div class="muted" id="hist-status" style="margin-bottom:10px"></div>
       <div class="card">
-        <div class="toolbar"><h2>Experimentos</h2><span class="muted">marque dois ou mais para comparar</span>
-          <button class="btn on" id="hist-compare-btn" disabled>Comparar</button></div>
+        <div class="toolbar"><h2>Experiments</h2><span class="muted">tick two or more to compare</span>
+          <button class="btn on" id="hist-compare-btn" disabled>Compare</button></div>
         <div class="tablewrap"><table id="hist-exps" class="exps"></table></div>
       </div>
       <div class="toolbar" style="margin-top:12px">
-        <label>Período <select id="hist-preset"></select></label>
-        <span id="hist-custom" class="hidden"><input type="datetime-local" id="hist-from"> até <input type="datetime-local" id="hist-to">
-          <button class="btn" id="hist-go">Ver</button></span>
-        <a class="btn" id="hist-csv" href="#" download>Exportar CSV</a>
+        <label>Period <select id="hist-preset"></select></label>
+        <span id="hist-custom" class="hidden"><input type="datetime-local" id="hist-from"> to <input type="datetime-local" id="hist-to">
+          <button class="btn" id="hist-go">View</button></span>
+        <a class="btn" id="hist-csv" href="#" download>Export CSV</a>
       </div>
       <div id="hist-view">
         <h3 class="sect" id="hist-view-title"></h3>
         <div class="kpis" id="hist-kpis"></div>
         <div class="charts two" style="margin-top:12px">
-          <div class="chart card"><h4>Vazão da célula <span class="unit">Mbit/s</span></h4><div id="hc-cell"></div></div>
-          <div class="chart card"><h4>PRBs usados</h4><div id="hc-prb"></div></div>
-          <div class="chart card"><h4>Downlink por UE <span class="unit">Mbit/s</span></h4><div id="hc-ue-dl"></div></div>
-          <div class="chart card"><h4>BLER DL por UE <span class="unit">%</span></h4><div id="hc-ue-bler"></div></div>
-          <div class="chart card"><h4>MCS DL por UE</h4><div id="hc-ue-mcs"></div></div>
-          <div class="chart card"><h4>CQI por UE</h4><div id="hc-ue-cqi"></div></div>
-          <div class="chart card"><h4>SNR PUSCH por UE <span class="unit">dB</span></h4><div id="hc-ue-snr"></div></div>
-          <div class="chart card"><h4>Máquinas: CPU e temperatura <span class="unit">% · °C</span></h4><div id="hc-hosts"></div></div>
-          <div class="chart card"><h4>CPU por função do core <span class="unit">% de 1 núcleo</span></h4><div id="hc-nf"></div></div>
-          <div class="chart card"><h4>Tráfego no UPF (N6) <span class="unit">Mbit/s</span></h4><div id="hc-upf"></div></div>
-          <div class="chart card ru-only"><h4>RU: potência e temperatura <span class="unit">W · °C</span></h4><div id="hc-ru"></div></div>
+          <div class="chart card"><h4>Cell throughput <span class="unit">Mbit/s</span></h4><div id="hc-cell"></div></div>
+          <div class="chart card"><h4>PRBs used</h4><div id="hc-prb"></div></div>
+          <div class="chart card"><h4>Downlink per UE <span class="unit">Mbit/s</span></h4><div id="hc-ue-dl"></div></div>
+          <div class="chart card"><h4>DL BLER per UE <span class="unit">%</span></h4><div id="hc-ue-bler"></div></div>
+          <div class="chart card"><h4>DL MCS per UE</h4><div id="hc-ue-mcs"></div></div>
+          <div class="chart card"><h4>CQI per UE</h4><div id="hc-ue-cqi"></div></div>
+          <div class="chart card"><h4>PUSCH SNR per UE <span class="unit">dB</span></h4><div id="hc-ue-snr"></div></div>
+          <div class="chart card"><h4>Machines: CPU and temperature <span class="unit">% · °C</span></h4><div id="hc-hosts"></div></div>
+          <div class="chart card"><h4>CPU per core function <span class="unit">% of 1 core</span></h4><div id="hc-nf"></div></div>
+          <div class="chart card"><h4>UPF traffic (N6) <span class="unit">Mbit/s</span></h4><div id="hc-upf"></div></div>
+          <div class="chart card ru-only"><h4>RU: power and temperature <span class="unit">W · °C</span></h4><div id="hc-ru"></div></div>
         </div>
-        <div class="card" style="margin-top:12px"><h2>UEs no período <span class="muted">(por IMSI; o RNTI muda a cada conexão)</span></h2>
+        <div class="card" style="margin-top:12px"><h2>UEs in the period <span class="muted">(per IMSI; the RNTI changes on every connection)</span></h2>
           <div class="tablewrap"><table id="hist-ues"></table></div></div>
-        <div class="card" style="margin-top:12px"><h2>Eventos do core no período</h2><div id="hist-events"></div></div>
+        <div class="card" style="margin-top:12px"><h2>Core events in the period</h2><div id="hist-events"></div></div>
       </div>
       <div id="hist-compare" class="hidden">
-        <div class="toolbar"><h3 class="sect" style="margin:0">Comparação de experimentos</h3><button class="btn" id="hist-back">Voltar</button></div>
+        <div class="toolbar"><h3 class="sect" style="margin:0">Experiment comparison</h3><button class="btn" id="hist-back">Back</button></div>
         <div class="card"><div class="tablewrap" style="max-height:none"><table id="hist-cmp-table" class="cmp"></table></div>
-          <p class="muted" style="margin:8px 0 0">Em destaque: o melhor valor de cada linha. BLER calculado com todos os blocos do período.</p></div>
-        <p class="muted">Gráficos sobrepostos: eixo X = tempo desde o início de cada experimento (min:s).</p>
+          <p class="muted" style="margin:8px 0 0">Highlighted: the best value of each row. BLER computed from every block in the period.</p></div>
+        <p class="muted">Overlaid charts: X axis = time since the start of each experiment (min:s).</p>
         <div class="charts two">
-          <div class="chart card"><h4>DL da célula <span class="unit">Mbit/s</span></h4><div id="hcc-dl"></div></div>
-          <div class="chart card"><h4>UL da célula <span class="unit">Mbit/s</span></h4><div id="hcc-ul"></div></div>
+          <div class="chart card"><h4>Cell DL <span class="unit">Mbit/s</span></h4><div id="hcc-dl"></div></div>
+          <div class="chart card"><h4>Cell UL <span class="unit">Mbit/s</span></h4><div id="hcc-ul"></div></div>
           <div class="chart card"><h4>PRBs DL</h4><div id="hcc-prb"></div></div>
           <div class="chart card"><h4 id="hcc-host-title">CPU</h4><div id="hcc-cpu"></div></div>
-          <div class="chart card ru-only"><h4>RU: temperatura <span class="unit">°C</span></h4><div id="hcc-ru"></div></div>
+          <div class="chart card ru-only"><h4>RU: temperature <span class="unit">°C</span></h4><div id="hcc-ru"></div></div>
         </div>
       </div>
     </div>
   </section>
   <dialog id="rec-dialog" class="dlg">
     <form method="dialog">
-      <h2>Gravar experimento</h2>
-      <p class="muted">Marca um período com nome e notas. O painel guarda junto o setup (UEs, config.env com chaves mascaradas).
-        As métricas continuam sendo gravadas sempre; o experimento é o marcador para comparar depois.</p>
-      <label>Nome<br><input type="text" id="rec-name" maxlength="120" placeholder="ex.: 100 MHz, 4x4 MIMO, MCS 256QAM"></label>
-      <label>Notas<br><textarea id="rec-notes" rows="4" placeholder="o que mudou no setup, posição do UE, teste (iperf -u -b 800M)…"></textarea></label>
-      <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="rec-cancel">Cancelar</button>
-        <button class="btn on" id="rec-start">● Iniciar</button></div>
+      <h2>Record experiment</h2>
+      <p class="muted">Marks a period with a name and notes. The dashboard also stores the setup (UEs, config.env with masked keys).
+        Metrics are always recorded; the experiment is the marker to compare later.</p>
+      <label>Name<br><input type="text" id="rec-name" maxlength="120" placeholder="e.g. 100 MHz, 4x4 MIMO, MCS 256QAM"></label>
+      <label>Notes<br><textarea id="rec-notes" rows="4" placeholder="what changed in the setup, UE position, test (iperf -u -b 800M)…"></textarea></label>
+      <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="rec-cancel">Cancel</button>
+        <button class="btn on" id="rec-start">● Start</button></div>
     </form>
   </dialog>
   <dialog id="cfg-dialog" class="dlg wide">
     <h2 id="cfg-dialog-title"></h2>
     <pre class="cfgdiff" id="cfg-dialog-body" style="max-height:60vh"></pre>
-    <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="cfg-dialog-close">Fechar</button></div>
+    <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="cfg-dialog-close">Close</button></div>
   </dialog>
-  <!-- ======================= CONFIGURAÇÃO ======================= -->
-  <!-- ======================= CONTROLE ======================= -->
+  <!-- ======================= SETTINGS ======================= -->
+  <!-- ======================= CONTROL ======================= -->
   <section id="tab-control" class="tab">
     <div class="note err hidden" id="ctl-error"></div>
     <div class="card" id="ctl-login">
-      <h2>Controle</h2>
-      <p class="muted">Ver o estado é livre; iniciar, parar e reiniciar pedem login de administrador (botão <b>🔒 Admin</b> no topo; vale para todas as abas).</p>
-      <div class="toolbar"><button class="btn on" data-admin-login>🔒 Entrar como administrador</button></div>
+      <h2>Control</h2>
+      <p class="muted">Viewing the status is open; start, stop and restart need an administrator login (<b>🔒 Admin</b> button at the top; valid for every tab).</p>
+      <div class="toolbar"><button class="btn on" data-admin-login>🔒 Sign in as administrator</button></div>
     </div>
     <div class="toolbar hidden" id="ctl-logged">
-      <button class="btn on" data-act="start" data-target="all">▶ Iniciar tudo (core + UERANSIM, em ordem)</button>
-      <button class="btn" data-act="restart" data-target="all">↻ Reiniciar tudo</button>
-      <button class="btn danger" data-act="stop" data-target="all">■ Parar tudo</button>
-      <span class="muted">Depois de um boot só o painel sobe: o resto começa por aqui.</span>
-      <button class="btn small" id="ctl-logout" style="margin-left:auto">Sair</button>
+      <button class="btn on" data-act="start" data-target="all">▶ Start all (core + UERANSIM, in order)</button>
+      <button class="btn" data-act="restart" data-target="all">↻ Restart all</button>
+      <button class="btn danger" data-act="stop" data-target="all">■ Stop all</button>
+      <span class="muted">After a boot only the dashboard comes up: everything else starts here.</span>
+      <button class="btn small" id="ctl-logout" style="margin-left:auto">Sign out</button>
     </div>
     <div class="card" id="ctl-job" style="margin-top:12px">
       <h2 id="ctl-job-title"></h2>
       <div class="events" id="ctl-job-log" style="max-height:260px"></div>
     </div>
     <div class="card hidden" id="ctl-corecard">
-      <h2>Core ativo <span class="muted">um por vez — trocar para o outro e sobe o novo em ordem</span></h2>
+      <h2>Active core <span class="muted">one at a time: switching stops this one and brings the other up in order</span></h2>
       <div class="toolbar">
         <div class="seg" id="ctl-core-seg"></div>
         <span class="muted" id="ctl-core-info"></span>
@@ -362,13 +363,13 @@
       <div class="hidden" id="ctl-switch">
         <div class="note" id="ctl-switch-text"></div>
         <div class="toolbar">
-          <label><input type="checkbox" id="ctl-switch-gnb" checked> religar o gNB OCUDU com</label>
+          <label><input type="checkbox" id="ctl-switch-gnb" checked> restart the OCUDU gNB with</label>
           <select id="ctl-switch-cfg" style="max-width:420px"></select>
         </div>
         <div class="toolbar">
-          <button class="btn on" id="ctl-switch-go">Trocar agora</button>
-          <button class="btn" id="ctl-switch-cancel">Cancelar</button>
-          <span class="muted">quem estiver usando a rede perde a conexão durante a troca (~1 a 5 min)</span>
+          <button class="btn on" id="ctl-switch-go">Switch now</button>
+          <button class="btn" id="ctl-switch-cancel">Cancel</button>
+          <span class="muted">anyone using the network loses the connection during the switch (~1 to 5 min)</span>
         </div>
       </div>
     </div>
@@ -376,66 +377,66 @@
       <div class="card">
         <h2>Core 5G (<span class="core-name">Open5GS</span>) <span class="muted" id="ctl-core-sub"></span></h2>
         <div class="toolbar">
-          <button class="btn small on" data-act="start" data-target="core">▶ Iniciar core</button>
-          <button class="btn small" data-act="restart" data-target="core">↻ Reiniciar core</button>
-          <button class="btn small danger" data-act="stop" data-target="core">■ Parar core</button>
+          <button class="btn small on" data-act="start" data-target="core">▶ Start core</button>
+          <button class="btn small" data-act="restart" data-target="core">↻ Restart core</button>
+          <button class="btn small danger" data-act="stop" data-target="core">■ Stop core</button>
         </div>
         <div class="tablewrap" style="max-height:none"><table id="ctl-core"></table></div>
       </div>
       <div>
         <div class="card" id="ctl-ocudu-card">
           <h2>gNB OCUDU <span class="muted" id="ctl-ocudu-sub"></span></h2>
-          <div class="note warn hidden" id="ctl-ocudu-setup">O serviço do gNB ainda não foi instalado no host do gNB.
-            Rode uma vez, a partir da máquina do core:<br>
+          <div class="note warn hidden" id="ctl-ocudu-setup">The gNB service is not installed on the gNB host yet.
+            Run once, from the core machine:<br>
             <code>scp scripts/ocudu/setup-gnb-service.sh innovaserver@10.10.0.1:/tmp/ &amp;&amp; ssh -t innovaserver@10.10.0.1 sudo bash /tmp/setup-gnb-service.sh</code></div>
           <div class="note warn hidden" id="ctl-ocudu-manual"></div>
           <div class="kpis" id="ctl-ocudu-kpis"></div>
           <div class="toolbar" style="margin-top:10px">
-            <label>Arquivo <select id="ctl-ocudu-cfg" style="max-width:420px"></select></label>
-            <label class="muted"><input type="checkbox" id="ctl-ocudu-all"> todos os .yml</label>
+            <label>File <select id="ctl-ocudu-cfg" style="max-width:420px"></select></label>
+            <label class="muted"><input type="checkbox" id="ctl-ocudu-all"> all .yml files</label>
           </div>
           <div class="muted" id="ctl-ocudu-cfginfo" style="font-size:12px;margin:4px 0 8px"></div>
           <div class="toolbar">
-            <button class="btn on" data-act="start" data-target="ocudu">▶ Iniciar gNB com este arquivo</button>
-            <button class="btn" data-act="restart" data-target="ocudu">↻ Reiniciar</button>
-            <button class="btn danger" data-act="stop" data-target="ocudu">■ Parar gNB</button>
+            <button class="btn on" data-act="start" data-target="ocudu">▶ Start gNB with this file</button>
+            <button class="btn" data-act="restart" data-target="ocudu">↻ Restart</button>
+            <button class="btn danger" data-act="stop" data-target="ocudu">■ Stop gNB</button>
           </div>
-          <details style="margin-top:8px"><summary class="muted" id="ctl-ocudu-jlabel">Saída do serviço (journal)</summary>
+          <details style="margin-top:8px"><summary class="muted" id="ctl-ocudu-jlabel">Service output (journal)</summary>
             <pre class="cfgout" id="ctl-ocudu-journal"></pre></details>
-          <p class="muted" style="font-size:12px" id="ctl-ocudu-how">A máquina já deve estar preparada (interface, VF do DPDK, XDP, PTP): o botão só roda
-            <code>taskset … ./gnb -c configs/&lt;arquivo&gt;.yml</code> como serviço. Parar = Ctrl+C no gNB.</p>
+          <p class="muted" style="font-size:12px" id="ctl-ocudu-how">The machine must already be prepared (interface, DPDK VF, XDP, PTP): the button only runs
+            <code>taskset … ./gnb -c configs/&lt;file&gt;.yml</code> as a service. Stop = Ctrl+C on the gNB.</p>
         </div>
         <div class="card">
-          <h2>UERANSIM (gNB e UEs simulados) <span class="muted" id="ctl-ueransim-sub"></span></h2>
+          <h2>UERANSIM (simulated gNB and UEs) <span class="muted" id="ctl-ueransim-sub"></span></h2>
           <div class="toolbar">
-            <button class="btn small on" data-act="start" data-target="ueransim">▶ Iniciar</button>
-            <button class="btn small" data-act="restart" data-target="ueransim">↻ Reiniciar</button>
-            <button class="btn small danger" data-act="stop" data-target="ueransim">■ Parar</button>
+            <button class="btn small on" data-act="start" data-target="ueransim">▶ Start</button>
+            <button class="btn small" data-act="restart" data-target="ueransim">↻ Restart</button>
+            <button class="btn small danger" data-act="stop" data-target="ueransim">■ Stop</button>
           </div>
           <div class="tablewrap" style="max-height:none"><table id="ctl-ueransim"></table></div>
         </div>
-        <div class="card"><h2>Ações recentes</h2><ul id="ctl-recent" class="plain"></ul></div>
+        <div class="card"><h2>Recent actions</h2><ul id="ctl-recent" class="plain"></ul></div>
       </div>
     </div>
-    <p class="note">Os botões agem sobre o <b>core ativo</b> (<span class="core-name">Open5GS</span>) e o UERANSIM dele. Parar = escala 0
-      (nada é apagado). Reiniciar recria o pod e também os que dependem dele (UPF → SMF; AMF → gNB e UEs simulados). "Iniciar tudo"
-      sobe em ordem: MongoDB → NRF → demais → UPF → SMF → AMF → gNB UERANSIM → UEs, conferindo a fibra no AMF/UPF, o PFCP e o
-      NG Setup; um pod que suba sem a fibra é recriado sozinho. Trocar de core para o gNB OCUDU, para o core atual, sobe o outro
-      e religa o gNB com o arquivo que aponta para o AMF novo.</p>
+    <p class="note">The buttons act on the <b>active core</b> (<span class="core-name">Open5GS</span>) and its UERANSIM. Stop = scale 0
+      (nothing is deleted). Restart recreates the pod and the ones that depend on it (UPF → SMF; AMF → gNB and simulated UEs). "Start all"
+      brings everything up in order: MongoDB → NRF → others → UPF → SMF → AMF → UERANSIM gNB → UEs, checking the fiber on AMF/UPF, PFCP and
+      NG Setup; a pod that comes up without the fiber is recreated automatically. Switching cores stops the OCUDU gNB and the current core, brings the other one up
+      and restarts the gNB with the file that points to the new AMF.</p>
   </section>
 
-  <!-- ======================= DOCUMENTAÇÃO ======================= -->
+  <!-- ======================= DOCUMENTATION ======================= -->
   <section id="tab-docs" class="tab">
     <div class="docs-layout">
       <aside class="card docs-nav">
-        <h2>Documentação</h2>
+        <h2>Documentation</h2>
         <div class="muted" id="docs-git" style="font-size:12px;margin-bottom:8px"></div>
-        <input type="search" id="docs-filter" placeholder="buscar nos títulos…">
+        <input type="search" id="docs-filter" placeholder="search titles…">
         <div id="docs-list"></div>
       </aside>
       <article class="card docs-body">
         <div class="toolbar"><span class="muted" id="docs-path"></span>
-          <a class="btn small" id="docs-raw" target="_blank" rel="noopener" style="margin-left:auto">abrir no GitHub</a></div>
+          <a class="btn small" id="docs-raw" target="_blank" rel="noopener" style="margin-left:auto">open on GitHub</a></div>
         <div id="docs-view" class="md"></div>
       </article>
     </div>
@@ -444,43 +445,44 @@
   <section id="tab-settings" class="tab">
     <div id="cfg-msg" class="cfgmsg hidden"></div>
     <div id="cfg-login" class="card cfglogin">
-      <h2>Configuração (config.env)</h2>
-      <p class="muted">Edita o <code>config.env</code> da máquina do core. Precisa da senha de administrador
-        (mostrada no fim do <code>sudo ./install.sh</code>; também em <code>sudo cat /opt/open5gs-k3s/state/dashboard-admin-password</code>).</p>
-      <div class="toolbar"><button class="btn on" data-admin-login>🔒 Entrar como administrador</button></div>
+      <h2>Settings (config.env)</h2>
+      <p class="muted">Edits <code>config.env</code> on the core machine. Needs the administrator password
+        (shown at the end of <code>sudo ./install.sh</code>; also in <code>sudo cat /opt/open5gs-k3s/state/dashboard-admin-password</code>).</p>
+      <div class="toolbar"><button class="btn on" data-admin-login>🔒 Sign in as administrator</button></div>
     </div>
     <div id="cfg-main" class="hidden">
       <div class="toolbar cfgbar">
-        <input type="search" id="cfg-filter" placeholder="filtrar variável ou descrição">
+        <input type="search" id="cfg-filter" placeholder="filter variable or description">
         <span class="muted" id="cfg-count"></span>
-        <button class="btn on" id="cfg-preview" disabled>Revisar e salvar…</button>
-        <button class="btn" id="cfg-discard" disabled>Descartar</button>
+        <button class="btn on" id="cfg-preview" disabled>Review and save…</button>
+        <button class="btn" id="cfg-discard" disabled>Discard</button>
         <span class="spacer"></span>
         <span id="cfg-sub"></span>
-        <button class="btn" id="cfg-reveal">Mostrar segredos</button>
-        <button class="btn" id="cfg-reload">Recarregar</button>
-        <button class="btn" id="cfg-logout">Sair</button>
+        <button class="btn" id="cfg-reveal">Show secrets</button>
+        <button class="btn" id="cfg-reload">Reload</button>
+        <button class="btn" id="cfg-logout">Sign out</button>
       </div>
-      <div class="card cfgnote muted">Salvar só grava o arquivo (com backup e a mesma validação do install). <b>Aplicar</b>
-        continua sendo o comando <code>sudo ./install.sh …</code> na máquina do core — o painel mostra qual.</div>
+      <div class="card cfgnote muted">Saving only writes the file (with a backup and the same validation as install). <b>Applying</b>
+        is still the <code>sudo ./install.sh …</code> command on the core machine; the dashboard shows which one.</div>
       <div id="cfg-review" class="card hidden">
-        <h2 id="cfg-review-title">Revisar alterações</h2>
+        <h2 id="cfg-review-title">Review changes</h2>
         <pre class="cfgdiff" id="cfg-diff"></pre>
         <div id="cfg-valid" style="margin:8px 0"></div>
         <div id="cfg-impact"></div>
         <div class="toolbar" style="margin-top:10px">
-          <button class="btn on" id="cfg-save">Salvar no config.env</button>
-          <button class="btn" id="cfg-cancel">Voltar</button>
+          <button class="btn on" id="cfg-save">Save to config.env</button>
+          <button class="btn" id="cfg-cancel">Back</button>
         </div>
       </div>
       <div id="cfg-sections"></div>
-      <details class="card"><summary><b>Backups</b> <span class="muted">— clique para ver a diferença e restaurar</span></summary>
+      <details class="card"><summary><b>Backups</b> <span class="muted">: click to see the diff and restore</span></summary>
         <ul id="cfg-backups" class="cfgbk"></ul></details>
     </div>
   </section>
 </main>
 
 <footer class="muted" id="footer"></footer>
+<script src="i18n.js"></script>
 <script src="uPlot.iife.min.js"></script>
 <script src="app.js"></script>
 <script src="hosts.js"></script>

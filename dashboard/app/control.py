@@ -1,17 +1,17 @@
 # =============================================================================
-#  dashboard/app/control.py — aba Controle: iniciar/parar/reiniciar o core,
-#  o UERANSIM e o gNB OCUDU (este pelo agente gnb-ctl na máquina do core).
+#  dashboard/app/control.py — Control tab: start/stop/restart the core,
+#  UERANSIM and the OCUDU gNB (the latter through the gnb-ctl agent on the core machine).
 #
-#  InnovaNetwork: dois cores (Open5GS e free5GC), cada um no seu namespace, um
-#  ativo por vez. CoreOps sabe operar UM core (nomes, ordem, checagens no log);
-#  Controller guarda as ações em andamento e faz a troca de core ativo.
+#  InnovaNetwork: two cores (Open5GS and free5GC), each in its own namespace, one
+#  active at a time. CoreOps knows how to operate ONE core (names, order, log checks);
+#  Controller keeps the actions in progress and switches the active core.
 #
-#  Core/UERANSIM: "parar" = escala 0 do Deployment; "iniciar" = escala 1 e espera
-#  ficar pronto; "reiniciar" = apaga o pod (o Deployment recria) e reinicia os
-#  dependentes (UPF -> SMF; AMF -> gNB simulado -> UEs). "Iniciar tudo" sobe em
-#  ordem e confere cada etapa (interface da fibra no AMF/UPF, PFCP, NG Setup);
-#  um pod que suba sem a interface da fibra (corrida com o Multus no boot) é
-#  recriado sozinho.
+#  Core/UERANSIM: "stop" = scale the Deployment to 0; "start" = scale to 1 and wait
+#  until ready; "restart" = delete the pod (the Deployment recreates it) and restart the
+#  dependents (UPF -> SMF; AMF -> simulated gNB -> UEs). "Start all" brings things up in
+#  order and checks each step (fiber interface on the AMF/UPF, PFCP, NG Setup);
+#  a pod that comes up without the fiber interface (race with Multus at boot) is
+#  recreated by itself.
 # =============================================================================
 import calendar
 import collections
@@ -20,8 +20,8 @@ import threading
 import time
 import urllib.error
 
-MAX_RETRY = 2          # recriações de um pod que subiu com problema
-READY_TIMEOUT = 300    # s (imagem já baixada: ~10-40 s)
+MAX_RETRY = 2          # recreations of a pod that came up with a problem
+READY_TIMEOUT = 300    # s (image already pulled: ~10-40 s)
 
 
 def _ts(s):
@@ -56,11 +56,11 @@ UERANSIM_CHECKS = {
 
 
 class CoreOps:
-    """Operações de UM core no seu namespace (Open5GS: chart da Gradiant; free5GC: manifestos próprios)."""
+    """Operations of ONE core in its namespace (Open5GS: Gradiant chart; free5GC: own manifests)."""
 
     LABELS = {"mongodb": "MongoDB", "nrf": "NRF", "scp": "SCP", "ausf": "AUSF", "udm": "UDM", "udr": "UDR",
               "pcf": "PCF", "bsf": "BSF", "nssf": "NSSF", "smf": "SMF", "upf": "UPF", "amf": "AMF",
-              "webui": "WebUI", "populate": "Assinantes (populate)", "gnb-sim": "gNB UERANSIM",
+              "webui": "WebUI", "populate": "Subscribers (populate)", "gnb-sim": "gNB UERANSIM",
               "ues-sim": "UEs UERANSIM", "chf": "CHF", "nef": "NEF"}
     ORDERS = {
         "open5gs": [["mongodb"], ["nrf"], ["scp"], ["ausf", "udm", "udr", "pcf", "bsf", "nssf"], ["populate", "webui"],
@@ -72,7 +72,7 @@ class CoreOps:
     DEPENDENTS = {"upf": ["smf"], "amf": ["gnb-sim", "ues-sim"], "gnb-sim": ["ues-sim"]}
 
     def __init__(self, k8s, core, ueransim_release):
-        """core: dict com name, label, kind (open5gs|free5gc), namespace, release, amf_ip, upf_ip."""
+        """core: dict with name, label, kind (open5gs|free5gc), namespace, release, amf_ip, upf_ip."""
         self.k8s, self.core = k8s, core
         self.ns, self.kind = core["namespace"], core["kind"]
         self.o5, self.ur = core.get("release") or "", ueransim_release
@@ -92,7 +92,7 @@ class CoreOps:
         return dep
 
     def checks(self, key):
-        """(regex de sucesso no log, regex de falha, segundos, obrigatório)."""
+        """(log success regex, failure regex, seconds, required)."""
         if key in UERANSIM_CHECKS:
             return UERANSIM_CHECKS[key]
         amf, upf = re.escape(self.amf_ip), re.escape(self.upf_ip)
@@ -161,7 +161,7 @@ class CoreOps:
                 reason = w["reason"]
         return ready, restarts, reason or st.get("phase", "")
 
-    # ------------------------------------------------------------------ visão
+    # ------------------------------------------------------------------ view
     def components(self):
         deps = self._deps()
         rank = {k: i for i, g in enumerate(self.ORDER) for k in g}
@@ -175,8 +175,8 @@ class CoreOps:
                 ps.append({"name": p["metadata"]["name"], "ready": ready, "restarts": restarts, "reason": reason,
                            "since": _ts(p.get("status", {}).get("startTime"))})
             want = d["spec"].get("replicas", 1)
-            state = ("parado" if want == 0 and not pods else "parando" if want == 0
-                     else "rodando" if ps and all(x["ready"] for x in ps) else "iniciando")
+            state = ("stopped" if want == 0 and not pods else "stopping" if want == 0
+                     else "running" if ps and all(x["ready"] for x in ps) else "starting")
             out.append({"key": k, "deployment": name, "label": self.LABELS.get(k, k),
                         "group": self.GROUP.get(k, "core"), "rank": rank.get(k, 99), "replicas": want,
                         "state": state, "pods": ps})
@@ -184,7 +184,7 @@ class CoreOps:
         return out
 
     def running(self):
-        """True se o AMF deste core está pedido para rodar (réplicas > 0)."""
+        """True if the AMF of this core is requested to run (replicas > 0)."""
         try:
             for name, d in self._deps().items():
                 if self.key(name) == "amf":
@@ -211,17 +211,17 @@ class CoreOps:
     def _run_group(self, job, action, target):
         sel = self._targets(target)
         if not sel:
-            raise RuntimeError("nenhum componente encontrado no namespace %s (%s instalado?)" % (self.ns, self.core["label"]))
+            raise RuntimeError("no component found in namespace %s (is %s installed?)" % (self.ns, self.core["label"]))
         if action == "stop":
-            # ordem inversa: rádio primeiro, banco por último
+            # reverse order: radio first, database last
             have = self._by_key()
             for k in reversed(sel):
-                job.log("parando %s" % self.LABELS.get(k, k))
+                job.log("stopping %s" % self.LABELS.get(k, k))
                 self._scale(have[k][0], 0)
             self._wait_gone(job, [have[k][0] for k in sel])
             return
         if action == "restart":
-            job.log("reiniciar = parar tudo e iniciar em ordem")
+            job.log("restart = stop everything and start in order")
             self._run_group(job, "stop", target)
         started = set()
         for group in self.ORDER + [[k for k in sel if all(k not in g for g in self.ORDER)]]:
@@ -232,31 +232,31 @@ class CoreOps:
     def _run_one(self, job, action, key):
         have = self._by_key()
         if key not in have:
-            raise ValueError("componente desconhecido: %s" % key)
+            raise ValueError("unknown component: %s" % key)
         name, dep = have[key]
         if action == "stop":
-            job.log("parando %s" % self.LABELS.get(key, key))
+            job.log("stopping %s" % self.LABELS.get(key, key))
             self._scale(name, 0)
             self._wait_gone(job, [name])
             deps = [k for k in self.DEPENDENTS.get(key, []) if k in have and have[k][1]["spec"].get("replicas", 1)]
             if deps:
-                job.log("atenção: %s depende(m) de %s e vai(ão) precisar ser reiniciado(s) quando ele voltar"
+                job.log("warning: %s depend(s) on %s and will need a restart when it comes back"
                         % (", ".join(self.LABELS.get(k, k) for k in deps), self.LABELS.get(key, key)), "warn")
             return
         if action == "start" or dep["spec"].get("replicas", 1) == 0:
             self._start_keys(job, [key])
             return
-        # reiniciar: recria o pod e depois os dependentes que estão rodando
+        # restart: recreate the pod and then the running dependents
         self._restart_keys(job, [key])
         for k in self.DEPENDENTS.get(key, []):
             if k in have and have[k][1]["spec"].get("replicas", 1) > 0:
-                job.log("%s depende de %s: reiniciando também" % (self.LABELS.get(k, k), self.LABELS.get(key, key)))
+                job.log("%s depends on %s: restarting it too" % (self.LABELS.get(k, k), self.LABELS.get(key, key)))
                 self._restart_keys(job, [k])
 
     # ------------------------------------------------------------------ passos
     def _start_keys(self, job, keys, started=frozenset()):
-        """Sobe as chaves; devolve as que foram (re)iniciadas. Um componente já rodando cujo
-        "fornecedor" acabou de ser (re)iniciado (ex.: SMF depois de um UPF novo) é reiniciado."""
+        """Brings the keys up; returns the ones (re)started. A component already running whose
+        "supplier" was just (re)started (e.g. SMF after a new UPF) is restarted."""
         have = self._by_key()
         t0 = time.time()
         todo = []
@@ -266,21 +266,21 @@ class CoreOps:
             if dep["spec"].get("replicas", 1) >= 1:
                 prov = [p for p, ds in self.DEPENDENTS.items() if k in ds and p in started]
                 if self._all_ready(dep) and not prov:
-                    job.log("%s já está rodando (mantido)" % label)
+                    job.log("%s is already running (kept)" % label)
                     continue
                 if prov:
-                    job.log("%s já rodava, mas %s foi reiniciado: reiniciando também"
+                    job.log("%s was running, but %s was restarted: restarting it too"
                             % (label, ", ".join(self.LABELS.get(p, p) for p in prov)))
                     for p in self._pods(dep):
                         self._delete_pod(p["metadata"]["name"])
                     todo.append(k)
                     continue
-                # pedido para rodar mas sem ficar pronto (ex.: sem a interface da fibra): recria
-                job.log("%s não está pronto; recriando o pod" % label, "warn")
+                # requested to run but not ready (e.g. without the fiber interface): recreate
+                job.log("%s is not ready; recreating the pod" % label, "warn")
                 for p in self._pods(dep):
                     self._delete_pod(p["metadata"]["name"])
             else:
-                job.log("iniciando %s" % label)
+                job.log("starting %s" % label)
                 self._scale(name, 1)
             todo.append(k)
         for k in todo:
@@ -293,7 +293,7 @@ class CoreOps:
         t0 = time.time()
         for k in keys:
             name, dep = have[k]
-            job.log("reiniciando %s (pod recriado)" % self.LABELS.get(k, k))
+            job.log("restarting %s (pod recreated)" % self.LABELS.get(k, k))
             for p in self._pods(dep):
                 self._delete_pod(p["metadata"]["name"])
         for k in keys:
@@ -310,7 +310,7 @@ class CoreOps:
         return pods[0] if pods else None
 
     def _verify(self, job, key, name, dep, t0):
-        """Espera o pod novo ficar pronto e confere o log; recria se subiu com problema."""
+        """Waits for the new pod to be ready and checks the log; recreates it if it came up with a problem."""
         label = self.LABELS.get(key, key)
         for attempt in range(MAX_RETRY + 1):
             pod = None
@@ -323,13 +323,13 @@ class CoreOps:
                         break
                 time.sleep(2)
             else:
-                raise RuntimeError("%s não ficou pronto em %d s" % (label, READY_TIMEOUT))
+                raise RuntimeError("%s was not ready after %d s" % (label, READY_TIMEOUT))
             ready, restarts, reason = self._pod_state(pod)
             ck = self.checks(key)
             bad = None
             if restarts or not ready:
                 text = self._log(pod, 60)
-                bad = "pod caiu (%s)%s" % (reason or "reiniciou",
+                bad = "pod went down (%s)%s" % (reason or "restarted",
                                            (": " + text.strip().splitlines()[-1][:160]) if text.strip() else "")
             elif ck:
                 ok_re, bad_re, secs, required = ck
@@ -344,17 +344,17 @@ class CoreOps:
                         break
                     if time.time() > end:
                         if required:
-                            bad = "não apareceu no log em %d s: %s" % (secs, ok_re.replace("\\", ""))
+                            bad = "not seen in the log after %d s: %s" % (secs, ok_re.replace("\\", ""))
                         else:
-                            job.log("%s: ainda sem '%s' após %d s (siga no log)" % (label, ok_re, secs), "warn")
+                            job.log("%s: still no '%s' after %d s (follow the log)" % (label, ok_re, secs), "warn")
                         break
                     time.sleep(2)
             if not bad:
-                job.log("%s pronto%s" % (label, " e conferido" if ck else ""))
+                job.log("%s ready%s" % (label, " and checked" if ck else ""))
                 return
             if attempt == MAX_RETRY:
-                raise RuntimeError("%s com problema: %s" % (label, bad))
-            job.log("%s com problema (%s); recriando o pod" % (label, bad), "warn")
+                raise RuntimeError("%s has a problem: %s" % (label, bad))
+            job.log("%s has a problem (%s); recreating the pod" % (label, bad), "warn")
             t0 = time.time()
             self._delete_pod(pod["metadata"]["name"])
 
@@ -364,21 +364,21 @@ class CoreOps:
         while time.time() < end:
             left = [n for n, d in have.items() if self._pods(d)]
             if not left:
-                job.log("parado(s)")
+                job.log("stopped")
                 return
             time.sleep(2)
-        job.log("ainda encerrando após %d s: %s" % (timeout, ", ".join(left)), "warn")
+        job.log("still terminating after %d s: %s" % (timeout, ", ".join(left)), "warn")
 
 
 class Controller:
-    """Ações da aba Controle (uma por vez) sobre o core ativo, o UERANSIM dele, o gNB OCUDU e a troca de core."""
+    """Control tab actions (one at a time) on the active core, its UERANSIM, the OCUDU gNB and the core switch."""
 
     def __init__(self, cores, active_fn, set_active_fn, event, gnb=None):
-        self.cores = cores               # nome -> CoreOps (ordem: o primeiro é o padrão)
+        self.cores = cores               # name -> CoreOps (order: the first one is the default)
         self.active_fn = active_fn       # () -> nome do core ativo
-        self.set_active = set_active_fn  # (nome) -> grava a preferência
-        self.event = event               # callback(level, msg) -> histórico/eventos
-        self.gnb = gnb                   # GnbCtl (OCUDU) ou None
+        self.set_active = set_active_fn  # (name) -> stores the preference
+        self.event = event               # callback(level, msg) -> history/events
+        self.gnb = gnb                   # GnbCtl (OCUDU) or None
         self.lock = threading.Lock()
         self.job = None
         self.jobs = collections.deque(maxlen=10)
@@ -387,7 +387,7 @@ class Controller:
     def ops(self, name=None):
         name = name or self.active_fn()
         if name not in self.cores:
-            raise ValueError("core desconhecido: %s" % name)
+            raise ValueError("unknown core: %s" % name)
         return self.cores[name]
 
     def view(self):
@@ -402,28 +402,28 @@ class Controller:
         return {"core": active, "components": comps, "error": err, "job": job, "recent": hist,
                 "ocudu": self.gnb.view() if self.gnb else None}
 
-    # ------------------------------------------------------------------ ações
+    # ------------------------------------------------------------------ actions
     def submit(self, body, user):
         target = str(body.get("target") or "")
         action = str(body.get("action") or "")
         if action not in ("start", "stop", "restart", "switch"):
-            raise ValueError("ação inválida")
+            raise ValueError("invalid action")
         with self.lock:
             if self.job and self.job.state == "running":
-                raise RuntimeError("já há uma ação em andamento: " + self.job.title)
-            names = {"start": "Iniciar", "stop": "Parar", "restart": "Reiniciar"}
+                raise RuntimeError("an action is already in progress: " + self.job.title)
+            names = {"start": "Start", "stop": "Stop", "restart": "Restart"}
             if action == "switch":
                 to = str(body.get("core") or "")
                 if to not in self.cores:
-                    raise ValueError("core desconhecido: %s" % to)
+                    raise ValueError("unknown core: %s" % to)
                 cfg = str(body.get("config") or "") if body.get("gnb") else ""
                 if body.get("gnb") and not self.gnb:
-                    raise ValueError("controle do gNB OCUDU desligado")
-                title = "Trocar o core ativo para %s" % self.cores[to].core["label"]
+                    raise ValueError("OCUDU gNB control disabled")
+                title = "Switch the active core to %s" % self.cores[to].core["label"]
                 fn = lambda j: self._switch(j, to, cfg)  # noqa: E731
             elif target == "ocudu":
                 if not self.gnb:
-                    raise ValueError("controle do gNB OCUDU desligado (GNB_CTL_SSH vazio)")
+                    raise ValueError("OCUDU gNB control disabled (GNB_CTL_SSH empty)")
                 cfg = str(body.get("config") or "")
                 title = "%s gNB OCUDU%s" % (names[action], " (%s)" % cfg if cfg else "")
                 fn = lambda j: self.gnb.run(j, action, cfg)  # noqa: E731
@@ -431,7 +431,7 @@ class Controller:
                 ops = self.ops(str(body.get("core") or "") or None)
                 core = ops.core["label"]
                 if target in ("core", "all", "ueransim"):
-                    what = {"core": "core inteiro", "all": "core + UERANSIM", "ueransim": "UERANSIM"}[target]
+                    what = {"core": "whole core", "all": "core + UERANSIM", "ueransim": "UERANSIM"}[target]
                     title = "%s %s (%s)" % (names[action], what, core)
                     fn = lambda j: ops._run_group(j, action, target)  # noqa: E731
                 else:
@@ -445,48 +445,48 @@ class Controller:
         return job.view()
 
     def _wrap(self, job, fn):
-        self.event("info", "controle: %s" % job.title)
+        self.event("info", "control: %s" % job.title)
         try:
             fn(job)
             w = getattr(job, "_worst", 0)
             job.state = "error" if w >= 2 else "warn" if w else "ok"
         except Exception as e:  # noqa: BLE001
-            job.log("falhou: %s" % e, "error")
+            job.log("failed: %s" % e, "error")
             job.state = "error"
         job.t1 = time.time()
         lvl = {"ok": "info", "warn": "warning", "error": "warning"}[job.state]
-        self.event(lvl, "controle: %s — %s" % (job.title, {"ok": "concluído", "warn": "concluído com avisos",
-                                                           "error": "falhou"}[job.state]))
+        self.event(lvl, "control: %s — %s" % (job.title, {"ok": "done", "warn": "done with warnings",
+                                                           "error": "failed"}[job.state]))
 
     def _switch(self, job, to, gnb_cfg):
-        """Para o gNB OCUDU (se pedido), para os outros cores, sobe o novo em ordem e religa o gNB."""
+        """Stops the OCUDU gNB (if asked), stops the other cores, starts the new one in order and starts the gNB again."""
         new = self.cores[to]
         if not new.installed():
-            raise RuntimeError("%s não está instalado (namespace %s)" % (new.core["label"], new.ns))
+            raise RuntimeError("%s is not installed (namespace %s)" % (new.core["label"], new.ns))
         olds = [o for n, o in self.cores.items() if n != to and o.installed()]
-        job.log("core ativo: %s → %s" % (", ".join(o.core["label"] for o in olds if o.running()) or "nenhum",
+        job.log("active core: %s → %s" % (", ".join(o.core["label"] for o in olds if o.running()) or "none",
                                          new.core["label"]))
         if gnb_cfg:
             st = self.gnb.status or {}
             if st.get("active"):
-                job.log("parando o gNB OCUDU (%s.yml) antes da troca" % (st["active"].get("config") or "?"))
+                job.log("stopping the OCUDU gNB (%s.yml) before the switch" % (st["active"].get("config") or "?"))
                 self.gnb.run(job, "stop", "")
         for o in olds:
             if o.running() or any(c["replicas"] for c in o.components()):
-                job.log("parando %s (core + UERANSIM)" % o.core["label"])
+                job.log("stopping %s (core + UERANSIM)" % o.core["label"])
                 o._run_group(job, "stop", "all")
         self.set_active(to)
-        job.log("iniciando %s em ordem" % new.core["label"])
+        job.log("starting %s in order" % new.core["label"])
         new._run_group(job, "start", "all")
         if gnb_cfg:
-            job.log("iniciando o gNB OCUDU com %s.yml" % gnb_cfg)
+            job.log("starting the OCUDU gNB with %s.yml" % gnb_cfg)
             self.gnb.run(job, "start", gnb_cfg)
-        job.log("pronto: core ativo = %s" % new.core["label"])
+        job.log("ready: active core = %s" % new.core["label"])
 
 
 # =============================================================================
-#  gNB OCUDU: o agente gnb-ctl (máquina do core) manda o estado a cada poucos
-#  segundos e recebe de volta o próximo comando; o resultado vem no envio seguinte.
+#  OCUDU gNB: the gnb-ctl agent (core machine) sends the state every few
+#  seconds and gets back the next command; the result comes in the following post.
 # =============================================================================
 class GnbCtl:
     def __init__(self, target):
@@ -518,22 +518,22 @@ class GnbCtl:
     def _cmd(self, job, action, config, timeout=90):
         with self.lock:
             if not (self.ts and time.time() - self.ts < 20):
-                raise RuntimeError("agente do gNB sem contato (journalctl -u open5gs-k3s-gnb-ctl na máquina do core)")
+                raise RuntimeError("gNB agent not reachable (journalctl -u open5gs-k3s-gnb-ctl on the core machine)")
             self.seq += 1
             cid = "%d-%d" % (int(time.time()), self.seq)
             self.pending = {"id": cid, "action": action, "config": config}
             self.results[cid] = None
-            job.log("comando enviado ao %s: %s %s" % (self.target, action, config or ""))
+            job.log("command sent to %s: %s %s" % (self.target, action, config or ""))
             end = time.time() + timeout
             while self.results[cid] is None and time.time() < end:
                 self.cond.wait(1)
             res = self.results.pop(cid)
         if res is None:
-            raise RuntimeError("o agente não respondeu em %d s" % timeout)
+            raise RuntimeError("the agent did not answer within %d s" % timeout)
         for l in (res.get("output") or "").strip().splitlines()[-15:]:
             job.log("  " + l)
         if not res.get("ok"):
-            raise RuntimeError("o comando falhou no %s" % self.target)
+            raise RuntimeError("the command failed on %s" % self.target)
 
     def _wait_status(self, cond, secs):
         end = time.time() + secs
@@ -548,54 +548,54 @@ class GnbCtl:
     def run(self, job, action, config):
         st = (self.status or {})
         if action == "start" and not config:
-            raise ValueError("escolha o arquivo de configuração")
+            raise ValueError("choose the configuration file")
         if action == "start" and st.get("manual"):
-            raise RuntimeError("há um gnb rodando fora do painel (PID %s): pare-o no terminal antes"
+            raise RuntimeError("a gnb is running outside the dashboard (PID %s): stop it in the terminal first"
                                % ", ".join(str(m["pid"]) for m in st["manual"]))
         if action == "restart" and not st.get("active"):
             if not config:
-                raise RuntimeError("nenhum gNB rodando pelo painel; use Iniciar")
+                raise RuntimeError("no gNB running from the dashboard; use Start")
             action = "start"
         n2_before = self.n2_ref() if self.n2_ref else None
         self._cmd(job, action, config)
         if action == "stop":
             if self._wait_status(lambda s: not s.get("active") and not s.get("gnb_pids"), 40):
-                job.log("gNB parado")
+                job.log("gNB stopped")
             else:
-                job.log("o processo gnb ainda aparece após 40 s", "warn")
+                job.log("the gnb process is still there after 40 s", "warn")
             return
         st = self._wait_status(lambda s: (s.get("active") or {}).get("sub") == "running" or s.get("failed"), 30) or {}
         a = st.get("active") or {}
         if a.get("sub") != "running":
             f = st.get("failed") or a
-            raise RuntimeError("o serviço não ficou rodando (%s/%s)%s" % (
+            raise RuntimeError("the service did not stay running (%s/%s)%s" % (
                 f.get("state"), f.get("sub"), ": " + " | ".join(f.get("journal", [])[-4:]) if f.get("journal") else ""))
-        time.sleep(5)   # o gnb pode cair logo no início (DPDK/RU): confere de novo
+        time.sleep(5)   # the gnb may die right at the start (DPDK/RU): check again
         st = self._wait_status(lambda s: True, 5) or {}
         if st.get("failed") or (st.get("active") or {}).get("sub") != "running":
             f = st.get("failed") or st.get("active") or {}
-            raise RuntimeError("o gNB caiu logo depois de iniciar: " + " | ".join(f.get("journal", [])[-4:]))
-        job.log("gNB rodando com %s.yml (PID %s)" % (a.get("config"), a.get("pid")))
-        # confirmações vindas de fora: RU (DU conectado) e AMF (N2)
+            raise RuntimeError("the gNB went down right after starting: " + " | ".join(f.get("journal", [])[-4:]))
+        job.log("gNB running with %s.yml (PID %s)" % (a.get("config"), a.get("pid")))
+        # confirmations from outside: RU (DU connected) and AMF (N2)
         if self.ru_ref:
             end = time.time() + 90
             while time.time() < end:
                 if (self.ru_ref.summary() or {}).get("du") == "Ready":
-                    job.log("RU: DU conectado (fronthaul ok)")
+                    job.log("RU: DU connected (fronthaul ok)")
                     break
                 time.sleep(2)
             else:
-                job.log("RU ainda sem DU conectado após 90 s (veja a aba RU e o log do gNB)", "warn")
+                job.log("RU still has no DU after 90 s (see the RU tab and the gNB log)", "warn")
         if self.n2_ref:
             end = time.time() + 60
             while time.time() < end:
                 cur = self.n2_ref()
                 if cur and cur != n2_before:
-                    job.log("AMF: gNB conectado (N2)")
+                    job.log("AMF: gNB connected (N2)")
                     break
                 time.sleep(2)
             else:
-                job.log("o AMF ainda não viu o gNB (N2) após 60 s — o arquivo aponta para este core?", "warn")
+                job.log("the AMF has not seen the gNB (N2) after 60 s: does the file point to this core?", "warn")
 
-    ru_ref = None   # RuState (confere "DU conectado")
-    n2_ref = None   # função -> horário do último "gNB-N2 accepted" deste gNB no AMF (ou None)
+    ru_ref = None   # RuState (checks "DU connected")
+    n2_ref = None   # function -> time of the last "gNB-N2 accepted" of this gNB in the AMF (or None)

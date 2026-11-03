@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  dashboard/agent/ru-agent.py — estado da RU (LiteOn FlexFi) para o painel (aba RU).
+#  dashboard/agent/ru-agent.py — RU (LiteOn FlexFi) state for the dashboard (RU tab).
 #
-#  Roda na máquina do core. Mantém UMA sessão SSH interativa na porta de gestão
-#  (RJ45) da RU e roda só comandos "show" — nunca altera a configuração.
-#  A RU só aceita senha (CLI própria), então a sessão usa um pseudo-terminal.
+#  Runs on the core machine. Keeps ONE interactive SSH session on the RU management
+#  port (RJ45) and only runs "show" commands — it never changes the configuration.
+#  The RU only accepts a password (own CLI), so the session uses a pseudo-terminal.
 #
-#  Uso:
+#  Usage:
 #    DASHBOARD_URL=http://10.254.254.1:30998 INGEST_TOKEN=... RU_TARGET=user@10.101.131.59 \
 #    RU_PASS=... RU_ENABLE=... python3 ru-agent.py
-#  RU_PASS/RU_ENABLE vêm de um arquivo só do root e do grupo do usuário
-#  (${INSTALL_DIR}/state/ru-credentials), nunca do git.
+#  RU_PASS/RU_ENABLE come from a file readable only by root and the user's group
+#  (${INSTALL_DIR}/state/ru-credentials), never from git.
 # =============================================================================
 import json
 import os
@@ -28,7 +28,7 @@ TARGET = os.environ.get("RU_TARGET", "")
 PASS = os.environ.get("RU_PASS", "")
 ENABLE = os.environ.get("RU_ENABLE", "")
 POLL = max(2.0, float(os.environ.get("RU_POLL_SECONDS", "10")))
-SLOW = 300   # configuração, firmware: a cada 5 min
+SLOW = 300   # configuration, firmware: every 5 min
 
 FAST_CMDS = ["show oru-status", "show sync-trace", "show pm-data", "show eth-info", "show uptime"]
 SLOW_CMDS = ["show fw-info", "show running-config", "show dl-ul-layer", "show system"]
@@ -48,7 +48,7 @@ def post(payload):
         r.read()
 
 
-# ----------------------------------------------------------------------------- sessão
+# ----------------------------------------------------------------------------- session
 class Session:
     def __init__(self):
         self.pid, self.fd = pty.fork()
@@ -68,13 +68,13 @@ class Session:
             try:
                 d = os.read(self.fd, 65536)
             except OSError:
-                raise ConnectionError("sessão SSH encerrada")
+                raise ConnectionError("SSH session closed")
             if not d:
-                raise ConnectionError("sessão SSH encerrada")
+                raise ConnectionError("SSH session closed")
             self.buf += d
             m = pattern.search(self.buf[-400:])
             if m:
-                time.sleep(0.15)   # resto da linha
+                time.sleep(0.15)   # rest of the line
                 r2, _, _ = select.select([self.fd], [], [], 0.1)
                 if r2:
                     try:
@@ -84,7 +84,7 @@ class Session:
                     if not pattern.search(self.buf[-400:]):
                         continue
                 return
-        raise TimeoutError("RU não respondeu (%s)" % self.buf[-120:].decode("utf-8", "replace").strip())
+        raise TimeoutError("RU did not answer (%s)" % self.buf[-120:].decode("utf-8", "replace").strip())
 
     def _send(self, s):
         os.write(self.fd, s.encode() + b"\r")
@@ -95,7 +95,7 @@ class Session:
         self._send(PASS)
         self._read(15, re.compile(rb"[Pp]assword:\s*$|(?:^|\n)\s*[>#] ?$"))
         if re.search(rb"[Pp]assword:\s*$", self.buf):
-            raise PermissionError("senha da RU recusada")
+            raise PermissionError("RU password rejected")
         self.mode = PROMPT.search(self.buf[-400:]).group(1)
         self.privileged()
 
@@ -110,11 +110,11 @@ class Session:
         self._read(8, PROMPT)
         self.mode = PROMPT.search(self.buf[-400:]).group(1)
         if self.mode != b"#":
-            raise PermissionError("senha do enable recusada")
+            raise PermissionError("enable password rejected")
 
     def run(self, cmd):
-        """Saída de um comando (sem eco e sem prompt)."""
-        assert cmd.startswith("show "), cmd   # o agente só lê
+        """Output of a command (no echo and no prompt)."""
+        assert cmd.startswith("show "), cmd   # the agent only reads
         self.buf = b""
         self._send(cmd)
         self._read(20, PROMPT)
@@ -127,7 +127,7 @@ class Session:
             lines = lines[:-1]
         out = "\n".join(lines)
         if "Auto exit privileged" in out or (self.mode == b">" and ENABLE):
-            # o modo privilegiado expira sozinho (300 s): entra de novo e repete
+            # privileged mode expires by itself (300 s): enter it again and repeat
             self.privileged()
             return self.run(cmd) if self.mode == b"#" else out
         return out
@@ -150,7 +150,7 @@ class Session:
             pass
 
 
-# ----------------------------------------------------------------------------- leitura das saídas
+# ----------------------------------------------------------------------------- output parsing
 def kv(text, sep=":"):
     out = {}
     for l in text.splitlines():
@@ -180,7 +180,7 @@ def _f(x):
 
 
 def parse_pm(text):
-    """Última janela de cada contador do "show pm-data"."""
+    """Last window of each "show pm-data" counter."""
     pm = {}
     for l in text.splitlines():
         p = [x.strip() for x in l.split(",")]
@@ -261,7 +261,7 @@ def parse_slow(outs):
             "config": parse_config(outs.get("show running-config", ""))}
 
 
-# ----------------------------------------------------------------------------- laço
+# ----------------------------------------------------------------------------- loop
 def cycle(s, prev, slow_due):
     outs = {c: s.run(c) for c in FAST_CMDS + (SLOW_CMDS if slow_due else [])}
     now = time.time()
@@ -281,9 +281,9 @@ def cycle(s, prev, slow_due):
 
 
 def main():
-    once = "--once" in sys.argv   # teste: uma leitura completa, imprime e sai (não envia)
+    once = "--once" in sys.argv   # test: one full read, print and exit (does not send)
     if not TARGET or not PASS or (not once and (not URL or not TOKEN)):
-        print("uso: DASHBOARD_URL=... INGEST_TOKEN=... RU_TARGET=usuario@ip RU_PASS=... [RU_ENABLE=...] ru-agent.py [--once]",
+        print("usage: DASHBOARD_URL=... INGEST_TOKEN=... RU_TARGET=user@ip RU_PASS=... [RU_ENABLE=...] ru-agent.py [--once]",
               file=sys.stderr)
         sys.exit(2)
     backoff = 5
@@ -294,7 +294,7 @@ def main():
         try:
             s = Session()
             s.login()
-            log("conectado", TARGET)
+            log("connected", TARGET)
             prev, last_slow = {}, 0.0
             if once:
                 cycle(s, prev, False)
@@ -310,7 +310,7 @@ def main():
                 try:
                     post({"target": TARGET, "sample": sample})
                 except (urllib.error.URLError, OSError) as e:
-                    log("painel indisponível:", e)
+                    log("dashboard unavailable:", e)
                 time.sleep(max(0.5, POLL - (time.time() - t0)))
         except (ConnectionError, TimeoutError, PermissionError, OSError, AttributeError) as e:
             err = str(e) or e.__class__.__name__
@@ -322,7 +322,7 @@ def main():
             except (urllib.error.URLError, OSError):
                 pass
             if isinstance(e, PermissionError):
-                wait = 300   # senha errada: não insiste (a RU pode bloquear o usuário)
+                wait = 300   # wrong password: do not insist (the RU may lock the user)
         finally:
             if s:
                 s.close()
