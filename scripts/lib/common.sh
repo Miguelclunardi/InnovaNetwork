@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  scripts/lib/common.sh — funções compartilhadas por install.sh, test.sh,
-#  uninstall.sh e scripts/subscribers.sh. Não executar diretamente.
+#  scripts/lib/common.sh — functions shared by install.sh, test.sh,
+#  uninstall.sh and scripts/subscribers.sh. Do not run it directly.
 # =============================================================================
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GENERATED_DIR="${PROJECT_DIR}/helm/generated"   # values Helm gerados do config.env
+GENERATED_DIR="${PROJECT_DIR}/helm/generated"   # Helm values generated from config.env
 LOG_DIR="${PROJECT_DIR}/logs"
-K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"     # 0600, só root
-# HOME pode faltar (units do systemd): cai para o home do usuário atual
-USER_KUBECONFIG="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}/.kube/open5gs-k3s.yaml" # cópia do install.sh para o usuário do sudo
-# Usa o kubeconfig do k3s se legível (root); senão a cópia do usuário
-# Root usa sempre a credencial do k3s, mesmo que ela ainda não exista (instalação do zero:
-# o k3s cria o arquivo depois que a biblioteca já foi carregada).
+K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"     # 0600, root only
+# HOME may be missing (systemd units): fall back to the home of the current user
+USER_KUBECONFIG="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}/.kube/open5gs-k3s.yaml" # copy made by install.sh for the sudo user
+# Uses the k3s kubeconfig if readable (root); otherwise the user's copy.
+# Root always uses the k3s credential, even if it does not exist yet (fresh install:
+# k3s creates the file after the library has been loaded).
 if [[ ${EUID} -eq 0 || -r "${K3S_KUBECONFIG}" ]]; then KUBECONFIG_PATH="${K3S_KUBECONFIG}"; else KUBECONFIG_PATH="${USER_KUBECONFIG}"; fi
 K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml"
 SYSCTL_FILE="/etc/sysctl.d/90-open5gs-k3s.conf"
 MODULES_FILE="/etc/modules-load.d/open5gs-k3s.conf"
 NM_CONF_FILE="/etc/NetworkManager/conf.d/90-open5gs-k3s-unmanaged.conf"
-NETIF_UNIT_FILE="/etc/systemd/system/open5gs-k3s-netif.service"   # interface estável do nó
+NETIF_UNIT_FILE="/etc/systemd/system/open5gs-k3s-netif.service"   # stable node interface
 K3S_DROPIN_FILE="/etc/systemd/system/k3s.service.d/10-open5gs-k3s-netif.conf"
 HEAL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-heal.service"
-GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # log do gNB -> painel
-GNBCTL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-ctl.service"     # painel -> iniciar/parar gNB OCUDU
-HOSTS_UNIT_FILE="/etc/systemd/system/open5gs-k3s-hosts.service"        # outras máquinas -> painel
-RU_UNIT_FILE="/etc/systemd/system/open5gs-k3s-ru.service"              # RU (porta de gestão) -> painel
-DASHBOARD_DATA_DIR="/var/lib/open5gs-k3s/dashboard"   # histórico persistente do painel (fora do INSTALL_DIR)
+GNBLOG_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-log.service"     # gNB log -> dashboard
+GNBCTL_UNIT_FILE="/etc/systemd/system/open5gs-k3s-gnb-ctl.service"     # dashboard -> start/stop the OCUDU gNB
+HOSTS_UNIT_FILE="/etc/systemd/system/open5gs-k3s-hosts.service"        # other machines -> dashboard
+RU_UNIT_FILE="/etc/systemd/system/open5gs-k3s-ru.service"              # RU (management port) -> dashboard
+DASHBOARD_DATA_DIR="/var/lib/open5gs-k3s/dashboard"   # persistent dashboard history (outside INSTALL_DIR)
 HASH_ANNOTATION="open5gs-k3s/config-hash"
 
 # ----------------------------------------------------------------------------
@@ -39,38 +39,40 @@ fi
 step() { echo; echo "${C_B}${C_BLU}==> $*${C_0}"; }
 info() { echo "    $*"; }
 ok()   { echo "    ${C_GRN}[ok]${C_0} $*"; }
-warn() { echo "    ${C_YEL}[aviso]${C_0} $*" >&2; }
-err()  { echo "    ${C_RED}[erro]${C_0} $*" >&2; }
+warn() { echo "    ${C_YEL}[warn]${C_0} $*" >&2; }
+err()  { echo "    ${C_RED}[error]${C_0} $*" >&2; }
 die()  { err "$*"; exit 1; }
+# Text without comment lines and trailing " # ..." comments (to compare generated files)
+strip_comments() { sed -e '/^[[:space:]]*#/d' -e 's/[[:space:]]\{1,\}#.*$//'; }
 
-# Repete um comando que depende da internet (DNS/rede podem falhar por alguns segundos).
-# Uso: retry <comando> [args...]   — até 5 tentativas, espera 5, 10, 15, 20 s entre elas.
+# Repeats a command that depends on the internet (DNS/network may fail for a few seconds).
+# Usage: retry <command> [args...]   — up to 5 attempts, waiting 5, 10, 15, 20 s between them.
 retry() {
   local n=1 max=5
   until "$@"; do
-    if (( n >= max )); then err "falhou ${max} vezes: $*"; return 1; fi
-    warn "falhou (tentativa ${n}/${max}): $* — nova tentativa em $((n * 5))s"
+    if (( n >= max )); then err "failed ${max} times: $*"; return 1; fi
+    warn "failed (attempt ${n}/${max}): $* — retrying in $((n * 5))s"
     sleep $((n * 5)); n=$((n + 1))
   done
 }
 
 require_root() {
   if [[ ${EUID} -ne 0 ]]; then
-    # Reexecuta com sudo preservando CONFIG, se definido
+    # Re-runs with sudo keeping CONFIG, if set
     exec sudo --preserve-env=CONFIG "$0" "$@"
   fi
 }
 
 # ----------------------------------------------------------------------------
-#  Configuração
+#  Configuration
 # ----------------------------------------------------------------------------
 load_config() {
   CONFIG="${CONFIG:-${PROJECT_DIR}/config.env}"
-  [[ -f "${CONFIG}" ]] || die "Arquivo de configuração não encontrado: ${CONFIG}"
+  [[ -f "${CONFIG}" ]] || die "Configuration file not found: ${CONFIG}"
   # shellcheck source=../config.env
   source "${CONFIG}"
 
-  # Padrões para variáveis ausentes (config antigo/mínimo)
+  # Defaults for missing variables (old/minimal config)
   : "${ENV_PROFILE:=auto}" "${NODE_IFACE:=}" "${NODE_IP:=}"
   : "${AUTO_HEAL:=true}" "${NODE_IP_MODE:=stable}" "${STABLE_IFACE:=k3s0}" "${STABLE_IP:=10.254.254.1}"
   : "${INSTALL_DIR:=/opt/open5gs-k3s}" "${KUBECONFIG_USER:=}" "${SHELL_EXTRAS:=true}"
@@ -96,9 +98,9 @@ load_config() {
   : "${RAN_LINK_ENABLED:=false}" "${RAN_LINK_IFACE:=}" "${RAN_LINK_CIDR:=}" "${RAN_LINK_MTU:=1500}"
   : "${AMF_N2_IP:=}" "${UPF_N3_IP:=}" "${GNB_SIM_IP:=}" "${MULTUS_CHART_VERSION:=v4.3.110}"
   : "${UE_COUNT:=1}" "${UE_MSIN_START:=0000000001}"
-  : "${UE_KEY:?defina UE_KEY}" "${UE_OPC:?defina UE_OPC}"
+  : "${UE_KEY:?set UE_KEY}" "${UE_OPC:?set UE_OPC}"
   : "${TEST_PING_COUNT:=4}" "${TEST_INTERNET:=true}" "${TEST_PING_TARGET:=8.8.8.8}" "${TEST_TIMEOUT:=180}"
-  declare -p SLICES      &>/dev/null || die "SLICES não definido no config"
+  declare -p SLICES      &>/dev/null || die "SLICES not defined in the config"
   declare -p SUBSCRIBERS &>/dev/null || SUBSCRIBERS=()
   declare -p K3S_EXTRA_ARGS &>/dev/null || K3S_EXTRA_ARGS=()
   declare -p DASHBOARD_UE_NAMES &>/dev/null || DASHBOARD_UE_NAMES=()
@@ -118,7 +120,7 @@ load_config() {
 is_true() { [[ "${1,,}" =~ ^(1|true|yes|sim|on)$ ]]; }
 
 # ----------------------------------------------------------------------------
-#  Rede: utilitários IPv4
+#  Network: IPv4 utilities
 # ----------------------------------------------------------------------------
 ip2int() { local IFS=.; local -a o=($1); echo $(( (o[0]<<24) + (o[1]<<16) + (o[2]<<8) + o[3] )); }
 int2ip() { local n=$1; echo "$(( (n>>24)&255 )).$(( (n>>16)&255 )).$(( (n>>8)&255 )).$(( n&255 ))"; }
@@ -158,161 +160,161 @@ parse_slice() {
   S_GW="$(int2ip $(( CIDR_NET + 1 )))"
 }
 
-# Nome da TUN no UPF para a slice de índice i (ogstun, ogstun2, ogstun3, ...)
+# Name of the UPF TUN for the slice with index i (ogstun, ogstun2, ogstun3, ...)
 tun_name() { (( $1 == 0 )) && echo ogstun || echo "ogstun$(( $1 + 1 ))"; }
 
 msin_len() { echo $(( 15 - ${#MCC} - ${#MNC} )); }
-# IMSI do i-ésimo UE do UERANSIM (0-based)
+# IMSI of the i-th UERANSIM UE (0-based)
 ue_imsi() {
   local len; len=$(msin_len)
   printf "%s%s%0${len}d" "${MCC}" "${MNC}" $(( 10#${UE_MSIN_START} + $1 ))
 }
 
 # ----------------------------------------------------------------------------
-#  Validação do config.env
+#  config.env validation
 # ----------------------------------------------------------------------------
 validate_config() {
   local errors=0 e
   bad() { err "config: $*"; errors=$((errors+1)); }
 
-  [[ "${MCC}" =~ ^[0-9]{3}$ ]]    || bad "MCC deve ter 3 dígitos (atual: '${MCC}')"
-  [[ "${MNC}" =~ ^[0-9]{2,3}$ ]]  || bad "MNC deve ter 2 ou 3 dígitos (atual: '${MNC}')"
+  [[ "${MCC}" =~ ^[0-9]{3}$ ]]    || bad "MCC must have 3 digits (current: '${MCC}')"
+  [[ "${MNC}" =~ ^[0-9]{2,3}$ ]]  || bad "MNC must have 2 or 3 digits (current: '${MNC}')"
   [[ "${TAC}" =~ ^[0-9]+$ ]] && (( 10#${TAC} >= 1 && 10#${TAC} <= 16777215 )) \
-    || bad "TAC deve ser decimal entre 1 e 16777215 (atual: '${TAC}')"
+    || bad "TAC must be decimal between 1 and 16777215 (current: '${TAC}')"
   [[ "${AMF_REGION_ID}" =~ ^[0-9]+$ ]] && (( AMF_REGION_ID <= 255 )) || bad "AMF_REGION_ID 0..255"
   [[ "${AMF_SET_ID}" =~ ^[0-9]+$ ]] && (( AMF_SET_ID <= 1023 ))       || bad "AMF_SET_ID 0..1023"
-  [[ "${NETWORK_NAME}" =~ ^[A-Za-z0-9._\ -]+$ ]] || bad "NETWORK_NAME com caracteres inválidos"
+  [[ "${NETWORK_NAME}" =~ ^[A-Za-z0-9._\ -]+$ ]] || bad "NETWORK_NAME has invalid characters"
 
-  (( ${#SLICES[@]} >= 1 )) || bad "SLICES precisa de pelo menos um item"
+  (( ${#SLICES[@]} >= 1 )) || bad "SLICES needs at least one item"
   local i s dnns="" cidrs=()
   for i in "${!SLICES[@]}"; do
     s=${SLICES[$i]}
     [[ "$s" =~ ^[0-9]{1,3}:[0-9A-Fa-f]{6}:[A-Za-z0-9][A-Za-z0-9.-]*:[0-9./]+$ ]] \
       || { bad "SLICES[$i]='$s' fora do formato SST:SD:DNN:CIDR (SD = 6 hex)"; continue; }
-    valid_cidr "${s##*:}" || { bad "SLICES[$i]: CIDR inválido '${s##*:}' (use /8../30)"; continue; }
+    valid_cidr "${s##*:}" || { bad "SLICES[$i]: invalid CIDR '${s##*:}' (use /8../30)"; continue; }
     parse_slice "$s"
-    (( S_SST >= 1 && S_SST <= 255 )) || bad "SLICES[$i]: SST deve estar entre 1 e 255"
-    if [[ " ${dnns} " == *" ${S_DNN} "* ]]; then bad "SLICES[$i]: DNN '${S_DNN}' repetido (use um DNN por slice)"; fi
+    (( S_SST >= 1 && S_SST <= 255 )) || bad "SLICES[$i]: SST must be between 1 and 255"
+    if [[ " ${dnns} " == *" ${S_DNN} "* ]]; then bad "SLICES[$i]: DNN '${S_DNN}' repeated (use one DNN per slice)"; fi
     dnns+=" ${S_DNN}"
-    if cidr_overlap "${S_CIDR}" "${K3S_CLUSTER_CIDR}"; then bad "SLICES[$i]: ${S_CIDR} sobrepõe K3S_CLUSTER_CIDR"; fi
-    if cidr_overlap "${S_CIDR}" "${K3S_SERVICE_CIDR}"; then bad "SLICES[$i]: ${S_CIDR} sobrepõe K3S_SERVICE_CIDR"; fi
+    if cidr_overlap "${S_CIDR}" "${K3S_CLUSTER_CIDR}"; then bad "SLICES[$i]: ${S_CIDR} overlaps K3S_CLUSTER_CIDR"; fi
+    if cidr_overlap "${S_CIDR}" "${K3S_SERVICE_CIDR}"; then bad "SLICES[$i]: ${S_CIDR} overlaps K3S_SERVICE_CIDR"; fi
     for e in "${cidrs[@]}"; do
-      if cidr_overlap "${S_CIDR}" "$e"; then bad "SLICES[$i]: ${S_CIDR} sobrepõe ${e}"; fi
+      if cidr_overlap "${S_CIDR}" "$e"; then bad "SLICES[$i]: ${S_CIDR} overlaps ${e}"; fi
     done
     cidrs+=("${S_CIDR}")
   done
-  valid_cidr "${K3S_CLUSTER_CIDR}" || bad "K3S_CLUSTER_CIDR inválido"
-  valid_cidr "${K3S_SERVICE_CIDR}" || bad "K3S_SERVICE_CIDR inválido"
-  if cidr_overlap "${K3S_CLUSTER_CIDR}" "${K3S_SERVICE_CIDR}"; then bad "K3S_CLUSTER_CIDR e K3S_SERVICE_CIDR se sobrepõem"; fi
-  for e in ${DNS_SERVERS}; do valid_ipv4 "$e" || bad "DNS_SERVERS: '$e' não é IPv4"; done
+  valid_cidr "${K3S_CLUSTER_CIDR}" || bad "invalid K3S_CLUSTER_CIDR"
+  valid_cidr "${K3S_SERVICE_CIDR}" || bad "invalid K3S_SERVICE_CIDR"
+  if cidr_overlap "${K3S_CLUSTER_CIDR}" "${K3S_SERVICE_CIDR}"; then bad "K3S_CLUSTER_CIDR and K3S_SERVICE_CIDR overlap"; fi
+  for e in ${DNS_SERVERS}; do valid_ipv4 "$e" || bad "DNS_SERVERS: '$e' is not IPv4"; done
   [[ "${UE_MTU}" =~ ^[0-9]+$ ]] && (( UE_MTU >= 1200 && UE_MTU <= 9000 )) || bad "UE_MTU 1200..9000"
 
-  [[ "${UE_KEY}" =~ ^[0-9A-Fa-f]{32}$ ]] || bad "UE_KEY deve ter 32 hex"
-  [[ "${UE_OPC}" =~ ^[0-9A-Fa-f]{32}$ ]] || bad "UE_OPC deve ter 32 hex"
+  [[ "${UE_KEY}" =~ ^[0-9A-Fa-f]{32}$ ]] || bad "UE_KEY must have 32 hex digits"
+  [[ "${UE_OPC}" =~ ^[0-9A-Fa-f]{32}$ ]] || bad "UE_OPC must have 32 hex digits"
   [[ "${UE_COUNT}" =~ ^[0-9]+$ ]] && (( UE_COUNT >= 1 && UE_COUNT <= 100 )) || bad "UE_COUNT 1..100"
   local len; len=$(msin_len)
   [[ "${UE_MSIN_START}" =~ ^[0-9]+$ && ${#UE_MSIN_START} -eq ${len} ]] \
-    || bad "UE_MSIN_START deve ter ${len} dígitos (15 - MCC - MNC); atual: '${UE_MSIN_START}'"
+    || bad "UE_MSIN_START must have ${len} digits (15 - MCC - MNC); current: '${UE_MSIN_START}'"
 
   local f
   for i in "${!SUBSCRIBERS[@]}"; do
     IFS=: read -r -a f <<<"${SUBSCRIBERS[$i]}"
-    if (( ${#f[@]} != 3 && ${#f[@]} != 6 )); then bad "SUBSCRIBERS[$i]: use IMSI:K:OPC ou IMSI:K:OPC:SST:SD:DNN"; continue; fi
-    [[ "${f[0]}" =~ ^[0-9]{15}$ ]] || bad "SUBSCRIBERS[$i]: IMSI deve ter 15 dígitos"
+    if (( ${#f[@]} != 3 && ${#f[@]} != 6 )); then bad "SUBSCRIBERS[$i]: use IMSI:K:OPC or IMSI:K:OPC:SST:SD:DNN"; continue; fi
+    [[ "${f[0]}" =~ ^[0-9]{15}$ ]] || bad "SUBSCRIBERS[$i]: the IMSI must have 15 digits"
     [[ "${f[1]}" =~ ^[0-9A-Fa-f]{32}$ && "${f[2]}" =~ ^[0-9A-Fa-f]{32}$ ]] || bad "SUBSCRIBERS[$i]: K/OPC devem ter 32 hex"
     if (( ${#f[@]} == 6 )); then
-      [[ "${f[3]}" =~ ^[0-9]{1,3}$ && "${f[4]}" =~ ^[0-9A-Fa-f]{6}$ ]] || bad "SUBSCRIBERS[$i]: SST/SD inválidos"
-      [[ " ${dnns} " == *" ${f[5]} "* ]] || warn "SUBSCRIBERS[$i]: DNN '${f[5]}' não existe em SLICES"
+      [[ "${f[3]}" =~ ^[0-9]{1,3}$ && "${f[4]}" =~ ^[0-9A-Fa-f]{6}$ ]] || bad "SUBSCRIBERS[$i]: invalid SST/SD"
+      [[ " ${dnns} " == *" ${f[5]} "* ]] || warn "SUBSCRIBERS[$i]: DNN '${f[5]}' does not exist in SLICES"
     fi
   done
 
-  [[ "${ENV_PROFILE}" =~ ^(auto|desktop|server)$ ]] || bad "ENV_PROFILE deve ser auto|desktop|server"
-  [[ "${K8S_NAMESPACE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || bad "K8S_NAMESPACE inválido"
-  [[ "${OPEN5GS_RELEASE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || bad "OPEN5GS_RELEASE inválido"
-  [[ "${UERANSIM_RELEASE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || bad "UERANSIM_RELEASE inválido"
+  [[ "${ENV_PROFILE}" =~ ^(auto|desktop|server)$ ]] || bad "ENV_PROFILE must be auto|desktop|server"
+  [[ "${K8S_NAMESPACE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || bad "invalid K8S_NAMESPACE"
+  [[ "${OPEN5GS_RELEASE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || bad "invalid OPEN5GS_RELEASE"
+  [[ "${UERANSIM_RELEASE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || bad "invalid UERANSIM_RELEASE"
   [[ "${WEBUI_NODEPORT}" =~ ^[0-9]+$ ]] && (( WEBUI_NODEPORT >= 30000 && WEBUI_NODEPORT <= 32767 )) \
-    || bad "WEBUI_NODEPORT deve estar em 30000..32767"
+    || bad "WEBUI_NODEPORT must be in 30000..32767"
   if is_true "${DASHBOARD_ENABLED}"; then
     [[ "${DASHBOARD_NODEPORT}" =~ ^[0-9]+$ ]] && (( DASHBOARD_NODEPORT >= 30000 && DASHBOARD_NODEPORT <= 32767 )) \
-      || bad "DASHBOARD_NODEPORT deve estar em 30000..32767"
+      || bad "DASHBOARD_NODEPORT must be in 30000..32767"
     [[ "${DASHBOARD_NODEPORT}" != "${WEBUI_NODEPORT}" ]] || bad "DASHBOARD_NODEPORT igual a WEBUI_NODEPORT"
     [[ "${DASHBOARD_HISTORY_SECONDS}" =~ ^[0-9]+$ ]] && (( DASHBOARD_HISTORY_SECONDS >= 60 && DASHBOARD_HISTORY_SECONDS <= 21600 )) \
-      || bad "DASHBOARD_HISTORY_SECONDS deve estar em 60..21600"
-    [[ -z "${GNB_METRICS_URL}" || "${GNB_METRICS_URL}" =~ ^wss?://[^[:space:]]+$ ]] || bad "GNB_METRICS_URL deve ser ws://host:porta"
-    [[ -z "${GNB_LOG_SSH}" || "${GNB_LOG_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_LOG_SSH deve ser usuario@host"
-    [[ "${GNB_LOG_FILE}" =~ ^/[^[:space:]\'\"]+$ ]] || bad "GNB_LOG_FILE deve ser um caminho absoluto sem espaços"
+      || bad "DASHBOARD_HISTORY_SECONDS must be in 60..21600"
+    [[ -z "${GNB_METRICS_URL}" || "${GNB_METRICS_URL}" =~ ^wss?://[^[:space:]]+$ ]] || bad "GNB_METRICS_URL must be ws://host:port"
+    [[ -z "${GNB_LOG_SSH}" || "${GNB_LOG_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_LOG_SSH must be user@host"
+    [[ "${GNB_LOG_FILE}" =~ ^/[^[:space:]\'\"]+$ ]] || bad "GNB_LOG_FILE must be an absolute path without spaces"
     for e in "${DASHBOARD_UE_NAMES[@]}"; do
-      [[ "$e" =~ ^[0-9]{15}:[^\;=\"]+$ ]] || bad "DASHBOARD_UE_NAMES: use 'IMSI:nome' sem ; = ou aspas (atual: $e)"
+      [[ "$e" =~ ^[0-9]{15}:[^\;=\"]+$ ]] || bad "DASHBOARD_UE_NAMES: use 'IMSI:name' without ; = or quotes (current: $e)"
     done
     for e in "${DASHBOARD_HOSTS[@]}"; do
       [[ "$e" =~ ^[A-Za-z0-9._-]+\|[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+\|[^\;\"]*$ ]] \
-        || bad "DASHBOARD_HOSTS: use 'nome|usuario@host|papel' (atual: $e)"
+        || bad "DASHBOARD_HOSTS: use 'name|user@host|role' (current: $e)"
     done
-    [[ "${DASHBOARD_PERSIST_DAYS}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_DAYS deve ser um número de dias (0 = sem limite)"
-    [[ "${DASHBOARD_PERSIST_MAX_GB}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_MAX_GB deve ser um número de GB (0 = sem limite)"
+    [[ "${DASHBOARD_PERSIST_DAYS}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_DAYS must be a number of days (0 = no limit)"
+    [[ "${DASHBOARD_PERSIST_MAX_GB}" =~ ^[0-9]+$ ]] || bad "DASHBOARD_PERSIST_MAX_GB must be a number of GB (0 = no limit)"
     [[ -z "${ENERGY_METER_URL}" || "${ENERGY_METER_URL}" =~ ^https?://[^[:space:]]+$ ]] \
-      || bad "ENERGY_METER_URL deve ser http://IP/Data"
+      || bad "ENERGY_METER_URL must be http://IP/Data"
     if is_true "${DASHBOARD_CONTROL}" && ! is_true "${DASHBOARD_CONFIG_EDIT}"; then
-      bad "DASHBOARD_CONTROL=true precisa de DASHBOARD_CONFIG_EDIT=true (usa a mesma senha de administrador)"
+      bad "DASHBOARD_CONTROL=true needs DASHBOARD_CONFIG_EDIT=true (it uses the same administrator password)"
     fi
     if [[ -n "${GNB_CTL_SSH}" ]]; then
-      [[ "${GNB_CTL_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_CTL_SSH: use usuario@host"
-      [[ "${GNB_CTL_DIR}" =~ ^/[A-Za-z0-9/_.-]+$ ]] || bad "GNB_CTL_DIR deve ser um caminho absoluto (pasta do OCUDU)"
-      [[ "${GNB_CTL_MODE}" == k8s || "${GNB_CTL_MODE}" == systemd ]] || bad "GNB_CTL_MODE: use k8s ou systemd"
+      [[ "${GNB_CTL_SSH}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] || bad "GNB_CTL_SSH: use user@host"
+      [[ "${GNB_CTL_DIR}" =~ ^/[A-Za-z0-9/_.-]+$ ]] || bad "GNB_CTL_DIR must be an absolute path (OCUDU folder)"
+      [[ "${GNB_CTL_MODE}" == k8s || "${GNB_CTL_MODE}" == systemd ]] || bad "GNB_CTL_MODE: use k8s or systemd"
     fi
     if [[ -n "${RU_MGMT_IP}" ]]; then
-      valid_ipv4 "${RU_MGMT_IP}" || bad "RU_MGMT_IP inválido"
-      [[ "${RU_SSH_USER}" =~ ^[A-Za-z0-9._-]+$ ]] || bad "RU_SSH_USER inválido"
-      [[ "${RU_NAME}" =~ ^[^\"\;]+$ ]] || bad "RU_NAME não pode ter aspas nem ;"
-      [[ -z "${RU_MGMT_IFACE}" || "${RU_MGMT_IFACE}" =~ ^[A-Za-z0-9._-]+$ ]] || bad "RU_MGMT_IFACE inválido"
-      [[ "${RU_POLL_SECONDS}" =~ ^[0-9]+$ ]] && (( RU_POLL_SECONDS >= 2 )) || bad "RU_POLL_SECONDS deve ser um número >= 2"
+      valid_ipv4 "${RU_MGMT_IP}" || bad "invalid RU_MGMT_IP"
+      [[ "${RU_SSH_USER}" =~ ^[A-Za-z0-9._-]+$ ]] || bad "invalid RU_SSH_USER"
+      [[ "${RU_NAME}" =~ ^[^\"\;]+$ ]] || bad "RU_NAME cannot have quotes or ;"
+      [[ -z "${RU_MGMT_IFACE}" || "${RU_MGMT_IFACE}" =~ ^[A-Za-z0-9._-]+$ ]] || bad "invalid RU_MGMT_IFACE"
+      [[ "${RU_POLL_SECONDS}" =~ ^[0-9]+$ ]] && (( RU_POLL_SECONDS >= 2 )) || bad "RU_POLL_SECONDS must be a number >= 2"
       if [[ -n "${RU_MGMT_LOCAL_CIDR}" ]]; then
         local ru_ip="${RU_MGMT_LOCAL_CIDR%/*}" ru_len="${RU_MGMT_LOCAL_CIDR##*/}"
         if [[ "${RU_MGMT_LOCAL_CIDR}" == */* && "${ru_len}" =~ ^[0-9]+$ ]] && valid_ipv4 "${ru_ip}" \
            && (( ru_len >= 16 && ru_len <= 32 )); then :
-        else bad "RU_MGMT_LOCAL_CIDR: use IP/prefixo de /16 a /32 (um /8 em 10.x cobriria a fibra e a rede do k3s)"; fi
+        else bad "RU_MGMT_LOCAL_CIDR: use IP/prefix from /16 to /32 (a /8 in 10.x would cover the fiber and the k3s network)"; fi
       fi
     fi
     if [[ -n "${GNB_LOG_DROP}" ]] && ! python3 -c 'import re,sys; re.compile(sys.argv[1])' "${GNB_LOG_DROP}" 2>/dev/null; then
-      bad "GNB_LOG_DROP não é uma regex válida"
+      bad "GNB_LOG_DROP is not a valid regex"
     fi
   fi
   if [[ -n "${MONGODB_IMAGE_REPOSITORY}${MONGODB_IMAGE_TAG}" ]] && \
      [[ -z "${MONGODB_IMAGE_REPOSITORY}" || -z "${MONGODB_IMAGE_TAG}" ]]; then
     bad "MONGODB_IMAGE_REPOSITORY e MONGODB_IMAGE_TAG devem ser definidos juntos"
   fi
-  if [[ -n "${NODE_IP}" ]] && ! valid_ipv4 "${NODE_IP}"; then bad "NODE_IP inválido"; fi
-  [[ "${NODE_IP_MODE}" =~ ^(stable|iface)$ ]] || bad "NODE_IP_MODE deve ser stable|iface"
+  if [[ -n "${NODE_IP}" ]] && ! valid_ipv4 "${NODE_IP}"; then bad "invalid NODE_IP"; fi
+  [[ "${NODE_IP_MODE}" =~ ^(stable|iface)$ ]] || bad "NODE_IP_MODE must be stable|iface"
   if [[ "${NODE_IP_MODE}" == stable ]]; then
-    valid_ipv4 "${STABLE_IP}" || bad "STABLE_IP inválido"
-    [[ "${STABLE_IFACE}" =~ ^[a-zA-Z0-9_-]{1,15}$ ]] || bad "STABLE_IFACE inválido (até 15 caracteres)"
+    valid_ipv4 "${STABLE_IP}" || bad "invalid STABLE_IP"
+    [[ "${STABLE_IFACE}" =~ ^[a-zA-Z0-9_-]{1,15}$ ]] || bad "invalid STABLE_IFACE (up to 15 characters)"
   fi
 
   if is_true "${RAN_LINK_ENABLED}"; then
-    is_true "${EXPOSE_RAN}" && bad "RAN_LINK_ENABLED e EXPOSE_RAN são alternativas: ligue só um"
-    [[ "${RAN_LINK_IFACE}" =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || bad "RAN_LINK_IFACE inválido"
+    is_true "${EXPOSE_RAN}" && bad "RAN_LINK_ENABLED and EXPOSE_RAN are alternatives: turn on only one"
+    [[ "${RAN_LINK_IFACE}" =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || bad "invalid RAN_LINK_IFACE"
     [[ "${RAN_LINK_MTU}" =~ ^[0-9]+$ ]] && (( RAN_LINK_MTU >= 1280 && RAN_LINK_MTU <= 9216 )) || bad "RAN_LINK_MTU 1280..9216"
     if valid_cidr "${RAN_LINK_CIDR}"; then
       for e in "${K3S_CLUSTER_CIDR}" "${K3S_SERVICE_CIDR}"; do
-        if cidr_overlap "${RAN_LINK_CIDR}" "$e"; then bad "RAN_LINK_CIDR sobrepõe $e"; fi
+        if cidr_overlap "${RAN_LINK_CIDR}" "$e"; then bad "RAN_LINK_CIDR overlaps $e"; fi
       done
       for e in AMF_N2_IP UPF_N3_IP GNB_SIM_IP; do
-        if ! valid_ipv4 "${!e}"; then bad "$e inválido ('${!e}')"
+        if ! valid_ipv4 "${!e}"; then bad "invalid $e ('${!e}')"
         elif ! cidr_overlap "${!e}/32" "${RAN_LINK_CIDR}"; then bad "$e (${!e}) fora de RAN_LINK_CIDR"; fi
       done
       [[ "${AMF_N2_IP}" != "${UPF_N3_IP}" && "${AMF_N2_IP}" != "${GNB_SIM_IP}" && "${UPF_N3_IP}" != "${GNB_SIM_IP}" ]] \
         || bad "AMF_N2_IP, UPF_N3_IP e GNB_SIM_IP devem ser diferentes"
     else
-      bad "RAN_LINK_CIDR inválido ('${RAN_LINK_CIDR}')"
+      bad "invalid RAN_LINK_CIDR ('${RAN_LINK_CIDR}')"
     fi
   fi
 
-  (( errors == 0 )) || die "${errors} erro(s) no ${CONFIG}"
+  (( errors == 0 )) || die "${errors} error(s) in ${CONFIG}"
   unset -f bad
 }
 
 # ----------------------------------------------------------------------------
-#  Detecção de ambiente (desktop x server, interface, IP, recursos)
+#  Environment detection (desktop x server, interface, IP, resources)
 # ----------------------------------------------------------------------------
 detect_env() {
   HAS_NM=false; UFW_ACTIVE=false; HAS_DOCKER=false; HAS_AVX=false; HAS_FIREWALLD=false
@@ -324,8 +326,8 @@ detect_env() {
   if grep -qw avx /proc/cpuinfo; then HAS_AVX=true; fi
 
   if [[ "${ENV_PROFILE}" == "auto" ]]; then
-    # graphical.target sozinho não basta: servidores costumam vir com ele como padrão sem
-    # nenhuma interface gráfica. Desktop = NetworkManager ativo ou gerenciador de login instalado.
+    # graphical.target alone is not enough: servers often have it as the default without
+    # any graphical interface. Desktop = NetworkManager active or a login manager installed.
     if ${HAS_NM} || [[ -e /etc/systemd/system/display-manager.service ]]; then
       DETECTED_PROFILE=desktop
     else
@@ -335,7 +337,7 @@ detect_env() {
     DETECTED_PROFILE=${ENV_PROFILE}
   fi
 
-  # Interface/IP físicos do host (rota default). Podem mudar (DHCP, Wi-Fi x cabo).
+  # Physical host interface/IP (default route). They may change (DHCP, Wi-Fi x cable).
   local need_phys=true
   if [[ "${NODE_IP_MODE}" == stable ]] && ! is_true "${EXPOSE_RAN}"; then need_phys=false; fi
   if [[ -z "${NODE_IFACE}" ]]; then
@@ -345,18 +347,18 @@ detect_env() {
     if [[ -z "${NODE_IP}" ]]; then
       NODE_IP=$(ip -4 -o addr show dev "${NODE_IFACE}" scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
     elif ! ip -4 -o addr show dev "${NODE_IFACE}" | grep -q " ${NODE_IP}/"; then
-      warn "NODE_IP ${NODE_IP} não está configurado em ${NODE_IFACE}"
+      warn "NODE_IP ${NODE_IP} is not configured on ${NODE_IFACE}"
     fi
   else
     NODE_IFACE=""
   fi
   if [[ -z "${NODE_IP}" ]]; then
-    ${need_phys} && die "Sem interface/IP de rede detectável; defina NODE_IFACE/NODE_IP no config"
-    warn "host sem rede agora (sem rota default) — o cluster funciona mesmo assim (NODE_IP_MODE=stable)"
+    ${need_phys} && die "No detectable network interface/IP; set NODE_IFACE/NODE_IP in the config"
+    warn "host without network right now (no default route) — the cluster works anyway (NODE_IP_MODE=stable)"
   fi
 
-  # Endereço que o k3s usa como nó. Em 'stable' é uma interface dummy própria,
-  # independente de DHCP/troca de rede; em 'iface' é a interface física.
+  # Address k3s uses as the node. In 'stable' it is an own dummy interface,
+  # independent of DHCP/network changes; in 'iface' it is the physical interface.
   if [[ "${NODE_IP_MODE}" == stable ]]; then
     K3S_NODE_IFACE="${STABLE_IFACE}"; K3S_NODE_IP="${STABLE_IP}"
   else
@@ -368,11 +370,11 @@ detect_env() {
 }
 
 print_env_summary() {
-  info "Perfil do host     : ${C_B}${DETECTED_PROFILE}${C_0} (ENV_PROFILE=${ENV_PROFILE})"
-  info "Host (físico)      : ${NODE_IFACE:-sem rede} / ${NODE_IP:-sem IP}"
-  info "Nó do k3s          : ${K3S_NODE_IFACE} / ${K3S_NODE_IP} (NODE_IP_MODE=${NODE_IP_MODE})"
+  info "Host profile       : ${C_B}${DETECTED_PROFILE}${C_0} (ENV_PROFILE=${ENV_PROFILE})"
+  info "Host (physical)    : ${NODE_IFACE:-no network} / ${NODE_IP:-no IP}"
+  info "k3s node           : ${K3S_NODE_IFACE} / ${K3S_NODE_IP} (NODE_IP_MODE=${NODE_IP_MODE})"
   info "CPU / RAM          : ${CPUS} vCPU / ${MEM_MB} MiB (AVX: ${HAS_AVX})"
-  info "NetworkManager     : ${HAS_NM}   UFW ativo: ${UFW_ACTIVE}   firewalld: ${HAS_FIREWALLD}   Docker: ${HAS_DOCKER}"
+  info "NetworkManager     : ${HAS_NM}   UFW active: ${UFW_ACTIVE}   firewalld: ${HAS_FIREWALLD}   Docker: ${HAS_DOCKER}"
   info "PLMN / TAC         : ${MCC}-${MNC} / ${TAC}"
   local s; for s in "${SLICES[@]}"; do parse_slice "$s"
     info "Slice              : SST=${S_SST} SD=${S_SD} DNN=${S_DNN} pool=${S_SUBNET} gw=${S_GW}"
@@ -381,7 +383,7 @@ print_env_summary() {
 }
 
 # ----------------------------------------------------------------------------
-#  kubectl / helm sempre apontando para o k3s (não usa ~/.kube/config)
+#  kubectl / helm always pointing to k3s (does not use ~/.kube/config)
 # ----------------------------------------------------------------------------
 kc() {
   if command -v k3s &>/dev/null; then
@@ -407,19 +409,19 @@ populate_deploy() {
 }
 
 # ----------------------------------------------------------------------------
-#  Geração dos values Helm a partir do config.env
+#  Generation of the Helm values from config.env
 # ----------------------------------------------------------------------------
-_q() { printf '"%s"' "$1"; }   # string YAML entre aspas
+_q() { printf '"%s"' "$1"; }   # quoted YAML string
 
-# Anotação do Multus: 2ª interface (net1) na rede ran-link com IP fixo
+# Multus annotation: 2nd interface (net1) on the ran-link network with a fixed IP
 ran_link_annotation() {  # $1 = IP
   printf "k8s.v1.cni.cncf.io/networks: '[{\"name\":\"ran-link\",\"ips\":[\"%s/%s\"]}]'" "$1" "${RAN_LINK_CIDR#*/}"
 }
 
-_nf_common() {  # $1 = chave do NF no chart umbrella; $2 (opcional) = IP no ran-link
+_nf_common() {  # $1 = NF key in the umbrella chart; $2 (optional) = IP on the ran-link
   echo "$1:"
-  # Recreate: em RollingUpdate pods novos descobrem NFs antigos (via NRF antigo) e
-  # guardam esse cache por 24h => falhas como "No route to host" no SCP.
+  # Recreate: with RollingUpdate new pods discover old NFs (through the old NRF) and
+  # keep that cache for 24h => failures like "No route to host" in the SCP.
   echo "  updateStrategy:"
   echo "    type: Recreate"
   echo "  podAnnotations:"
@@ -429,7 +431,7 @@ _nf_common() {  # $1 = chave do NF no chart umbrella; $2 (opcional) = IP no ran-
     echo "  image:"
     echo "    tag: $(_q "${OPEN5GS_IMAGE_TAG}")"
   fi
-  # Prometheus (:9090/metrics) para a aba Core do painel
+  # Prometheus (:9090/metrics) for the dashboard Core tab
   if is_true "${OPEN5GS_METRICS}" && [[ " amf smf upf pcf " == *" $1 "* ]]; then
     echo "  metrics:"
     echo "    enabled: true"
@@ -440,7 +442,7 @@ render_open5gs_values() {
   local out="${GENERATED_DIR}/open5gs-values.yaml" i s dns body
   mkdir -p "${GENERATED_DIR}"
   body=$(
-    echo "# GERADO automaticamente a partir de config.env — não edite à mão."
+    echo "# GENERATED automatically from config.env — do not edit by hand."
     if [[ -n "${MONGODB_IMAGE_REPOSITORY}" ]]; then
       echo "global:"
       echo "  security:"
@@ -460,8 +462,8 @@ render_open5gs_values() {
       echo "    tag: $(_q "${MONGODB_IMAGE_TAG}")"
     fi
 
-    # --- NRF: PLMN servido. Sem isso o chart usa 999/70 e o SCP trata o UE como
-    #     roaming ("No SEPP"), rejeitando o registro com HTTP 400.
+    # --- NRF: served PLMN. Without it the chart uses 999/70 and the SCP treats the UE as
+    #     roaming ("No SEPP"), rejecting the registration with HTTP 400.
     _nf_common nrf
     echo "  config:"
     echo "    servingList:"
@@ -469,8 +471,8 @@ render_open5gs_values() {
 
     for nf in scp ausf udm udr pcf bsf; do _nf_common "$nf"; done
 
-    # --- AMF: GUAMI, TAI, PLMN + S-NSSAI suportados
-    #     Com RAN_LINK: net1 no link; o N2 passa a ouvir em net1 (post-renderer amf-ngap-net1.sh)
+    # --- AMF: GUAMI, TAI, supported PLMN + S-NSSAI
+    #     With RAN_LINK: net1 on the link; N2 listens on net1 (post-renderer amf-ngap-net1.sh)
     if is_true "${RAN_LINK_ENABLED}"; then _nf_common amf "${AMF_N2_IP}"; else _nf_common amf; fi
     echo "  config:"
     echo "    networkName: $(_q "${NETWORK_NAME}")"
@@ -492,7 +494,7 @@ render_open5gs_values() {
       echo "      type: LoadBalancer      # ServiceLB do k3s => SCTP ${NODE_IP}:38412"
     fi
 
-    # --- NSSF: uma NSI por slice (todas apontando para o NRF)
+    # --- NSSF: one NSI per slice (all pointing to the NRF)
     _nf_common nssf
     echo "  config:"
     echo "    nsiList:"
@@ -513,18 +515,18 @@ render_open5gs_values() {
       echo "      - {subnet: $(_q "${S_SUBNET}"), gateway: $(_q "${S_GW}"), dnn: $(_q "${S_DNN}")}"
     done
 
-    # --- UPF: uma TUN + NAT por DNN
+    # --- UPF: one TUN + NAT per DNN
     if is_true "${RAN_LINK_ENABLED}"; then _nf_common upf "${UPF_N3_IP}"; else _nf_common upf; fi
     echo "  config:"
     if is_true "${RAN_LINK_ENABLED}"; then
       echo "    upf:"
       echo "      gtpu:"
-      echo "        dev: net1            # N3 no link com o gNB (${UPF_N3_IP})"
+      echo "        dev: net1            # N3 on the gNB link (${UPF_N3_IP})"
     fi
     if is_true "${EXPOSE_RAN}"; then
       echo "    upf:"
       echo "      gtpu:"
-      echo "        advertise: $(_q "${NODE_IP}")   # endereço N3 anunciado ao gNB"
+      echo "        advertise: $(_q "${NODE_IP}")   # N3 address advertised to the gNB"
     fi
     echo "    subnetList:"
     for i in "${!SLICES[@]}"; do parse_slice "${SLICES[$i]}"
@@ -537,9 +539,9 @@ render_open5gs_values() {
       echo "        enableNAT: true"
     done
     echo "  services:"
-    # PFCP (N4) sem DNAT: Service headless => o SMF fala direto com o IP do pod do UPF.
-    # Com ClusterIP, o tráfego SMF->Service e UPF->SMF (ambos UDP 8805<->8805) colidia no
-    # conntrack, a porta de origem do SMF era reescrita e o UPF respondia "Cannot find PFCP-Node".
+    # PFCP (N4) without DNAT: headless Service => the SMF talks straight to the UPF pod IP.
+    # With a ClusterIP, the SMF->Service and UPF->SMF traffic (both UDP 8805<->8805) collided in
+    # conntrack, the SMF source port was rewritten and the UPF answered "Cannot find PFCP-Node".
     echo "    pfcp:"
     echo "      clusterIP: None"
     if is_true "${EXPOSE_RAN}"; then
@@ -563,19 +565,19 @@ render_open5gs_values() {
       echo "  enabled: false"
     fi
   )
-  OPEN5GS_HASH=$(printf '%s' "${body}" | sha256sum | cut -c1-16)
+  OPEN5GS_HASH=$(printf '%s\n' "${body}" | strip_comments | sha256sum | cut -c1-16)   # comments do not count
   printf '%s\n' "${body//__CONFIG_HASH__/$(_q "${OPEN5GS_HASH}")}" >"${out}"
   OPEN5GS_VALUES="${out}"
 }
 
-# Rede ran-link (NetworkAttachmentDefinition do Multus): macvlan sobre RAN_LINK_IFACE.
-# O IP de cada pod vem da anotação dele (IPAM static). No macvlan o próprio host
-# não enxerga os pods pela RAN_LINK_IFACE; o gNB do outro lado do cabo, sim.
+# ran-link network (Multus NetworkAttachmentDefinition): macvlan over RAN_LINK_IFACE.
+# Each pod IP comes from its annotation (static IPAM). With macvlan the host itself
+# does not see the pods through RAN_LINK_IFACE; the gNB at the other end of the cable does.
 render_ran_link_nad() {
   local out="${GENERATED_DIR}/ran-link-nad.yaml"
   mkdir -p "${GENERATED_DIR}"
   cat >"${out}" <<EOF
-# GERADO automaticamente a partir de config.env — não edite à mão.
+# GENERATED automatically from config.env — do not edit by hand.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -596,23 +598,23 @@ EOF
   RAN_LINK_NAD="${out}"
 }
 
-# Painel (dashboard/): ServiceAccount só leitura, ConfigMap com os arquivos da
-# página, Secret (senha/token), Deployment e Service NodePort.
+# Dashboard (dashboard/): read-only ServiceAccount, ConfigMap with the page
+# files, Secret (password/token), Deployment and NodePort Service.
 render_dashboard() {
   local out="${GENERATED_DIR}/dashboard.yaml" app="${PROJECT_DIR}/dashboard/app" files=() f hash cm i e
   local sims="" names=""
-  # IMSIs do UERANSIM (o painel marca como simulados) e apelidos "IMSI=nome;..."
+  # UERANSIM IMSIs (the dashboard marks them as simulated) and nicknames "IMSI=name;..."
   if is_true "${DEPLOY_UERANSIM}"; then
     for (( i = 0; i < UE_COUNT; i++ )); do sims+="${sims:+ }$(ue_imsi "$i")"; done
   fi
   for e in "${DASHBOARD_UE_NAMES[@]}"; do names+="${names:+;}${e%%:*}=${e#*:}"; done
-  # Máquinas remotas para listar no painel: "nome|papel;..."
+  # Remote machines to list in the dashboard: "name|role;..."
   local hosts="" hn
   for e in "${DASHBOARD_HOSTS[@]}"; do IFS='|' read -r hn _ e <<<"$e"; hosts+="${hosts:+;}${hn}|${e}"; done
-  # Túneis do UPF -> DNN (aba Core: tráfego N6 por DNN)
+  # UPF tunnels -> DNN (Core tab: N6 traffic per DNN)
   local upfdevs=""
   for i in "${!SLICES[@]}"; do parse_slice "${SLICES[$i]}"; upfdevs+="${upfdevs:+;}$(tun_name "$i")=${S_DNN}"; done
-  # Segundo core (free5GC, opcional): o painel lê os dados do free5gc/free5gc.env, se existir
+  # Second core (free5GC, optional): the dashboard reads free5gc/free5gc.env, if it exists
   local f5env="" f5ns="" f5amf="" f5upf="" f5web="" f5name="" f5pools=""
   if [[ -r "${PROJECT_DIR}/free5gc/free5gc.env" ]]; then
     f5env=$(
@@ -626,7 +628,7 @@ render_dashboard() {
     { read -r f5ns; read -r f5amf; read -r f5upf; read -r f5web; read -r f5name; read -r f5pools; } <<<"${f5env}"
   fi
   mkdir -p "${GENERATED_DIR}"
-  # Aba Configuração: config.env gravável (pelo grupo do dono), projeto só leitura, backups
+  # Settings tab: config.env writable (through the owner group), project read only, backups
   local cfg_env="" cfg_mounts="" cfg_vols="" cfg_groups=""
   if [[ -n "${DASHBOARD_ADMIN_PASSWORD}" && -n "${DASHBOARD_CONFIG_GID}" ]]; then
     cfg_groups="
@@ -637,7 +639,7 @@ render_dashboard() {
             - {name: PROJECT_DIR, value: /project}
             - {name: CONFIG_BACKUP_DIR, value: /backups}"
     cfg_mounts="
-            # Aba Configuração: só o config.env é gravável; o resto do projeto é só leitura
+            # Settings tab: only config.env is writable; the rest of the project is read only
             - {name: project, mountPath: /project, readOnly: true}
             - {name: config-env, mountPath: /config/config.env}
             - {name: config-backups, mountPath: /backups}"
@@ -646,7 +648,7 @@ render_dashboard() {
         - {name: config-env, hostPath: {path: $(_q "${PROJECT_DIR}/config.env"), type: File}}
         - {name: config-backups, hostPath: {path: $(_q "${INSTALL_DIR}/state/config-backups"), type: Directory}}"
   fi
-  # Histórico persistente: diretório do host gravável pelo pod (usuário 65534)
+  # Persistent history: host folder writable by the pod (user 65534)
   local hist_env="" hist_mount="" hist_vol=""
   if is_true "${DASHBOARD_PERSIST}"; then
     hist_env="
@@ -658,17 +660,17 @@ render_dashboard() {
     hist_vol="
         - {name: history, hostPath: {path: $(_q "${DASHBOARD_DATA_DIR}"), type: Directory}}"
   fi
-  for f in server.py configedit.py control.py history.py history.js settings.js control.js docs.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css logo.svg; do
-    [[ -f "${app}/${f}" ]] || die "arquivo do painel ausente: ${app}/${f}"
+  for f in server.py configedit.py control.py history.py i18n.js history.js settings.js control.js docs.js hoststats.py index.html app.js hosts.js ru.js style.css favicon.svg uPlot.iife.min.js uPlot.min.css logo.svg; do
+    [[ -f "${app}/${f}" ]] || die "dashboard file missing: ${app}/${f}"
     files+=(--from-file="${f}=${app}/${f}")
   done
   cm=$(kc -n "${K8S_NAMESPACE}" create configmap dashboard-app "${files[@]}" --dry-run=client -o yaml)
-  # O hash muda quando a página ou a config mudam => o pod reinicia sozinho
+  # The hash changes when the page or the config change => the pod restarts by itself
   hash=$(printf '%s\n' "${cm}" "${GNB_METRICS_URL}" "${GNB_NAME}" "${NETWORK_NAME}" "${DASHBOARD_HISTORY_SECONDS}" \
          "${OPEN5GS_METRICS}" "${DASHBOARD_IMAGE}" "${sims}" "${names}" "${hosts}" "${upfdevs}" "${DASHBOARD_PERSIST}" "${DASHBOARD_PERSIST_DAYS}" "${DASHBOARD_PERSIST_MAX_GB}" "${WEBUI_ENABLED}" "${WEBUI_NODEPORT}" "${DASHBOARD_LOCAL_ROLE}" "${ENERGY_METER_URL}" "${ENERGY_METER_HOST}" "${RU_MGMT_IP}" "${RU_NAME}" "${DASHBOARD_CONTROL}" "${GNB_CTL_SSH}" "${GNB_CTL_MODE}" "${AMF_N2_IP}" "${UPF_N3_IP}" "${DASHBOARD_PASSWORD}" "${DASHBOARD_INGEST_TOKEN}" "${DASHBOARD_ADMIN_PASSWORD}" "${DASHBOARD_CONFIG_GID}" "${f5env}" | sha256sum | cut -c1-16)
   {
-    echo "# GERADO automaticamente a partir de config.env — não edite à mão."
-    # só o campo vazio gerado pelo kubectl (não linhas dos arquivos do painel que citem a palavra)
+    echo "# GENERATED automatically from config.env — do not edit by hand."
+    # only the empty field generated by kubectl (not lines of the dashboard files that mention the word)
     printf '%s\n' "${cm}" | sed '/^  creationTimestamp: null$/d'
     cat <<EOF
 ---
@@ -699,7 +701,7 @@ rules:
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
 ---
-# Aba Controle (DASHBOARD_CONTROL): escalar Deployments e apagar pods. Vazio quando desligada.
+# Control tab (DASHBOARD_CONTROL): scale Deployments and delete pods. Empty when off.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -825,7 +827,7 @@ spec:
             capabilities: {drop: ["ALL"]}
           volumeMounts:
             - {name: app, mountPath: /app, readOnly: true}
-            # Aba Máquinas: /proc, /sys e / do host, só leitura (CPU, memória, temperatura, discos)
+            # Machines tab: host /proc, /sys and /, read only (CPU, memory, temperature, disks)
             - {name: host-proc, mountPath: /host/proc, readOnly: true}
             - {name: host-sys, mountPath: /host/sys, readOnly: true}
             - {name: host-root, mountPath: /host/root, readOnly: true}
@@ -858,7 +860,7 @@ render_ueransim_values() {
   mkdir -p "${GENERATED_DIR}"
   parse_slice "${SLICES[0]}"
   body=$(
-    echo "# GERADO automaticamente a partir de config.env — não edite à mão."
+    echo "# GENERATED automatically from config.env — do not edit by hand."
     echo "fullnameOverride: $(_q "${UERANSIM_RELEASE}")"
     if [[ -n "${UERANSIM_IMAGE_TAG}" ]]; then
       echo "image:"
@@ -871,7 +873,7 @@ render_ueransim_values() {
     echo "podAnnotations:"
     echo "  ${HASH_ANNOTATION}: __CONFIG_HASH__"
     if is_true "${RAN_LINK_ENABLED}"; then
-      # gNB simulado no mesmo link do gNB real: N2 e N3 por net1; rádio (UEs) segue no eth0
+      # simulated gNB on the same link as the real gNB: N2 and N3 over net1; radio (UEs) stays on eth0
       echo "  $(ran_link_annotation "${GNB_SIM_IP}")"
       echo "amf:"
       echo "  ip: $(_q "${AMF_N2_IP}")"
@@ -906,16 +908,16 @@ render_ueransim_values() {
     echo "      emergency: false"
   )
   # Inclui o hash do core: se o core mudar, gNB/UEs reiniciam e se reconectam
-  UERANSIM_HASH=$(printf '%s%s' "${body}" "${OPEN5GS_HASH:-}" | sha256sum | cut -c1-16)
+  UERANSIM_HASH=$( { printf '%s\n' "${body}" | strip_comments; printf '%s' "${OPEN5GS_HASH:-}"; } | sha256sum | cut -c1-16)
   printf '%s\n' "${body//__CONFIG_HASH__/$(_q "${UERANSIM_HASH}")}" >"${out}"
   UERANSIM_VALUES="${out}"
 }
 
 # ----------------------------------------------------------------------------
-#  Assinantes: gera script bash executado dentro do pod "populate"
-#  (open5gs-dbctl: remove + add_ue_with_slice => idempotente)
+#  Subscribers: generates a bash script run inside the "populate" pod
+#  (open5gs-dbctl: remove + add_ue_with_slice => idempotent)
 # ----------------------------------------------------------------------------
-subscriber_lines() {  # imprime "IMSI K OPC DNN SST SD" por linha
+subscriber_lines() {  # prints "IMSI K OPC DNN SST SD" per line
   local i f
   parse_slice "${SLICES[0]}"
   local d_sst=${S_SST} d_sd=${S_SD,,} d_dnn=${S_DNN}
@@ -932,9 +934,9 @@ subscriber_lines() {  # imprime "IMSI K OPC DNN SST SD" por linha
   done
 }
 
-populate_exec() {  # executa um script bash no pod populate
+populate_exec() {  # runs a bash script in the populate pod
   local dep; dep=$(populate_deploy)
-  [[ -n "${dep}" ]] || die "Deployment 'populate' do Open5GS não encontrado no namespace ${K8S_NAMESPACE}"
+  [[ -n "${dep}" ]] || die "Open5GS 'populate' Deployment not found in namespace ${K8S_NAMESPACE}"
   kc -n "${K8S_NAMESPACE}" exec -i "${dep}" -c populate -- /bin/bash -s <<<"$1"
 }
 
@@ -952,21 +954,21 @@ sync_subscribers() {
 }
 
 # ----------------------------------------------------------------------------
-#  kubeconfig e atalhos do usuário real (quem chamou o sudo)
+#  kubeconfig and shortcuts of the real user (who called sudo)
 # ----------------------------------------------------------------------------
-KCTX="open5gs-k3s"   # nome do cluster/contexto/usuário no ~/.kube/config
+KCTX="open5gs-k3s"   # cluster/context/user name in ~/.kube/config
 BASHRC_BEGIN="# >>> open5gs-k3s >>>"
 BASHRC_END="# <<< open5gs-k3s <<<"
 
 # Define TARGET_USER / TARGET_HOME / TARGET_GROUP: KUBECONFIG_USER > SUDO_USER > root
 resolve_target_user() {
   TARGET_USER="${KUBECONFIG_USER:-${SUDO_USER:-root}}"
-  getent passwd "${TARGET_USER}" >/dev/null || die "usuário '${TARGET_USER}' não existe (KUBECONFIG_USER/SUDO_USER)"
+  getent passwd "${TARGET_USER}" >/dev/null || die "user '${TARGET_USER}' does not exist (KUBECONFIG_USER/SUDO_USER)"
   TARGET_HOME=$(getent passwd "${TARGET_USER}" | cut -d: -f6)
   TARGET_GROUP=$(id -gn "${TARGET_USER}")
 }
 
-# Copia do k3s.yaml com nomes "default" trocados por ${KCTX} (evita colisão no merge)
+# Copy of k3s.yaml with the "default" names replaced by ${KCTX} (avoids collisions in the merge)
 _renamed_k3s_kubeconfig() {
   sed -e "s/^  name: default\$/  name: ${KCTX}/" \
       -e "s/^    cluster: default\$/    cluster: ${KCTX}/" \
@@ -975,24 +977,24 @@ _renamed_k3s_kubeconfig() {
       -e "s/^current-context: default\$/current-context: ${KCTX}/" "$1"
 }
 
-# setup_user_kubeconfig SRC: instala/mescla o kubeconfig no ~/.kube/config do usuário-alvo.
-# Idempotente: só grava se o conteúdo mudar; backup único do config original.
+# setup_user_kubeconfig SRC: installs/merges the kubeconfig into the target user's ~/.kube/config.
+# Idempotent: only writes if the content changes; single backup of the original config.
 setup_user_kubeconfig() {
   local src="$1" kdir="${TARGET_HOME}/.kube" cfg="${TARGET_HOME}/.kube/config"
   local own="${TARGET_HOME}/.kube/${KCTX}.yaml" tmp merged cur
   tmp=$(mktemp); merged=$(mktemp)
   _renamed_k3s_kubeconfig "${src}" >"${tmp}"
-  grep -q "^current-context: ${KCTX}\$" "${tmp}" || { rm -f "${tmp}" "${merged}"; die "formato inesperado em ${src}"; }
+  grep -q "^current-context: ${KCTX}\$" "${tmp}" || { rm -f "${tmp}" "${merged}"; die "unexpected format in ${src}"; }
   [[ -d "${kdir}" ]] || install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${kdir}"
-  # cópia avulsa (usada por test.sh/subscribers.sh quando sem root)
+  # standalone copy (used by test.sh/subscribers.sh without root)
   cmp -s "${tmp}" "${own}" 2>/dev/null || install -m 0600 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${tmp}" "${own}"
 
   if [[ ! -s "${cfg}" ]] || ! grep -q 'server:' "${cfg}"; then
-    # inexistente ou vazio (sem clusters): usa o nosso
+    # missing or empty (no clusters): use ours
     if [[ -s "${cfg}" && ! -e "${cfg}.bak-${KCTX}" ]]; then cp -p "${cfg}" "${cfg}.bak-${KCTX}"; fi
     cp "${tmp}" "${merged}"
   else
-    # já tem clusters: merge (o 1º arquivo vence em nomes repetidos => nossas credenciais atualizadas)
+    # already has clusters: merge (the 1st file wins on repeated names => our credentials updated)
     cur=$(k3s kubectl --kubeconfig "${cfg}" config current-context 2>/dev/null || true)
     KUBECONFIG="${tmp}:${cfg}" k3s kubectl config view --flatten >"${merged}"
     if [[ -n "${cur}" && "${cur}" != "${KCTX}" ]] && \
@@ -1009,7 +1011,7 @@ setup_user_kubeconfig() {
   rm -f "${tmp}" "${merged}"
 }
 
-# Remove do ~/.kube/config do usuário-alvo só as entradas ${KCTX}
+# Removes only the ${KCTX} entries from the target user's ~/.kube/config
 remove_user_kubeconfig() {
   local cfg="${TARGET_HOME}/.kube/config" kbin
   rm -f "${TARGET_HOME}/.kube/${KCTX}.yaml"
@@ -1024,14 +1026,14 @@ remove_user_kubeconfig() {
   chown "${TARGET_USER}:${TARGET_GROUP}" "${cfg}"
 }
 
-# Alias k=kubectl + autocomplete no ~/.bashrc (bloco com marcadores, só se não existir)
+# Alias k=kubectl + completion in ~/.bashrc (block with markers, only if missing)
 setup_user_bashrc() {
   local rc="${TARGET_HOME}/.bashrc"
   [[ -f "${rc}" ]] || install -m 0644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/null "${rc}"
   grep -qF "${BASHRC_BEGIN}" "${rc}" && return 0
   local alias_line='alias k=kubectl'
-  # não sobrescreve um alias k já definido pelo usuário
-  if grep -qE '^\s*alias k=' "${rc}"; then alias_line='# alias k já definido acima pelo usuário'; fi
+  # does not overwrite an alias k already defined by the user
+  if grep -qE '^\s*alias k=' "${rc}"; then alias_line='# alias k already defined above by the user'; fi
   cat >>"${rc}" <<EOB
 
 ${BASHRC_BEGIN}
@@ -1049,22 +1051,22 @@ EOB
 remove_user_bashrc() {
   local rc="${TARGET_HOME}/.bashrc"
   [[ -f "${rc}" ]] && grep -qF "${BASHRC_BEGIN}" "${rc}" || return 1
-  # apaga o bloco e a linha em branco que o precede
+  # deletes the block and the blank line before it
   sed -i "/^${BASHRC_BEGIN//\//\\/}\$/,/^${BASHRC_END//\//\\/}\$/d" "${rc}"
   sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "${rc}"
 }
 
 # ----------------------------------------------------------------------------
-#  Recuperação do plano de usuário (install.sh, scripts/heal.sh, boot)
-#  Depois de reboot/restart do k3s os pods voltam em ordem qualquer e o SMF pode
-#  ficar com uma associação PFCP que o UPF não reconhece ("Cannot find
-#  PFCP-Node"), ou o gNB/UE ficam presos. Sintoma: UE registra mas não pinga.
+#  User-plane recovery (install.sh, scripts/heal.sh, boot)
+#  After a reboot/restart of k3s the pods come back in any order and the SMF may
+#  keep a PFCP association that the UPF does not recognize ("Cannot find
+#  PFCP-Node"), or the gNB/UE get stuck. Symptom: the UE registers but does not ping.
 # ----------------------------------------------------------------------------
 _ues_dep()  { echo "deploy/${UERANSIM_RELEASE}-ues"; }
 _gnb_has_ngsetup() {
   kc -n "${K8S_NAMESPACE}" logs "deploy/${UERANSIM_RELEASE}" 2>/dev/null | grep -q "NG Setup procedure is successful"
 }
-# Todos os UEs registrados e pingando o gateway do UPF pela uesimtunN
+# All UEs registered and pinging the UPF gateway through uesimtunN
 ue_plane_ok() {
   local i imsi gw; parse_slice "${SLICES[0]}"; gw="${S_GW}"
   for (( i = 0; i < UE_COUNT; i++ )); do
@@ -1079,31 +1081,31 @@ _wait_plane() {  # $1 = segundos
   while (( t < $1 )); do ue_plane_ok && return 0; sleep 5; (( t += 5 )); done
   return 1
 }
-_restart() {  # deployments em sequência, cada um esperando ficar pronto
+_restart() {  # deployments in sequence, each one waiting to be ready
   local d
   for d in "$@"; do
     kc -n "${K8S_NAMESPACE}" get "deploy/${d}" &>/dev/null || continue
     kc -n "${K8S_NAMESPACE}" rollout restart "deploy/${d}" >/dev/null
-    kc -n "${K8S_NAMESPACE}" rollout status "deploy/${d}" --timeout=300s >/dev/null || warn "deploy/${d} demorou a ficar pronto"
+    kc -n "${K8S_NAMESPACE}" rollout status "deploy/${d}" --timeout=300s >/dev/null || warn "deploy/${d} took long to become ready"
   done
 }
-# Garante UEs registrados com plano de usuário funcionando. Escalonado:
-# espera -> reinicia só os UEs (corrida do UERANSIM) -> reinicia UPF, SMF, gNB e UEs
-# nessa ordem (refaz a associação PFCP e o NG Setup). Retorna 1 se não resolver.
+# Makes sure the UEs are registered with a working user plane. Escalating:
+# wait -> restart only the UEs (UERANSIM race) -> restart UPF, SMF, gNB and UEs
+# in that order (redoes the PFCP association and the NG Setup). Returns 1 if it does not fix it.
 ensure_user_plane() {
-  kc -n "${K8S_NAMESPACE}" get "$(_ues_dep)" &>/dev/null || { info "UERANSIM não implantado; nada a verificar"; return 0; }
+  kc -n "${K8S_NAMESPACE}" get "$(_ues_dep)" &>/dev/null || { info "UERANSIM not deployed; nothing to check"; return 0; }
   local t=0
   until _gnb_has_ngsetup; do (( t += 3 )); (( t < 120 )) || break; sleep 3; done
-  if _gnb_has_ngsetup && _wait_plane 60; then ok "${UE_COUNT} UE(s) registrado(s) e plano de usuário OK"; return 0; fi
+  if _gnb_has_ngsetup && _wait_plane 60; then ok "${UE_COUNT} UE(s) registered and user plane OK"; return 0; fi
 
-  info "UE(s) sem registro/ping; reiniciando o pod dos UEs"
+  info "UE(s) without registration/ping; restarting the UE pod"
   _restart "${UERANSIM_RELEASE}-ues"
-  if _wait_plane 60; then ok "plano de usuário OK após reiniciar os UEs"; return 0; fi
+  if _wait_plane 60; then ok "user plane OK after restarting the UEs"; return 0; fi
 
-  info "ainda falhando; reiniciando UPF -> SMF -> gNB -> UEs (refaz PFCP/N4 e NG Setup)"
+  info "still failing; restarting UPF -> SMF -> gNB -> UEs (redoes PFCP/N4 and NG Setup)"
   _restart "${OPEN5GS_RELEASE}-upf" "${OPEN5GS_RELEASE}-smf"
   sleep 5
   _restart "${UERANSIM_RELEASE}" "${UERANSIM_RELEASE}-ues"
-  if _wait_plane 120; then ok "plano de usuário OK após reiniciar UPF/SMF/gNB/UEs"; return 0; fi
+  if _wait_plane 120; then ok "user plane OK after restarting UPF/SMF/gNB/UEs"; return 0; fi
   return 1
 }

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  ran/ocudu/lib/render.py — manifestos do gNB OCUDU no Kubernetes.
+#  ran/ocudu/lib/render.py — manifests of the OCUDU gNB on Kubernetes.
 #
-#  Lê as variáveis do ocudu.env (no ambiente) e escreve no stdout: Namespace,
-#  Deployment "ocudu-gnb" e o descritor do componente. Sem dependências.
+#  Reads the ocudu.env variables (from the environment) and writes to stdout: Namespace,
+#  Deployment "ocudu-gnb" and the component descriptor. No dependencies.
 #
-#  O pod roda o MESMO comando do serviço nativo ocudu-gnb@:
-#    taskset -c <CPUs> gnb -c <pasta>/<yml>.yml [-c <pasta>/metricas.yml]
-#  com a rede e o hardware do host (hostNetwork + privileged), os .yml lidos da
-#  pasta do host e o log no /tmp do host. Parar = SIGINT ao gNB (igual a Ctrl+C).
+#  The pod runs the SAME command as the native ocudu-gnb@ service:
+#    taskset -c <CPUs> gnb -c <folder>/<yml>.yml [-c <folder>/metricas.yml]
+#  with the host network and hardware (hostNetwork + privileged), the .yml files read from
+#  the host folder and the log in the host /tmp. Stop = SIGINT to the gNB (like Ctrl+C).
 # =============================================================================
 import json
 import os
@@ -20,7 +20,7 @@ E = os.environ
 def env(k, d=None):
     v = E.get(k, d)
     if v is None:
-        sys.exit("render.py: falta %s" % k)
+        sys.exit("render.py: missing %s" % k)
     return v
 
 
@@ -31,46 +31,46 @@ LOG_DIR = env("OCUDU_LOG_DIR")
 IMAGE = "%s:%s" % (env("OCUDU_IMAGE"), env("OCUDU_IMAGE_TAG"))
 LABELS = {"app.kubernetes.io/name": "ocudu-gnb", "app.kubernetes.io/part-of": "innovanetwork"}
 
-# Script do contêiner: confere o .yml, recusa se já houver um gnb no host (o serviço
-# nativo, por exemplo) e repassa o TERM do Kubernetes como INT ao gNB.
+# Container script: checks the .yml, refuses if there is already a gnb on the host (the
+# native service, for example) and forwards the Kubernetes TERM as INT to the gNB.
 RUN = r'''
 set -u
-# Depois de um reboot do nó o gNB NÃO liga sozinho (o GPS pode levar até ~30 min e a RU precisa do relógio
-# certo): só liga se o último "gnb.sh iniciar" (GNB_START_REQUEST, epoch) for posterior ao boot do nó.
-# /proc/stat não é isolado por contêiner: btime é a hora de boot do host.
+# After a node reboot the gNB does NOT start by itself (the GPS can take up to ~30 min and the RU needs the
+# right clock): it only starts if the last "gnb.sh start" (GNB_START_REQUEST, epoch) is newer than the node boot.
+# /proc/stat is not isolated per container: btime is the host boot time.
 btime=$(awk '/^btime/{print $2}' /proc/stat)
 if [ "${GNB_START_REQUEST:-0}" -lt "$btime" ]; then
-  echo "ocudu-gnb: o nó reiniciou depois do último pedido de início ($(date -d @"${GNB_START_REQUEST:-0}" '+%F %T' 2>/dev/null))."
-  echo "ocudu-gnb: o gNB NÃO liga sozinho. Confira o GPS (ts2phc 's2') e a RU e rode: ./ran/ocudu/gnb.sh iniciar"
+  echo "ocudu-gnb: the node rebooted after the last start request ($(date -d @"${GNB_START_REQUEST:-0}" '+%F %T' 2>/dev/null))."
+  echo "ocudu-gnb: the gNB does NOT start by itself. Check the GPS (ts2phc 's2') and the RU, then run: ./ran/ocudu/gnb.sh start"
   trap 'exit 0' TERM INT
   while :; do sleep 3600 & wait $!; done
 fi
 cfg="/configs/${GNB_CONFIG}.yml"
-[ -r "$cfg" ] || { echo "ocudu-gnb: não achei $cfg"; exit 1; }
+[ -r "$cfg" ] || { echo "ocudu-gnb: $cfg not found"; exit 1; }
 extra=""
 if [ -n "${GNB_EXTRA_CONFIG}" ] && [ -r "/configs/${GNB_EXTRA_CONFIG}" ]; then
   extra="-c /configs/${GNB_EXTRA_CONFIG}"
 fi
 for c in /proc/[0-9]*/comm; do
   if [ "$(cat "$c" 2>/dev/null)" = gnb ]; then
-    echo "ocudu-gnb: já existe um gnb rodando no host (serviço ocudu-gnb@ ou terminal): pare-o antes"
+    echo "ocudu-gnb: a gnb is already running on the host (ocudu-gnb@ service or a terminal): stop it first"
     exit 1
   fi
 done
-# log do .yml (log.filename) no /tmp do host: se ficou de outro dono (ex.: uid 1001 da imagem), o root
-# não consegue reabrir por causa do fs.protected_regular; remove só nesse caso
+# .yml log (log.filename) in the host /tmp: if it has another owner (e.g. uid 1001 of the image), root
+# cannot reopen it because of fs.protected_regular; remove it only in that case
 logf=$(awk '/^log:/{l=1;next} l&&/^[^ #]/{l=0} l&&/filename:/{print $2; exit}' "$cfg")
 if [ -n "$logf" ] && [ -e "$logf" ] && [ "$(stat -c %u "$logf")" != 0 ]; then
-  echo "ocudu-gnb: removendo $logf (dono $(stat -c %u "$logf"), não root)"; rm -f "$logf"
+  echo "ocudu-gnb: removing $logf (owner $(stat -c %u "$logf"), not root)"; rm -f "$logf"
 fi
-command -v taskset >/dev/null || { echo "ocudu-gnb: a imagem não tem taskset (util-linux)"; exit 1; }
+command -v taskset >/dev/null || { echo "ocudu-gnb: the image has no taskset (util-linux)"; exit 1; }
 echo "ocudu-gnb: taskset -c ${GNB_CPUS} gnb -c $cfg $extra"
 taskset -c "${GNB_CPUS}" gnb -c "$cfg" $extra &
 pid=$!
-# Threads comuns (não tempo real) que o gNB não fixa em CPU herdam todas as GNB_CPUS. Com isolcpus não há
-# balanceamento entre CPUs isoladas, e sem limite de tempo real (sched_rt_runtime_us=-1) uma delas pode cair numa
-# CPU ocupada 100 % por uma thread de tempo real e nunca rodar (ex.: o log do gNB parou em 8 KB). O vigia move
-# essas threads para GNB_AUX_CPUS (CPUs sem trabalho do gNB). Não mexe na thread principal nem nas de tempo real.
+# Common (non-realtime) threads that the gNB does not pin inherit all GNB_CPUS. With isolcpus there is no
+# balancing between isolated CPUs, and without a realtime limit (sched_rt_runtime_us=-1) one of them can land on
+# a CPU 100 % busy with a realtime thread and never run (e.g. the gNB log stopped at 8 KB). The watcher moves
+# those threads to GNB_AUX_CPUS (CPUs without gNB work). It does not touch the main thread or the realtime ones.
 if [ -n "${GNB_AUX_CPUS:-}" ]; then
   (
     full=$(taskset -cp "$pid" 2>/dev/null | sed 's/.*: //')
@@ -87,12 +87,12 @@ if [ -n "${GNB_AUX_CPUS:-}" ]; then
     done
   ) &
 fi
-trap 'echo "ocudu-gnb: parando (SIGINT)"; kill -INT $pid' TERM INT
+trap 'echo "ocudu-gnb: stopping (SIGINT)"; kill -INT $pid' TERM INT
 wait $pid; rc=$?
 trap - TERM INT
 wait $pid 2>/dev/null; rc2=$?
 [ $rc2 -ne 127 ] && rc=$rc2
-echo "ocudu-gnb: gnb terminou (código $rc)"
+echo "ocudu-gnb: gnb exited (code $rc)"
 exit $rc
 '''
 
@@ -105,28 +105,28 @@ deployment = {
     "apiVersion": "apps/v1", "kind": "Deployment",
     "metadata": {"name": "ocudu-gnb", "namespace": NS, "labels": LABELS},
     "spec": {
-        "replicas": int(env("OCUDU_REPLICAS", "0")),  # 0 = parado; ligar = 1 (gnb.sh ou painel)
-        "strategy": {"type": "Recreate"},    # nunca dois gNBs ao mesmo tempo
+        "replicas": int(env("OCUDU_REPLICAS", "0")),  # 0 = stopped; start = 1 (gnb.sh or dashboard)
+        "strategy": {"type": "Recreate"},    # never two gNBs at the same time
         "selector": {"matchLabels": {"app.kubernetes.io/name": "ocudu-gnb"}},
         "template": {
             "metadata": {"labels": LABELS},
             "spec": {
                 "nodeSelector": {"kubernetes.io/hostname": NODE},
                 "tolerations": [{"key": "innovanetwork/ran", "operator": "Exists", "effect": "NoSchedule"}],
-                "hostNetwork": True,         # N2/N3 em 10.10.0.1, métricas :8001, como no host
-                "hostPID": True,             # para enxergar um gnb nativo e recusar
+                "hostNetwork": True,         # N2/N3 on 10.10.0.1, metrics :8001, like on the host
+                "hostPID": True,             # to see a native gnb and refuse
                 "dnsPolicy": "ClusterFirstWithHostNet",
                 "terminationGracePeriodSeconds": 30,
                 "containers": [{
                     "name": "gnb",
                     "image": IMAGE,
-                    "imagePullPolicy": "Never",   # imagem local, importada no containerd do k3s
-                    # privileged + root: DPDK/vfio, hugepages, /proc/self/pagemap, RT. A imagem oficial
-                    # roda como USER 1001; o serviço nativo ocudu-gnb@ roda como root (igual aqui).
+                    "imagePullPolicy": "Never",   # local image, imported into the k3s containerd
+                    # privileged + root: DPDK/vfio, hugepages, /proc/self/pagemap, RT. The official image
+                    # runs as USER 1001; the native ocudu-gnb@ service runs as root (same here).
                     "securityContext": {"privileged": True, "runAsUser": 0, "runAsGroup": 0},
                     "command": ["/bin/bash", "-c", RUN],
-                    # O Kubernetes limita as hugepages do pod ao que ele pede (sem pedido = 0 e o DPDK
-                    # falha com "Cannot init memory"). Memória: só pedido, sem limite.
+                    # Kubernetes limits the pod hugepages to what it requests (no request = 0 and DPDK
+                    # fails with "Cannot init memory"). Memory: request only, no limit.
                     "resources": {
                         "requests": {"hugepages-1Gi": env("OCUDU_HUGEPAGES_1G"), "memory": env("OCUDU_MEMORY_REQUEST")},
                         "limits": {"hugepages-1Gi": env("OCUDU_HUGEPAGES_1G")},
@@ -154,7 +154,7 @@ deployment = {
     },
 }
 
-# Descritor do componente (contrato da v3): ferramentas como o painel descobrem o que está instalado.
+# Component descriptor (v3 contract): tools like the dashboard discover what is installed.
 descriptor = {
     "apiVersion": "v1", "kind": "ConfigMap",
     "metadata": {"name": "innovanetwork-component", "namespace": NS,

@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  free5gc/setup-gtp5g.sh — módulo do kernel gtp5g (exigido pelo UPF do free5GC).
-#  Roda UMA vez, com sudo, na máquina do core. Instala via DKMS: o módulo é
-#  recompilado sozinho quando o kernel do Ubuntu for atualizado. Não afeta o
-#  Open5GS (o UPF dele usa TUN, não gtp5g).
+#  free5gc/setup-gtp5g.sh — gtp5g kernel module (required by the free5GC UPF).
+#  Runs ONCE, with sudo, on the core machine. Installs through DKMS: the module is
+#  rebuilt by itself when the Ubuntu kernel is updated. Does not affect
+#  Open5GS (its UPF uses TUN, not gtp5g).
 #
-#  Uso: sudo ./free5gc/setup-gtp5g.sh            (versão de free5gc.env)
-#       sudo ./free5gc/setup-gtp5g.sh --remove
+#  Usage: sudo ./free5gc/setup-gtp5g.sh          (version from free5gc.env)
+#        sudo ./free5gc/setup-gtp5g.sh --remove
 # =============================================================================
 set -Eeuo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=free5gc.env
 source "${DIR}/free5gc.env"
 VER="${F5_GTP5G_VERSION#v}"
-[[ $EUID -eq 0 ]] || { echo "rode com sudo" >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
 
 if [[ "${1:-}" == "--remove" ]]; then
   modprobe -r gtp5g 2>/dev/null || true
   dkms remove "gtp5g/${VER}" --all 2>/dev/null || true
   rm -rf "/usr/src/gtp5g-${VER}" /etc/modules-load.d/gtp5g.conf
-  echo "gtp5g removido"; exit 0
+  echo "gtp5g removed"; exit 0
 fi
 
 command -v dkms >/dev/null || { apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dkms; }
 dpkg -s "linux-headers-$(uname -r)" >/dev/null 2>&1 || apt-get install -y -qq "linux-headers-$(uname -r)"
 
-# outra versão instalada antes (o UPF exige uma faixa de versões): sai do DKMS e do kernel
+# another version installed earlier (the UPF requires a version range): remove it from DKMS and the kernel
 for old in $(dkms status gtp5g 2>/dev/null | sed -n 's#^gtp5g/\([^,]*\),.*#\1#p' | sort -u); do
   [[ "${old}" == "${VER}" ]] && continue
-  echo "removendo gtp5g ${old}"
+  echo "removing gtp5g ${old}"
   modprobe -r gtp5g 2>/dev/null || true
   dkms remove "gtp5g/${old}" --all || true
   rm -rf "/usr/src/gtp5g-${old}"
@@ -42,9 +42,9 @@ if ! dkms status "gtp5g/${VER}" 2>/dev/null | grep -q installed; then
   dkms build "gtp5g/${VER}"
   dkms install "gtp5g/${VER}" --force
 fi
-echo gtp5g > /etc/modules-load.d/gtp5g.conf      # carrega também nos próximos boots
+echo gtp5g > /etc/modules-load.d/gtp5g.conf      # also loads on the next boots
 if [[ "$(cat /sys/module/gtp5g/version 2>/dev/null)" != "${VER}" ]]; then
-  modprobe -r gtp5g 2>/dev/null || { echo "gtp5g em uso (UPF do free5GC rodando?): pare o UPF e rode de novo" >&2; exit 1; }
+  modprobe -r gtp5g 2>/dev/null || { echo "gtp5g in use (free5GC UPF running?): stop the UPF and run again" >&2; exit 1; }
 fi
 modprobe gtp5g
-echo "ok: $(modinfo gtp5g | grep -E '^version') carregado ($(uname -r)); DKMS: $(dkms status gtp5g | head -1)"
+echo "ok: $(modinfo gtp5g | grep -E '^version') loaded ($(uname -r)); DKMS: $(dkms status gtp5g | head -1)"

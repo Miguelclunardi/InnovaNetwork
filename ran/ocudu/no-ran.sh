@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  ran/ocudu/no-ran.sh — roda NA MÁQUINA DO gNB (innovaserver), com sudo.
+#  ran/ocudu/no-ran.sh — runs ON THE gNB MACHINE (innovaserver), with sudo.
 #
-#  O torre2 copia este script, o ocudu.env e (só no "preparar") o join.env para
-#  ~/innovanetwork-ran/ no nó:   ./ran/ocudu/install.sh copiar | preparar
+#  The core machine copies this script, ocudu.env and (only on "prepare") join.env to
+#  ~/innovanetwork-ran/ on the node:   ./ran/ocudu/install.sh copy | prepare
 #
-#  Uso (no nó):
-#    sudo ~/innovanetwork-ran/no-ran.sh imagem    compila a imagem do gNB do código em OCUDU_SRC_DIR
-#                                                 (commit atual, via git archive) e, se o nó já está
-#                                                 no cluster, importa no containerd do k3s
-#    sudo ~/innovanetwork-ran/no-ran.sh importar  só importa no k3s uma imagem já compilada
-#    sudo ~/innovanetwork-ran/no-ran.sh entrar    entra no k3s do torre2 como nó do RAN (precisa do
-#                                                 join.env do "preparar"; o token é apagado no fim)
-#    sudo ~/innovanetwork-ran/no-ran.sh sair      sai do cluster (remove o k3s agente)
-#         ~/innovanetwork-ran/no-ran.sh estado    mostra o que está instalado (sem sudo)
+#  Usage (on the node):
+#    sudo ~/innovanetwork-ran/no-ran.sh image     builds the gNB image from the source in OCUDU_SRC_DIR
+#                                                 (current commit, through git archive) and, if the node
+#                                                 is already in the cluster, imports it into the k3s containerd
+#    sudo ~/innovanetwork-ran/no-ran.sh import    only imports an already built image into k3s
+#    sudo ~/innovanetwork-ran/no-ran.sh join      joins the k3s of the core machine as the RAN node (needs
+#                                                 the join.env of "prepare"; the token is deleted at the end)
+#    sudo ~/innovanetwork-ran/no-ran.sh leave     leaves the cluster (removes the k3s agent)
+#         ~/innovanetwork-ran/no-ran.sh status    shows what is installed (no sudo)
+#  The Portuguese names of earlier versions (imagem, importar, entrar, sair, estado) still work.
 #
-#  Não mexe em: PTP, VF/DPDK, XDP, hugepages, CPUs isoladas, netplan, serviço ocudu-gnb@.
+#  Does not touch: PTP, VF/DPDK, XDP, hugepages, isolated CPUs, netplan, the ocudu-gnb@ service.
 # =============================================================================
 set -Eeuo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,8 +26,8 @@ source "${DIR}/ocudu.env"
 
 say()  { echo "==> $*"; }
 info() { echo "    $*"; }
-die()  { echo "[erro] $*" >&2; exit 1; }
-need_root() { [[ $EUID -eq 0 ]] || die "rode com sudo: sudo $0 $1"; }
+die()  { echo "[error] $*" >&2; exit 1; }
+need_root() { [[ $EUID -eq 0 ]] || die "run with sudo: sudo $0 $1"; }
 OWNER="${SUDO_USER:-$(stat -c %U "${OCUDU_SRC_DIR}")}"
 ROUTE_UNIT="innovanetwork-k3s-route.service"
 
@@ -37,35 +38,35 @@ image_tag() {
 
 do_import() {
   local ref="${OCUDU_IMAGE}:$(image_tag)"
-  command -v k3s >/dev/null || { info "k3s ainda não instalado: importe depois com '$0 importar'"; return 0; }
-  say "importando ${ref} no containerd do k3s"
-  docker image inspect "${ref}" >/dev/null 2>&1 || die "imagem ${ref} não existe: rode '$0 imagem'"
+  command -v k3s >/dev/null || { info "k3s not installed yet: import later with '$0 import'"; return 0; }
+  say "importing ${ref} into the k3s containerd"
+  docker image inspect "${ref}" >/dev/null 2>&1 || die "image ${ref} does not exist: run '$0 image'"
   docker save "${ref}" | k3s ctr -n k8s.io images import -
   k3s ctr -n k8s.io images ls -q | grep -F "${ref}" | sed 's/^/    /'
 }
 
 do_image() {
-  need_root imagem
-  command -v docker >/dev/null || die "docker não instalado"
+  need_root image
+  command -v docker >/dev/null || die "docker not installed"
   local tag ref ctx
   tag="$(image_tag)"; ref="${OCUDU_IMAGE}:${tag}"
   ctx="/var/tmp/innovanetwork-ocudu-src"
-  say "imagem ${ref} (OCUDU em ${OCUDU_SRC_DIR}, commit $(sudo -u "${OWNER}" git -C "${OCUDU_SRC_DIR}" rev-parse --short=10 HEAD))"
+  say "image ${ref} (OCUDU in ${OCUDU_SRC_DIR}, commit $(sudo -u "${OWNER}" git -C "${OCUDU_SRC_DIR}" rev-parse --short=10 HEAD))"
   if sudo -u "${OWNER}" git -C "${OCUDU_SRC_DIR}" status --porcelain --untracked-files=no | grep -qv '^.. configs/\|^.. docker/'; then
-    info "[aviso] há alterações locais no código fora de configs/ e docker/: a imagem usa o commit, sem elas"
+    info "[warn] there are local changes in the source outside configs/ and docker/: the image uses the commit, without them"
   fi
-  # Contexto limpo = só o commit (sem build/ nativo de ~2 GB, que quebraria o cmake da imagem)
+  # Clean context = only the commit (without the ~2 GB native build/, which would break the image cmake)
   rm -rf "${ctx}"; mkdir -p "${ctx}"
   sudo -u "${OWNER}" git -C "${OCUDU_SRC_DIR}" archive HEAD | tar x -C "${ctx}"
   if [[ "${OCUDU_IMAGE_ROHC:-false}" != "true" ]]; then
-    # Sem ROHC (igual ao gnb nativo): o Dockerfile copia /opt/rohc, então criamos a pasta vazia
-    # em vez de baixar e compilar a biblioteca. Só a cópia temporária muda; o OCUDU_SRC_DIR não.
-    info "sem ROHC (OCUDU_IMAGE_ROHC=false): build_rohc.sh substituído na cópia temporária"
-    printf '#!/bin/sh\nmkdir -p /opt/rohc/lib /opt/rohc/include\necho "ROHC desligado (InnovaNetwork)"\n' \
+    # No ROHC (same as the native gnb): the Dockerfile copies /opt/rohc, so we create the empty folder
+    # instead of downloading and building the library. Only the temporary copy changes; OCUDU_SRC_DIR does not.
+    info "no ROHC (OCUDU_IMAGE_ROHC=false): build_rohc.sh replaced in the temporary copy"
+    printf '#!/bin/sh\nmkdir -p /opt/rohc/lib /opt/rohc/include\necho "ROHC disabled (InnovaNetwork)"\n' \
       > "${ctx}/docker/scripts/build_rohc.sh"
     chmod 755 "${ctx}/docker/scripts/build_rohc.sh"
   fi
-  say "compilando (demora ~20-40 min; usa ${OCUDU_BUILD_JOBS} jobs nas CPUs não isoladas)"
+  say "building (takes ~20-40 min; uses ${OCUDU_BUILD_JOBS} jobs on the non-isolated CPUs)"
   docker build -f "${ctx}/docker/Dockerfile" --target runtime-dpdk \
     --build-arg COMPONENT=gnb \
     --build-arg OS="${OCUDU_IMAGE_OS}" --build-arg OS_VERSION="${OCUDU_IMAGE_OS_VERSION}" \
@@ -73,37 +74,37 @@ do_image() {
     --label "innovanetwork.ocudu.commit=$(sudo -u "${OWNER}" git -C "${OCUDU_SRC_DIR}" rev-parse HEAD)" \
     -t "${ref}" "${ctx}"
   rm -rf "${ctx}"
-  docker run --rm --entrypoint /bin/bash "${ref}" -c 'command -v gnb taskset bash' | sed 's/^/    tem: /'
+  docker run --rm --entrypoint /bin/bash "${ref}" -c 'command -v gnb taskset bash' | sed 's/^/    has: /'
   do_import
 }
 
 do_join() {
-  need_root entrar
+  need_root join
   [[ -n "${K3S_URL:-}" && -n "${K3S_TOKEN:-}" && -n "${K3S_VERSION:-}" && -n "${STABLE_IP:-}" ]] \
-    || die "falta o join.env: no torre2, rode 'sudo ./ran/ocudu/install.sh preparar'"
+    || die "join.env is missing: on the core machine, run 'sudo ./ran/ocudu/install.sh prepare'"
   ip -br addr show "${OCUDU_NODE_IFACE}" | grep -q "${OCUDU_NODE_IP}/" \
-    || die "${OCUDU_NODE_IFACE} não tem ${OCUDU_NODE_IP}"
+    || die "${OCUDU_NODE_IFACE} does not have ${OCUDU_NODE_IP}"
 
-  # Problemas conhecidos (docs/troubleshooting.md, seção 6):
-  # 1) outro Kubernetes na máquina (ex.: MicroK8s) ocupa as portas do kubelet e o k3s não sobe
+  # Known problems (docs/troubleshooting.md, section 6):
+  # 1) another Kubernetes on the machine (e.g. MicroK8s) holds the kubelet ports and k3s does not start
   local busy
   busy="$(ss -ltnpH '( sport = :10250 or sport = :10248 or sport = :6443 )' 2>/dev/null | grep -v '"k3s' || true)"
   if [[ -n "${busy}" ]]; then
     echo "${busy}" | sed 's/^/    /'
-    die "há outro Kubernetes usando as portas do kubelet (10250/10248). MicroK8s? 'sudo microk8s stop' (não apaga nada; volta com 'sudo microk8s start')"
+    die "another Kubernetes is using the kubelet ports (10250/10248). MicroK8s? 'sudo microk8s stop' (deletes nothing; comes back with 'sudo microk8s start')"
   fi
-  # 2) restos de uma tentativa que falhou: certificados antigos fazem o servidor recusar o nó
+  # 2) leftovers of a failed attempt: old certificates make the server refuse the node
   if [[ -d /var/lib/rancher/k3s/agent ]] && ! systemctl is-active -q k3s-agent; then
-    say "limpando restos de uma tentativa anterior (/var/lib/rancher/k3s/agent)"
+    say "cleaning up leftovers of an earlier attempt (/var/lib/rancher/k3s/agent)"
     systemctl stop k3s-agent 2>/dev/null || true
     rm -rf /var/lib/rancher/k3s/agent
   fi
 
-  say "rota até o servidor do k3s (${STABLE_IP} via ${OCUDU_SERVER_VIA}) — unit ${ROUTE_UNIT}"
+  say "route to the k3s server (${STABLE_IP} via ${OCUDU_SERVER_VIA}) — unit ${ROUTE_UNIT}"
   cat > "/etc/systemd/system/${ROUTE_UNIT}" <<EOF
-# InnovaNetwork: rota até o servidor do k3s (torre2) pela fibra. Gerado por ran/ocudu/no-ran.sh
+# InnovaNetwork: route to the k3s server (core machine) over the fiber. Generated by ran/ocudu/no-ran.sh
 [Unit]
-Description=InnovaNetwork: rota ${STABLE_IP} via ${OCUDU_SERVER_VIA} (k3s)
+Description=InnovaNetwork: route ${STABLE_IP} via ${OCUDU_SERVER_VIA} (k3s)
 After=network-online.target
 Wants=network-online.target
 Before=k3s-agent.service
@@ -119,21 +120,21 @@ WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
   systemctl enable --now "${ROUTE_UNIT}"
-  ping -c1 -W2 "${STABLE_IP}" >/dev/null || die "sem resposta de ${STABLE_IP} pela fibra"
-  info "ok: ${STABLE_IP} responde"
+  ping -c1 -W2 "${STABLE_IP}" >/dev/null || die "no answer from ${STABLE_IP} over the fiber"
+  info "ok: ${STABLE_IP} answers"
 
   if ufw status 2>/dev/null | grep -q "Status: active"; then
-    say "UFW: liberando o cluster (só a partir do torre2 e das redes do k3s)"
+    say "UFW: opening the cluster (only from the core machine and the k3s networks)"
     ufw allow from "${OCUDU_SERVER_VIA}" comment 'InnovaNetwork k3s' >/dev/null
     ufw allow from "${STABLE_IP}" comment 'InnovaNetwork k3s' >/dev/null
     ufw allow from 10.42.0.0/16 comment 'InnovaNetwork k3s pods' >/dev/null
     ufw allow from 10.43.0.0/16 comment 'InnovaNetwork k3s services' >/dev/null
   fi
 
-  say "configuração do k3s agente"
+  say "k3s agent configuration"
   mkdir -p /etc/rancher/k3s
   cat > /etc/rancher/k3s/config.yaml <<EOF
-# Gerado por InnovaNetwork ran/ocudu/no-ran.sh — nó do RAN
+# Generated by InnovaNetwork ran/ocudu/no-ran.sh — RAN node
 node-name: "${OCUDU_NODE}"
 node-ip: "${OCUDU_NODE_IP}"
 flannel-iface: "${OCUDU_NODE_IFACE}"
@@ -142,38 +143,38 @@ node-label:
 node-taint:
   - "innovanetwork/ran=true:NoSchedule"
 EOF
-  say "instalando k3s ${K3S_VERSION} (agente) e entrando em ${K3S_URL}"
+  say "installing k3s ${K3S_VERSION} (agent) and joining ${K3S_URL}"
   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" K3S_URL="${K3S_URL}" \
     K3S_TOKEN="${K3S_TOKEN}" sh -s - agent
   rm -f "${DIR}/join.env"
-  info "token apagado (${DIR}/join.env)"
+  info "token deleted (${DIR}/join.env)"
   systemctl is-active k3s-agent | sed 's/^/    k3s-agent: /'
   if docker image inspect "${OCUDU_IMAGE}:$(image_tag)" >/dev/null 2>&1; then do_import; fi
-  say "pronto. No torre2: kubectl get nodes"
+  say "done. On the core machine: kubectl get nodes"
 }
 
 do_leave() {
-  need_root sair
+  need_root leave
   [[ -x /usr/local/bin/k3s-agent-uninstall.sh ]] && /usr/local/bin/k3s-agent-uninstall.sh
   systemctl disable --now "${ROUTE_UNIT}" 2>/dev/null || true
   rm -f "/etc/systemd/system/${ROUTE_UNIT}"; systemctl daemon-reload
-  info "k3s agente removido. No torre2: kubectl delete node ${OCUDU_NODE}"
-  info "(regras do UFW 'InnovaNetwork k3s' ficam; remova com 'sudo ufw status numbered' se quiser)"
+  info "k3s agent removed. On the core machine: kubectl delete node ${OCUDU_NODE}"
+  info "(the 'InnovaNetwork k3s' UFW rules stay; remove them with 'sudo ufw status numbered' if you want)"
 }
 
 do_state() {
   echo "k3s-agent:  $(systemctl is-active k3s-agent 2>/dev/null || true)"
-  echo "rota:       $(ip route show "${STABLE_IP:-10.254.254.1}" 2>/dev/null || true)"
-  echo "join.env:   $([[ -f "${DIR}/join.env" ]] && echo presente || echo ausente)"
+  echo "route:      $(ip route show "${STABLE_IP:-10.254.254.1}" 2>/dev/null || true)"
+  echo "join.env:   $([[ -f "${DIR}/join.env" ]] && echo present || echo absent)"
   echo "OCUDU:      $(git -C "${OCUDU_SRC_DIR}" rev-parse --short=7 HEAD 2>/dev/null)"
-  echo "gnb nativo: $(systemctl list-units --no-legend --state=active 'ocudu-gnb@*' | awk '{print $1}' | tr '\n' ' ')"
+  echo "native gnb: $(systemctl list-units --no-legend --state=active 'ocudu-gnb@*' | awk '{print $1}' | tr '\n' ' ')"
 }
 
 case "${1:-}" in
-  imagem)   do_image ;;
-  importar) need_root importar; do_import ;;
-  entrar)   do_join ;;
-  sair)     do_leave ;;
-  estado)   do_state ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  image|imagem)     do_image ;;
+  import|importar)  need_root import; do_import ;;
+  join|entrar)      do_join ;;
+  leave|sair)       do_leave ;;
+  status|estado)    do_state ;;
+  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

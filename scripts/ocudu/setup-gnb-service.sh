@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  scripts/ocudu/setup-gnb-service.sh — roda UMA vez, com sudo, NO HOST DO gNB.
+#  scripts/ocudu/setup-gnb-service.sh — runs ONCE, with sudo, ON THE gNB HOST.
+#  (Legacy native mode, GNB_CTL_MODE="systemd".)
 #
-#  Cria o serviço ocudu-gnb@<arquivo>.service (gNB OCUDU com <arquivo>.yml da
-#  pasta configs/) e uma regra do polkit que deixa SÓ o usuário do gNB iniciar,
-#  parar e reiniciar esse serviço sem senha — nada de sudo sem senha. O painel
-#  (aba Controle) usa isso pelo agente gnb-ctl da máquina do core.
+#  Creates the ocudu-gnb@<file>.service service (OCUDU gNB with <file>.yml from the
+#  configs/ folder) and a polkit rule that lets ONLY the gNB user start, stop and
+#  restart that service without a password — no passwordless sudo. The dashboard
+#  (Control tab) uses it through the gnb-ctl agent of the core machine.
 #
-#  O serviço roda o binário e os .yml direto da pasta do OCUDU do usuário
-#  (escolha do usuário: mais prático; quem controla esse usuário controla o gNB).
-#  Não prepara a máquina (interface, DPDK, XDP, PTP): isso continua manual.
+#  The service runs the binary and the .yml files straight from the user's OCUDU
+#  folder (the user's choice: more practical; whoever controls that user controls the gNB).
+#  It does not prepare the machine (interface, DPDK, XDP, PTP): that stays manual.
 #
-#  Uso (no host do gNB):
+#  Usage (on the gNB host):
 #    sudo bash setup-gnb-service.sh [--user innovaserver] [--dir /home/innovaserver/ocudu] [--cpus 0-17]
-#                                   [--extra metricas.yml]   (2º -c, se existir em configs/; "" = nenhum)
+#                                   [--extra metricas.yml]   (2nd -c, if it exists in configs/; "" = none)
 #    sudo bash setup-gnb-service.sh --remove
-#  A partir da máquina do core:
+#  From the core machine:
 #    scp scripts/ocudu/setup-gnb-service.sh innovaserver@10.10.0.1:/tmp/
 #    ssh -t innovaserver@10.10.0.1 sudo bash /tmp/setup-gnb-service.sh
 # =============================================================================
@@ -24,7 +25,7 @@ set -Eeuo pipefail
 USER_NAME="${SUDO_USER:-innovaserver}"
 DIR=""
 CPUS="0-17"
-EXTRA="metricas.yml"   # métricas JSON + remote_control (porta 8001), como no "-c ../../../configs/metricas.yml"
+EXTRA="metricas.yml"   # JSON metrics + remote_control (port 8001), like "-c ../../../configs/metricas.yml"
 REMOVE=false
 UNIT=/etc/systemd/system/ocudu-gnb@.service
 RULE=/etc/polkit-1/rules.d/50-ocudu-gnb.rules
@@ -36,52 +37,52 @@ while (( $# )); do
     --cpus) CPUS="$2"; shift 2 ;;
     --extra) EXTRA="$2"; shift 2 ;;
     --remove) REMOVE=true; shift ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "opção desconhecida: $1" >&2; exit 2 ;;
+    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
-[[ $EUID -eq 0 ]] || { echo "rode com sudo" >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
 
 if ${REMOVE}; then
   systemctl stop 'ocudu-gnb@*.service' 2>/dev/null || true
   rm -f "${UNIT}" "${RULE}"
   systemctl daemon-reload
-  echo "removido: ${UNIT} e ${RULE}"
+  echo "removed: ${UNIT} and ${RULE}"
   exit 0
 fi
 
-id "${USER_NAME}" &>/dev/null || { echo "usuário inexistente: ${USER_NAME}" >&2; exit 1; }
+id "${USER_NAME}" &>/dev/null || { echo "user does not exist: ${USER_NAME}" >&2; exit 1; }
 [[ -n "${DIR}" ]] || DIR="$(getent passwd "${USER_NAME}" | cut -d: -f6)/ocudu"
-[[ "${USER_NAME}" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "usuário inválido" >&2; exit 1; }
-[[ "${DIR}" =~ ^/[A-Za-z0-9/_.-]+$ ]] || { echo "pasta inválida: ${DIR}" >&2; exit 1; }
-[[ "${CPUS}" =~ ^[0-9,-]+$ ]] || { echo "--cpus inválido: ${CPUS}" >&2; exit 1; }
-[[ -z "${EXTRA}" || "${EXTRA}" =~ ^[A-Za-z0-9_.-]+\.yml$ ]] || { echo "--extra inválido: ${EXTRA}" >&2; exit 1; }
-# 2º arquivo: entra no comando só se existir na hora de iniciar (o gNB aceita vários -c)
+[[ "${USER_NAME}" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "invalid user" >&2; exit 1; }
+[[ "${DIR}" =~ ^/[A-Za-z0-9/_.-]+$ ]] || { echo "invalid folder: ${DIR}" >&2; exit 1; }
+[[ "${CPUS}" =~ ^[0-9,-]+$ ]] || { echo "invalid --cpus: ${CPUS}" >&2; exit 1; }
+[[ -z "${EXTRA}" || "${EXTRA}" =~ ^[A-Za-z0-9_.-]+\.yml$ ]] || { echo "invalid --extra: ${EXTRA}" >&2; exit 1; }
+# 2nd file: added to the command only if it exists at start time (the gNB accepts several -c)
 if [[ -n "${EXTRA}" ]]; then
   X="${DIR}/configs/${EXTRA}"
   EXEC="/bin/sh -c 'C=; if [ -r ${X} ]; then C=\"-c ${X}\"; fi; exec /usr/bin/taskset -c ${CPUS} ${DIR}/build/apps/gnb/gnb -c ${DIR}/configs/%i.yml \$\$C'"
 else
   EXEC="/usr/bin/taskset -c ${CPUS} ${DIR}/build/apps/gnb/gnb -c ${DIR}/configs/%i.yml"
 fi
-[[ -x "${DIR}/build/apps/gnb/gnb" ]] || { echo "não achei ${DIR}/build/apps/gnb/gnb" >&2; exit 1; }
-[[ -d "${DIR}/configs" ]] || { echo "não achei ${DIR}/configs" >&2; exit 1; }
+[[ -x "${DIR}/build/apps/gnb/gnb" ]] || { echo "${DIR}/build/apps/gnb/gnb not found" >&2; exit 1; }
+[[ -d "${DIR}/configs" ]] || { echo "${DIR}/configs not found" >&2; exit 1; }
 
 cat >"${UNIT}" <<EOF
-# Gerado por open5GK3S/scripts/ocudu/setup-gnb-service.sh
-# gNB OCUDU com ${DIR}/configs/<instância>.yml — ex.: systemctl start ocudu-gnb@gnb_split_open5gs
+# Generated by InnovaNetwork scripts/ocudu/setup-gnb-service.sh
+# OCUDU gNB with ${DIR}/configs/<instance>.yml — e.g. systemctl start ocudu-gnb@gnb_split_open5gs
 [Unit]
-Description=gNB OCUDU com %i.yml (painel open5GK3S)
+Description=OCUDU gNB with %i.yml (InnovaNetwork dashboard)
 After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 WorkingDirectory=${DIR}/build/apps/gnb
-# um gNB por vez: recusa se já houver um gnb (aberto no terminal, por exemplo)
-ExecStartPre=/bin/sh -c 'if pgrep -x gnb >/dev/null; then echo "ja existe um gnb rodando fora deste servico: pare-o antes"; exit 1; fi'
+# one gNB at a time: refuse if there is already a gnb (opened in a terminal, for example)
+ExecStartPre=/bin/sh -c 'if pgrep -x gnb >/dev/null; then echo "a gnb is already running outside this service: stop it first"; exit 1; fi'
 ExecStartPre=/usr/bin/test -r ${DIR}/configs/%i.yml
 ExecStart=${EXEC}
-# Ctrl+C, como no terminal: o gNB fecha a célula e a RU direito
+# Ctrl+C, like in the terminal: the gNB closes the cell and the RU cleanly
 KillSignal=SIGINT
 TimeoutStopSec=30
 LimitMEMLOCK=infinity
@@ -90,8 +91,8 @@ Restart=no
 EOF
 
 cat >"${RULE}" <<EOF
-// Gerado por open5GK3S/scripts/ocudu/setup-gnb-service.sh
-// ${USER_NAME} pode iniciar/parar/reiniciar SÓ as units ocudu-gnb@*.service (painel open5GK3S).
+// Generated by InnovaNetwork scripts/ocudu/setup-gnb-service.sh
+// ${USER_NAME} may start/stop/restart ONLY the ocudu-gnb@*.service units (InnovaNetwork dashboard).
 polkit.addRule(function (action, subject) {
   if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "${USER_NAME}") {
     var unit = action.lookup("unit") || "";
@@ -108,7 +109,7 @@ systemctl daemon-reload
 systemctl try-restart polkit.service 2>/dev/null || true
 
 echo "ok: ${UNIT}"
-echo "ok: ${RULE} (usuário ${USER_NAME})"
+echo "ok: ${RULE} (user ${USER_NAME})"
 echo
-echo "Teste (como ${USER_NAME}, sem sudo; não inicia nada, só confere a permissão):"
-echo "  systemctl stop ocudu-gnb@teste.service && echo permissao-ok"
+echo "Test (as ${USER_NAME}, no sudo; starts nothing, only checks the permission):"
+echo "  systemctl stop ocudu-gnb@test.service && echo permission-ok"

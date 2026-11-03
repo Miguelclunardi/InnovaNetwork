@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Sincroniza os assinantes do config.env no free5GC pela API do WebConsole
-(o mesmo formato que a página de cadastro dele envia). Idempotente: apaga e recria.
+"""Syncs the config.env subscribers into free5GC through the WebConsole API
+(the same format its registration page sends). Idempotent: deletes and recreates.
 
-Modo --from-open5gs: lê da entrada padrão a lista de assinantes exportada do MongoDB do
-Open5GS (import-open5gs) e cadastra os mesmos SIMs aqui, nas slices/DNNs que este core tem.
+--from-open5gs mode: reads from standard input the subscriber list exported from the Open5GS
+MongoDB (import-open5gs) and registers the same SIMs here, on the slices/DNNs this core has.
 
-Entradas (ambiente, exportadas por free5gc/install.sh): MCC MNC SLICES UE_COUNT UE_MSIN_START
-UE_KEY UE_OPC SUBSCRIBERS_ENV F5_WEBUI_URL [F5_WEBUI_USER F5_WEBUI_PASS]. As chaves não são impressas.
+Inputs (environment, exported by free5gc/install.sh): MCC MNC SLICES UE_COUNT UE_MSIN_START
+UE_KEY UE_OPC SUBSCRIBERS_ENV F5_WEBUI_URL [F5_WEBUI_USER F5_WEBUI_PASS]. The keys are never printed.
 """
 import json
 import os
@@ -22,7 +22,7 @@ SLICES = []
 for line in (x for x in E["SLICES_ENV"].split("\n") if x.strip()):
     sst, sd, dnn, _ = line.split(":")
     SLICES.append((int(sst), sd.lower(), dnn))
-EXTRA = []   # DNNs extras do free5GC (F5_EXTRA_DNNS), ex.: (1, "111111", "ims")
+EXTRA = []   # extra free5GC DNNs (F5_EXTRA_DNNS), e.g. (1, "111111", "ims")
 for line in (x for x in os.environ.get("F5_EXTRA_DNNS_ENV", "").split("\n") if x.strip()):
     sst, sd, dnn, _ = line.split(":")
     EXTRA.append((int(sst), sd.lower(), dnn))
@@ -43,7 +43,7 @@ def call(method, path, body=None, token=None):
 
 
 def body(imsi, k, opc, sst, sd, dnn, slices=None, op_type="OPc"):
-    """slices = [(sst, sd, [dnn, ...]), ...]; sem ele, uma slice com uma DNN."""
+    """slices = [(sst, sd, [dnn, ...]), ...]; without it, one slice with one DNN."""
     slices = slices or [(sst, sd, [dnn])]
     key = lambda a, b: "%02d%s" % (a, b)
     smd = [{"singleNssai": {"sst": a, "sd": b}, "dnnConfigurations": {d: dnn_cfg() for d in ds}} for a, b, ds in slices]
@@ -81,8 +81,8 @@ def dnn_cfg():
 
 
 def from_open5gs(docs):
-    """Converte assinantes do Open5GS para as slices/DNNs que este core tem (SLICES do config.env).
-    Slice sem SD vira a slice configurada de mesma SST; DNN que este core não tem (ex.: ims) fica de fora."""
+    """Converts Open5GS subscribers to the slices/DNNs this core has (SLICES of config.env).
+    A slice without SD becomes the configured slice with the same SST; a DNN this core does not have (e.g. ims) is left out."""
     for d in docs:
         sec = d.get("security") or {}
         k = (sec.get("k") or "").replace(" ", "").upper()
@@ -115,7 +115,7 @@ def subscribers():
         f = line.split(":")
         if len(f) == 6:   # IMSI:K:OPC:SST:SD:DNN
             yield (f[0], f[1].upper(), f[2].upper(), int(f[3]), f[4].lower(), f[5])
-        else:             # IMSI:K:OPC (slice padrão)
+        else:             # IMSI:K:OPC (default slice)
             yield (f[0], f[1].upper(), f[2].upper(), sst, sd, dnn)
 
 
@@ -124,27 +124,27 @@ def main_import(tok):
     n = 0
     for imsi, k, opc, op_type, slices, skipped in from_open5gs(docs):
         if not (imsi and k and opc):
-            print("    - %s: sem chave/OPc no Open5GS, ignorado" % (imsi or "?"))
+            print("    - %s: no key/OPc in Open5GS, skipped" % (imsi or "?"))
             continue
         if not slices:
-            print("    - %s: nenhuma slice/DNN em comum com este core, ignorado" % imsi)
+            print("    - %s: no slice/DNN in common with this core, skipped" % imsi)
             continue
         path = "/api/subscriber/imsi-%s/%s" % (imsi, PLMN)
         call("DELETE", path, token=tok)
         st, r = call("POST", path, body(imsi, k, opc, 0, "", "", slices=slices, op_type=op_type), token=tok)
         if st not in (200, 201, 204):
-            sys.exit("    [erro] assinante %s: HTTP %s %s" % (imsi, st, r))
+            sys.exit("    [error] subscriber %s: HTTP %s %s" % (imsi, st, r))
         print("    + %s  %s%s" % (imsi, ", ".join("%d/%s %s" % (a, b, "+".join(ds)) for a, b, ds in slices),
                                   ("  (fora: %s)" % ", ".join(sorted(set(skipped)))) if skipped else ""))
         n += 1
-    print("    [ok] %d assinante(s) do Open5GS cadastrado(s) no free5GC" % n)
+    print("    [ok] %d Open5GS subscriber(s) registered in free5GC" % n)
 
 
 def main():
     st, r = call("POST", "/api/login", {"username": E.get("F5_WEBUI_USER", "admin"),
                                         "password": E.get("F5_WEBUI_PASS", "free5gc")})
     if st != 200 or not isinstance(r, dict) or not r.get("access_token"):
-        sys.exit("    [erro] login no WebConsole falhou (%s): %s" % (st, r))
+        sys.exit("    [error] WebConsole login failed (%s): %s" % (st, r))
     tok = r["access_token"]
     if "--from-open5gs" in sys.argv:
         return main_import(tok)
@@ -154,10 +154,10 @@ def main():
         call("DELETE", path, token=tok)
         st, r = call("POST", path, body(imsi, k, opc, sst, sd, dnn), token=tok)
         if st not in (200, 201, 204):
-            sys.exit("    [erro] assinante %s: HTTP %s %s" % (imsi, st, r))
+            sys.exit("    [error] subscriber %s: HTTP %s %s" % (imsi, st, r))
         print("    + %s  DNN=%s  S-NSSAI=%d/%s" % (imsi, dnn, sst, sd))
         n += 1
-    print("    [ok] %d assinante(s) sincronizado(s) no free5GC" % n)
+    print("    [ok] %d subscriber(s) synced into free5GC" % n)
 
 
 if __name__ == "__main__":

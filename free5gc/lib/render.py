@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Gera os manifestos do free5GC (JSON = YAML válido) a partir das variáveis de ambiente
-que free5gc/install.sh exporta (config.env + free5gc/free5gc.env). Nada fixo aqui.
+"""Generates the free5GC manifests (JSON = valid YAML) from the environment variables
+that free5gc/install.sh exports (config.env + free5gc/free5gc.env). Nothing hard-coded here.
 
-Uso: render.py manifests > free5gc.json
-     render.py ueransim  > ueransim-values.json
+Usage: render.py manifests > free5gc.json
+       render.py ueransim  > ueransim-values.json
 """
 import hashlib
 import json
@@ -16,7 +16,7 @@ E = os.environ
 def env(k, d=None):
     v = E.get(k, d)
     if v is None:
-        sys.exit("render.py: falta a variável %s" % k)
+        sys.exit("render.py: missing variable %s" % k)
     return v
 
 
@@ -31,15 +31,15 @@ AMF_IP, UPF_IP = env("F5_AMF_N2_IP"), env("F5_UPF_N3_IP")
 DNS = env("DNS_SERVERS").split()[0]
 HASH_ANN = "innovanetwork/config-hash"
 
-# SLICES do config.env: "SST:SD:DNN:CIDR" (o CIDR é do Open5GS; o do free5GC vem de F5_UE_POOLS)
+# SLICES of config.env: "SST:SD:DNN:CIDR" (the CIDR is the Open5GS one; the free5GC one comes from F5_UE_POOLS)
 SLICES = []
 pools = [p for p in env("F5_UE_POOLS_ENV").split("\n") if p.strip()]
 for i, line in enumerate(x for x in env("SLICES_ENV").split("\n") if x.strip()):
     sst, sd, dnn, _ = line.split(":")
     if i >= len(pools):
-        sys.exit("render.py: F5_UE_POOLS tem menos itens que SLICES")
+        sys.exit("render.py: F5_UE_POOLS has fewer items than SLICES")
     SLICES.append({"sst": int(sst), "sd": sd.lower(), "dnn": dnn, "pool": pools[i]})
-# DNNs extras só do free5GC (F5_EXTRA_DNNS: "SST:SD:DNN:CIDR"), ex.: ims, que os celulares pedem
+# extra DNNs of free5GC only (F5_EXTRA_DNNS: "SST:SD:DNN:CIDR"), e.g. ims, which phones ask for
 for line in (x for x in env("F5_EXTRA_DNNS_ENV").split("\n") if x.strip()):
     sst, sd, dnn, cidr = line.split(":")
     SLICES.append({"sst": int(sst), "sd": sd.lower(), "dnn": dnn, "pool": cidr})
@@ -97,7 +97,7 @@ CFG["smf"] = {"info": info("SMF", "1.0.7"), "configuration": {
     "snssaiInfos": [{"sNssai": n, "dnnInfos": [{"dnn": s["dnn"], "dns": {"ipv4": DNS}} for s in ss]}
                     for n, ss in BY_SNSSAI],
     "plmnList": [PLMN], "locality": "area1",
-    # POD_IP_ADDR e UPF_IP_ADDR: trocados na partida (wrapper) pelo IP do pod do SMF e do UPF
+    # POD_IP_ADDR and UPF_IP_ADDR: replaced at startup (wrapper) by the IP of the SMF pod and of the UPF
     "pfcp": {"nodeID": "POD_IP_ADDR", "listenAddr": "POD_IP_ADDR", "externalAddr": "POD_IP_ADDR",
              "assocFailAlertInterval": "10s", "assocFailRetryInterval": "30s", "heartbeatInterval": "10s"},
     "userplaneInformation": {
@@ -129,7 +129,7 @@ CFG["ausf"] = {"info": info("AUSF", "1.0.3"), "configuration": {
 CFG["udm"] = {"info": info("UDM", "1.0.3"), "configuration": {
     "serviceNameList": ["nudm-sdm", "nudm-uecm", "nudm-ueau", "nudm-ee", "nudm-pp"],
     "sbi": sbi("udm"), "nrfUri": NRF, "nrfCertPem": "cert/nrf.pem",
-    # Perfis SUCI de exemplo do free5GC (chaves públicas de teste; SIMs sem SUCI usam o esquema nulo)
+    # free5GC sample SUCI profiles (public test keys; SIMs without SUCI use the null scheme)
     "SuciProfile": [
         {"ProtectionScheme": 1,
          "PrivateKey": "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d",
@@ -186,13 +186,13 @@ CFG["nef"] = {"info": info("NEF", "1.0.1"), "configuration": {
 CFG["webui"] = {"info": info("WebUI", "1.0.3"), "configuration": {
     "mongodb": {"name": "free5gc", "url": MONGO}, "nrfUri": NRF,
     "webServer": {"scheme": "http", "ipv4Address": "0.0.0.0", "port": 5000},
-    # o WebConsole exige billingServer ligado (é o servidor FTP de CDR que o CHF usa)
+    # the WebConsole requires billingServer on (it is the CDR FTP server the CHF uses)
     "billingServer": {"enable": True, "hostIPv4": "0.0.0.0", "listenPort": 2121,
                       "portRange": {"start": 2123, "end": 2130}, "basePath": "/tmp/webconsole", "port": 2122,
                       "cert": {"pem": "cert/chf.pem", "key": "cert/chf.key"}}},
     "logger": LOGGER}
 
-# Ordem de partida (o painel usa a mesma): banco -> NRF -> demais -> UPF -> SMF -> AMF
+# Start order (the dashboard uses the same): database -> NRF -> others -> UPF -> SMF -> AMF
 ORDER = ["nrf", "udr", "udm", "ausf", "nssf", "pcf", "chf", "nef", "webui", "upf", "smf", "amf"]
 
 
@@ -258,7 +258,7 @@ def dump(o):
 
 
 def manifests():
-    # rótulo innovanetwork/core: no boot (CORE_AUTOSTART=false) o heal.sh para todo namespace com ele
+    # innovanetwork/core label: at boot (CORE_AUTOSTART=false) heal.sh stops every namespace with it
     out = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NS, "labels": {
         "app.kubernetes.io/part-of": "free5gc", "innovanetwork/core": "free5gc"}}},
            {"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
@@ -266,7 +266,7 @@ def manifests():
             "spec": {"config": json.dumps({"cniVersion": "0.3.1", "type": "macvlan", "master": env("RAN_LINK_IFACE"),
                                            "mode": "bridge", "mtu": int(env("RAN_LINK_MTU")),
                                            "ipam": {"type": "static"}, "capabilities": {"ips": True}})}}]
-    # MongoDB (volume local do k3s: os assinantes sobrevivem a reinícios)
+    # MongoDB (k3s local volume: the subscribers survive restarts)
     out += [
         {"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": {"name": "mongodb", "namespace": NS},
          "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": env("F5_MONGO_SIZE")}}}},
@@ -288,8 +288,8 @@ def manifests():
             wrapper = "\n".join([
                 "set -e",
                 "POD_IP=$(hostname -i | awk '{print $1}')",
-                "for i in $(seq 1 60); do UPF_IP=$(getent hosts upf | awk '{print $1}' | head -1); [ -n \"$UPF_IP\" ] && break; echo esperando o UPF; sleep 2; done",
-                "[ -n \"$UPF_IP\" ] || { echo 'UPF não resolvido'; exit 1; }",
+                "for i in $(seq 1 60); do UPF_IP=$(getent hosts upf | awk '{print $1}' | head -1); [ -n \"$UPF_IP\" ] && break; echo waiting for the UPF; sleep 2; done",
+                "[ -n \"$UPF_IP\" ] || { echo 'UPF not resolved'; exit 1; }",
                 "sed -e \"s/POD_IP_ADDR/$POD_IP/g\" -e \"s/UPF_IP_ADDR/$UPF_IP/g\" config/smfcfg.yaml > /tmp/smfcfg.yaml",
                 "echo \"SMF pfcp=$POD_IP  UPF=$UPF_IP\"",
                 "exec ./smf -c /tmp/smfcfg.yaml -u config/uerouting.yaml"])
@@ -306,7 +306,7 @@ def manifests():
                 "set -e",
                 "POD_IP=$(hostname -i | awk '{print $1}')",
                 "sed \"s/POD_IP_ADDR/$POD_IP/g\" config/upfcfg.yaml > /tmp/upfcfg.yaml",
-                "echo 1 > /proc/sys/net/ipv4/ip_forward",   # a imagem não tem sysctl
+                "echo 1 > /proc/sys/net/ipv4/ip_forward",   # the image has no sysctl
                 "iptables -C FORWARD -j ACCEPT 2>/dev/null || iptables -A FORWARD -j ACCEPT",
                 nat,
                 "echo \"UPF pfcp=$POD_IP  N3=%s (net1)\"" % UPF_IP,
@@ -315,7 +315,7 @@ def manifests():
             out += deployment(nf, files, ["/sbin/tini", "--", "sh", "config/wrapper.sh"], privileged=True,
                               wait_nrf=False, extra_ann={"k8s.v1.cni.cncf.io/networks": ran_link(UPF_IP)},
                               ports=[{"name": "pfcp", "containerPort": 8805, "protocol": "UDP"}])
-            # headless: o nome "upf" resolve direto para o IP do pod (o SMF usa como nodeID)
+            # headless: the name "upf" resolves straight to the pod IP (the SMF uses it as nodeID)
             out.append(service(nf, [{"name": "pfcp", "port": 8805, "protocol": "UDP"}], headless=True))
         elif nf == "amf":
             files = {name: dump(CFG[nf])}
@@ -344,7 +344,7 @@ def manifests():
 
 
 def dashboard_rbac():
-    """O painel (ServiceAccount "dashboard" no namespace do Open5GS) lê e controla este core."""
+    """The dashboard (ServiceAccount "dashboard" in the Open5GS namespace) reads and controls this core."""
     dns = env("K8S_NAMESPACE", "open5gs")
     rules = [{"apiGroups": [""], "resources": ["pods", "pods/log"], "verbs": ["get", "list", "watch"]},
              {"apiGroups": [""], "resources": ["pods"], "verbs": ["delete"]},
