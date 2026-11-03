@@ -1,5 +1,7 @@
 # Arquitetura
 
+> 🇬🇧 [English version](architecture.md)
+
 Como o InnovaNetwork está montado: máquinas, cluster, componentes, redes, IPs, portas e pastas.
 
 - [1. Visão geral](#1-visão-geral)
@@ -218,7 +220,7 @@ Nada do painel é instalado na máquina do RAN além do que o Kubernetes já rod
 |---|---|
 | `k3s-agent` | nó Kubernetes |
 | `innovanetwork-k3s-route` | rota até o servidor pela fibra |
-| `ocudu-setup`, `dpdk`, `ts2phc`, `ptp4l-gm`, `phc2sys` | preparação da máquina (do setup, não do projeto) — ver [hardware](hardware/e810-liteon.md) |
+| `ocudu-setup`, `dpdk`, `ts2phc`, `ptp4l-gm`, `phc2sys` | preparação da máquina (do setup, não do projeto) — ver [hardware](hardware/e810-liteon.pt-BR.md) |
 
 ## 11. Princípios de projeto
 

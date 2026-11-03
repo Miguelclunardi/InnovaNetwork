@@ -1,7 +1,9 @@
 # Tutorial 4 — Celular na rede
 
+> 🇬🇧 [English version](04-phone-on-the-network.md)
+
 **Objetivo:** cadastrar um SIM programável, conectar um celular comercial e navegar.
-**Tempo:** ~20 min. **Precisa de:** core e gNB funcionando ([tutorial 3](03-ocudu-em-kubernetes.md)); um SIM
+**Tempo:** ~20 min. **Precisa de:** core e gNB funcionando ([tutorial 3](03-ocudu-on-kubernetes.pt-BR.md)); um SIM
 programável com PLMN `001-01` (IMSI, K e OPc conhecidos); um celular 5G SA com a banda n78.
 
 ## 1. Cadastrar o SIM
@@ -62,7 +64,7 @@ O nome **InnovaOpen5GS** aparece no celular depois do registro.
 ## 5. Medir
 
 Abra um teste de velocidade no celular e acompanhe a vazão DL/UL na aba **Rádio**. Para comparar setups, grave um
-experimento ([tutorial 8](08-experimentos.md)).
+experimento ([tutorial 8](08-experiments.pt-BR.md)).
 
 ## Se não conectar
 
@@ -70,7 +72,7 @@ experimento ([tutorial 8](08-experimentos.md)).
 |---|---|
 | a rede não aparece | gNB ligado? O-RU sincronizada? banda n78 no celular? |
 | aparece mas recusa o registro | IMSI/K/OPc errados (AMF: falha de autenticação) ou PLMN diferente |
-| registra e sai logo em seguida | no free5GC: voz IMS ([free5gc.md](../componentes/free5gc.md#5-celulares-comerciais)) |
-| PRACH no log do gNB, mas não registra | O-RU sincronizada antes do GNSS ([hardware](../hardware/e810-liteon.md#4-sincronismo-espere-o-gnss)) |
+| registra e sai logo em seguida | no free5GC: voz IMS ([free5gc.md](../components/free5gc.pt-BR.md#5-celulares-comerciais)) |
+| PRACH no log do gNB, mas não registra | O-RU sincronizada antes do GNSS ([hardware](../hardware/e810-liteon.pt-BR.md#4-sincronismo-espere-o-gnss)) |
 
-Mais: [troubleshooting.md](../troubleshooting.md#5-rádio-e-gnb-ocudu).
+Mais: [troubleshooting.md](../troubleshooting.pt-BR.md#5-rádio-e-gnb-ocudu).

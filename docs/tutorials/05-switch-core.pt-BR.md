@@ -1,5 +1,7 @@
 # Tutorial 5 — Trocar de core
 
+> 🇬🇧 [English version](05-switch-core.md)
+
 **Objetivo:** instalar o free5GC ao lado do Open5GS e alternar entre os dois pelo painel, com o celular
 voltando sozinho na rede nova.
 **Tempo:** ~30 min. **Precisa de:** core Open5GS e painel instalados; para o rádio, o gNB no Kubernetes.

@@ -1,5 +1,7 @@
 # Tutorial 1 — Primeiro teste com UERANSIM
 
+> 🇬🇧 [English version](01-first-test-ueransim.md)
+
 **Objetivo:** instalar o core Open5GS em uma máquina e ver um UE simulado registrar, abrir sessão e navegar.
 **Tempo:** ~20 min. **Precisa de:** Ubuntu 24.04 com `sudo` e internet. Nenhum rádio.
 
@@ -81,4 +83,4 @@ Abra `http://<IP da máquina>:30998`:
 ## O que você fez
 
 Instalou um k3s, o core Open5GS (13 funções + MongoDB), um gNB e um UE simulados, e o painel — tudo como pods,
-gerado a partir do `config.env`. Próximo: [Conhecer o painel](02-conhecer-o-painel.md).
+gerado a partir do `config.env`. Próximo: [Conhecer o painel](02-dashboard-tour.pt-BR.md).

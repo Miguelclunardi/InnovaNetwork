@@ -1,6 +1,29 @@
 # Histórico de versões
 
+> 🇬🇧 [English version](CHANGELOG.md)
+
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Cada versão tem uma tag no Git.
+
+## [Não lançado]
+
+### Alterado
+- **Tudo em inglês:** documentação, comandos, saída dos scripts e comentários do código. Cada documento mantém
+  uma tradução em português (`*.pt-BR.md`). Documentos renomeados para caminhos em inglês (`docs/architecture.md`,
+  `docs/components/`, `docs/tutorials/`…).
+- **Painel em inglês ou português:** botão EN/PT no topo (ou `?lang=pt` / `?lang=en`); traduções em
+  `dashboard/i18n/pt.json`. A aba Documentação abre a versão `*.pt-BR.md` no modo português.
+- `ran/ocudu/gnb.sh`: comandos `start`/`stop`/`status` (`iniciar`/`parar`/`estado` continuam funcionando).
+- Os códigos de estado da API do painel estão em inglês (`running`/`stopped`/`starting`/`stopping`; GPS
+  `locked`/`searching`/`adjusting`/`unlocked`/`stalled`; UE `registered`/`deregistered`).
+- Nomes de opções em inglês, com os nomes em português mantidos como apelidos: `free5gc/install.sh --subscribers`,
+  `--import-open5gs`, `--stopped`, `--no-ueransim`; `ran/ocudu/install.sh copy|prepare|--remove`;
+  `ran/ocudu/no-ran.sh image|import|join|leave|status`. Os prefixos dos scripts passam a ser `[warn]` e `[error]`.
+- Os hashes dos values do Open5GS e do UERANSIM ignoram comentários: editar um comentário não recria mais os pods.
+  **Uma vez**, no primeiro `--deploy-only` depois desta mudança, o core e os UEs são recriados (fórmula nova do
+  hash) — rode numa janela sem usuários.
+- O `install.sh` não reinicia mais o k3s quando só mudam comentários do arquivo de configuração dele.
+- O texto do script do pod do gNB mudou (mensagem de boot em inglês): o próximo `./ran/ocudu/install.sh` recria o
+  pod do gNB.
 
 ## [3.0] — 2026-10-28 · tag `v3.0-innovanetwork`
 

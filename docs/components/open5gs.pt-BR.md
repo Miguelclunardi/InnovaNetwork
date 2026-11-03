@@ -1,5 +1,7 @@
 # Open5GS — core padrão
 
+> 🇬🇧 [English version](open5gs.md)
+
 Core **5G Standalone Open5GS 2.7.5** no namespace `open5gs`, instalado pelo `install.sh` da raiz com os Helm
 charts da [Gradiant](https://github.com/Gradiant/5g-charts) (commit fixo) e values gerados a partir do
 `config.env`. Validado com UERANSIM e com celulares comerciais pelo gNB OCUDU.
@@ -13,7 +15,7 @@ charts da [Gradiant](https://github.com/Gradiant/5g-charts) (commit fixo) e valu
 | Assinantes | WebUI `http://<máquina do core>:30999` (`admin` / `1423` — troque) ou `scripts/subscribers.sh` |
 | Teste | `./test.sh` → `7 verificações OK` |
 
-Arquitetura geral: [../arquitetura.md](../arquitetura.md). Instalação: [../instalacao.md](../instalacao.md).
+Arquitetura geral: [../arquitetura.md](../architecture.pt-BR.md). Instalação: [../instalacao.md](../installation.pt-BR.md).
 
 ## Sumário
 
@@ -49,7 +51,7 @@ Cada passo só age se algo mudou — rodar de novo é seguro.
 14. **Recuperação no boot** (`AUTO_HEAL`): instala a unit `open5gs-k3s-heal`.
 15. **kubeconfig do usuário real** (`$SUDO_USER`): cria/mescla `~/.kube/config` (0600), alias `k` + autocomplete, e testa `kubectl get nodes` como esse usuário.
 
-Depois do UERANSIM vêm o **painel e os agentes** ([painel.md](painel.md)) e as units de boot.
+Depois do UERANSIM vêm o **painel e os agentes** ([painel.md](dashboard.pt-BR.md)) e as units de boot.
 
 Opções: `--deploy-only` (pula 3–9: só values, deploy, assinantes, painel e kubeconfig), `--dashboard-only` (só o painel e os agentes), `-h`.
 
@@ -127,12 +129,12 @@ kubectl -n open5gs rollout restart deploy                       # tudo (core + R
 ```
 
 > Reinicie **todos os NFs juntos** em vez de um a um quando houver erros de SBI com IPs antigos
-> (cache de descoberta — ver [troubleshooting](../troubleshooting.md)).
+> (cache de descoberta — ver [troubleshooting](../troubleshooting.pt-BR.md)).
 
 ### 2.7 Parar, iniciar e reboot
 
 O jeito normal é a aba **Controle** do painel (**▶ Iniciar tudo** / **■ Parar tudo**), que segue a ordem certa e
-confere cada etapa. Ver [../operacao.md](../operacao.md).
+confere cada etapa. Ver [../operacao.md](../operation.pt-BR.md).
 
 **No boot**, o comportamento depende de `CORE_AUTOSTART`:
 
@@ -212,7 +214,7 @@ recriados (estratégia `Recreate`, todos juntos) e o gNB/UEs também; os assinan
 | `SLICES` | `internet` 10.45/16 e `internet2` 10.46/16 | slices/DNN/pools (ver §3.3) |
 | `DNS_SERVERS`, `UE_MTU` | `8.8.8.8 8.8.4.4`, `1400` | entregues ao UE |
 | `WEBUI_ENABLED`, `WEBUI_NODEPORT` | `true`, `30999` | WebUI |
-| `DASHBOARD_*`, `GNB_METRICS_URL`, `GNB_LOG_*`, `OPEN5GS_METRICS` | ver [painel.md](painel.md) | painel de logs e métricas |
+| `DASHBOARD_*`, `GNB_METRICS_URL`, `GNB_LOG_*`, `OPEN5GS_METRICS` | ver [painel.md](dashboard.pt-BR.md) | painel de logs e métricas |
 | `MONGODB_PERSISTENCE`, `MONGODB_PERSISTENCE_SIZE` | `true`, `2Gi` | volume do banco |
 | `MONGODB_IMAGE_REGISTRY/REPOSITORY/TAG` | vazio (Bitnami latest) | imagem alternativa (ex.: CPU sem AVX) |
 | `DEPLOY_UERANSIM` | `true` | `false` remove gNB/UEs simulados (para RAN real) |
@@ -373,7 +375,7 @@ Outros contextos do seu `~/.kube/config` são preservados. Pacotes apt não são
 
 ## 7. Problemas comuns
 
-Guia completo: **[troubleshooting.md](../troubleshooting.md)**. Os mais comuns:
+Guia completo: **[troubleshooting.md](../troubleshooting.pt-BR.md)**. Os mais comuns:
 
 | Sintoma | Solução rápida |
 |---------|----------------|

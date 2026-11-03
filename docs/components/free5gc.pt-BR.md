@@ -1,5 +1,7 @@
 # free5GC — core opcional
 
+> 🇬🇧 [English version](free5gc.md)
+
 Core **free5GC v4.3.0** no mesmo cluster, separado do Open5GS: namespace `free5gc`, configuração própria
 (`free5gc/free5gc.env`), instalador e desinstalador próprios. Os IPs não colidem com os do Open5GS, então os dois
 ficam instalados juntos; **um core por vez** atende o rádio, e a troca é feita no painel.

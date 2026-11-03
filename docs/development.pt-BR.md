@@ -1,5 +1,7 @@
 # Desenvolvimento
 
+> 🇬🇧 [English version](development.md)
+
 Para entender o InnovaNetwork por dentro, mostrar o projeto e estendê-lo: onde cada coisa está no código, como uma
 configuração vira um pod, e como mudar cores, gNB e painel. As referências usam nomes de função (procure com
 `grep -n`).
@@ -180,7 +182,7 @@ lado a lado de dois experimentos. Cada experimento guarda o core em uso.
 | Por que dois cores? | pesquisas diferentes pedem cores diferentes; um por vez, sem misturar |
 | Por que o gNB usa a rede do host e privilégios? | DPDK, VF da NIC e PTP exigem acesso direto ao hardware, como no serviço nativo |
 | Por que manifesto próprio para o gNB, e não o chart oficial? | o chart muda o comando e os argumentos do DPDK; o manifesto reproduz o comando validado |
-| O que acontece num reboot? | só o painel sobe; core e gNB são ligados pelo operador, depois do GNSS ([operação](operacao.md#2-depois-de-ligar-as-máquinas)) |
+| O que acontece num reboot? | só o painel sobe; core e gNB são ligados pelo operador, depois do GNSS ([operação](operation.pt-BR.md#2-depois-de-ligar-as-máquinas)) |
 | Onde estão as senhas? | nunca no git: Secret do Kubernetes e arquivos do root em `/opt/open5gs-k3s/state/` |
 
 ---
@@ -208,7 +210,7 @@ O Open5GS vem das imagens dos charts (`OPEN5GS_IMAGE_TAG`). Para usar um código
 ### Modificar o código do OCUDU
 
 Commit no repositório do OCUDU → `sudo ~/innovanetwork-ran/no-ran.sh imagem` → `./ran/ocudu/install.sh` → reiniciar o
-gNB. Passo a passo: [tutorial 7](tutoriais/07-alterar-o-gnb.md).
+gNB. Passo a passo: [tutorial 7](tutorials/07-change-the-gnb.pt-BR.md).
 
 ### Verificações antes de propor uma mudança
 
@@ -220,4 +222,4 @@ python3 -m py_compile dashboard/app/*.py dashboard/agent/*.py free5gc/lib/*.py r
 ./test.sh
 ```
 
-Rodar o painel fora do cluster: [componentes/painel.md](componentes/painel.md#desenvolvimento).
+Rodar o painel fora do cluster: [componentes/painel.md](components/dashboard.pt-BR.md#desenvolvimento).

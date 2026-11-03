@@ -1,5 +1,7 @@
 # Instalação
 
+> 🇬🇧 [English version](installation.md)
+
 Do zero até um celular navegando. A instalação tem três partes independentes; faça na ordem e pare onde quiser.
 
 | Parte | Resultado | Onde | Tempo |
@@ -8,7 +10,7 @@ Do zero até um celular navegando. A instalação tem três partes independentes
 | [2. free5GC (opcional)](#2-free5gc-opcional) | segundo core, alternável pelo painel | máquina do core | 15 min |
 | [3. Rádio: OCUDU em Kubernetes](#3-rádio-ocudu-em-kubernetes) | gNB real como pod no nó do RAN | as duas máquinas | ~1 h |
 
-Depois: [operação do dia a dia](operacao.md).
+Depois: [operação do dia a dia](operation.pt-BR.md).
 
 ---
 
@@ -31,7 +33,7 @@ Kubernetes; ele **não** prepara a máquina. Antes, garanta:
 - Docker instalado (para compilar a imagem);
 - acesso SSH **sem senha** da máquina do core para a do RAN (`ssh-copy-id usuario@ip-da-fibra`).
 
-O setup de referência está descrito em [hardware/e810-liteon.md](hardware/e810-liteon.md).
+O setup de referência está descrito em [hardware/e810-liteon.md](hardware/e810-liteon.pt-BR.md).
 
 ---
 
@@ -86,8 +88,8 @@ Opções úteis:
 | `sudo ./install.sh --dashboard-only` | reinstala só o painel e os agentes (não toca no core nem no gNB) |
 | `sudo ./uninstall.sh` | remove o core (níveis `--k3s`, `--purge`) |
 
-Detalhes do core: [componentes/open5gs.md](componentes/open5gs.md). Tutorial guiado:
-[Primeiro teste com UERANSIM](tutoriais/01-primeiro-teste-ueransim.md).
+Detalhes do core: [componentes/open5gs.md](components/open5gs.pt-BR.md). Tutorial guiado:
+[Primeiro teste com UERANSIM](tutorials/01-first-test-ueransim.pt-BR.md).
 
 ### Credenciais da O-RU (opcional)
 
@@ -115,7 +117,7 @@ sudo ./install.sh --dashboard-only        # o painel passa a oferecer a troca de
 ```
 
 O free5GC sobe ligado. Para deixá-lo como reserva, troque de volta para o Open5GS pelo painel (aba Controle →
-Core ativo). Detalhes: [componentes/free5gc.md](componentes/free5gc.md).
+Core ativo). Detalhes: [componentes/free5gc.md](components/free5gc.pt-BR.md).
 
 ---
 
@@ -213,7 +215,7 @@ sudo ./install.sh --dashboard-only
 ```
 
 A aba **Controle** passa a mostrar o cartão **gNB (Kubernetes)**, com iniciar/parar/reiniciar e a escolha do
-`.yml`. Tutorial completo com resultados esperados: [OCUDU em Kubernetes](tutoriais/03-ocudu-em-kubernetes.md).
+`.yml`. Tutorial completo com resultados esperados: [OCUDU em Kubernetes](tutorials/03-ocudu-on-kubernetes.pt-BR.md).
 
 ---
 

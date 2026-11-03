@@ -1,5 +1,7 @@
 # free5GC — core opcional
 
+> 🇬🇧 [English version](README.md)
+
 Instalador do core **free5GC** do InnovaNetwork (namespace `free5gc`).
 
 ```bash
@@ -8,5 +10,5 @@ sudo ./free5gc/setup-gtp5g.sh     # uma vez: módulo do kernel do UPF
 ./free5gc/test.sh                 # testa com o UERANSIM
 ```
 
-Documentação completa: [docs/componentes/free5gc.md](../docs/componentes/free5gc.md). Troca de core:
-[tutorial 5](../docs/tutoriais/05-trocar-de-core.md).
+Documentação completa: [docs/componentes/free5gc.md](../docs/components/free5gc.pt-BR.md). Troca de core:
+[tutorial 5](../docs/tutorials/05-switch-core.pt-BR.md).

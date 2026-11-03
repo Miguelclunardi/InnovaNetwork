@@ -1,5 +1,7 @@
 # Solução de problemas
 
+> 🇬🇧 [English version](troubleshooting.md)
+
 Sintoma → causa → solução. Organizado por área.
 
 - [1. Diagnóstico rápido](#1-diagnóstico-rápido)
@@ -129,7 +131,7 @@ sudo systemctl status k3s ; sudo journalctl -u k3s -f   # serviço do k3s
 |---|---|---|
 | gNB sobe mas não aparece no AMF | `.yml` aponta para o outro core, ou o AMF reiniciou depois do gNB | escolha o `.yml` do core ativo; reinicie o gNB |
 | gNB perde o AMF ("Handling N2 disconnection") | core parado ou trocado com o gNB ligado | use a troca de core do painel, que religa o gNB |
-| celulares fazem PRACH mas não conectam; RU com muitos pacotes adiantados/atrasados | O-RU sincronizou antes do GNSS ficar válido | `restart ptp4l-gm phc2sys`, reiniciar a O-RU, reiniciar o gNB ([hardware](hardware/e810-liteon.md#4-sincronismo-espere-o-gnss)) |
+| celulares fazem PRACH mas não conectam; RU com muitos pacotes adiantados/atrasados | O-RU sincronizou antes do GNSS ficar válido | `restart ptp4l-gm phc2sys`, reiniciar a O-RU, reiniciar o gNB ([hardware](hardware/e810-liteon.pt-BR.md#4-sincronismo-espere-o-gnss)) |
 | O-RU sem "DU conectado" | PTP parado ou VF fora do `vfio-pci` | `systemctl status ptp4l-gm ts2phc`; `dpdk-devbind.py --status` |
 | painel: "parado (nó reiniciou)" | proteção de boot: o nó reiniciou depois do último pedido | espere o GNSS, ajuste PTP/O-RU e clique **Iniciar** |
 | pod recusa iniciar: "há um gnb rodando no host" | serviço nativo `ocudu-gnb@` ou gNB aberto no terminal | pare o outro gNB (os dois usam a mesma O-RU e VF) |
@@ -175,7 +177,7 @@ Conferir o nó: `kubectl describe node <nó>` (rótulo, taint, `hugepages-1Gi` a
 | Configuração recusa salvar | o arquivo mudou no servidor; recarregue a página |
 | página não abre de outro PC | firewall: o install abre a porta do painel; `sudo ufw status` |
 
-Mais: [componentes/painel.md](componentes/painel.md#problemas-comuns).
+Mais: [componentes/painel.md](components/dashboard.pt-BR.md#problemas-comuns).
 
 ## 9. Logs úteis
 

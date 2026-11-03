@@ -16,6 +16,8 @@
   <img alt="5G SA" src="https://img.shields.io/badge/5G-Standalone-555">
 </p>
 
+<p align="center"><a href="README.md">Read in English</a></p>
+
 ---
 
 O **InnovaNetwork** monta e opera uma rede 5G SA de laboratório **inteiramente em Kubernetes (k3s)**: o core,
@@ -58,18 +60,18 @@ e documentado.
                                                                                        └─────────────┘
 ```
 
-Detalhes, IPs, portas e pastas: **[docs/arquitetura.md](docs/arquitetura.md)**.
+Detalhes, IPs, portas e pastas: **[docs/arquitetura.md](docs/architecture.pt-BR.md)**.
 
 ## Componentes
 
 | Componente | Versão | Onde roda | Documentação |
 |---|---|---|---|
-| **Open5GS** (core padrão) | 2.7.5 | namespace `open5gs` | [componentes/open5gs.md](docs/componentes/open5gs.md) |
-| **free5GC** (core opcional) | v4.3.0 | namespace `free5gc` | [componentes/free5gc.md](docs/componentes/free5gc.md) |
-| **UERANSIM** (gNB/UE simulados) | 3.2.6 | um par por core | [componentes/ueransim.md](docs/componentes/ueransim.md) |
-| **OCUDU** (gNB real) | commit fixo do usuário | namespace `ocudu`, nó do RAN | [componentes/ocudu.md](docs/componentes/ocudu.md) |
-| **Innova Center Dashboard** | 3.0 | namespace `open5gs`, porta 30998 | [componentes/painel.md](docs/componentes/painel.md) |
-| **k3s** + Multus | v1.36.5+k3s1 | as duas máquinas | [arquitetura.md](docs/arquitetura.md) |
+| **Open5GS** (core padrão) | 2.7.5 | namespace `open5gs` | [componentes/open5gs.md](docs/components/open5gs.pt-BR.md) |
+| **free5GC** (core opcional) | v4.3.0 | namespace `free5gc` | [componentes/free5gc.md](docs/components/free5gc.pt-BR.md) |
+| **UERANSIM** (gNB/UE simulados) | 3.2.6 | um par por core | [componentes/ueransim.md](docs/components/ueransim.pt-BR.md) |
+| **OCUDU** (gNB real) | commit fixo do usuário | namespace `ocudu`, nó do RAN | [componentes/ocudu.md](docs/components/ocudu.pt-BR.md) |
+| **Innova Center Dashboard** | 3.0 | namespace `open5gs`, porta 30998 | [componentes/painel.md](docs/components/dashboard.pt-BR.md) |
+| **k3s** + Multus | v1.36.5+k3s1 | as duas máquinas | [arquitetura.md](docs/architecture.pt-BR.md) |
 
 ## Início rápido
 
@@ -84,21 +86,21 @@ sudo ./install.sh        # k3s, Open5GS, UERANSIM e painel (idempotente)
 
 Abra o painel em `http://<IP da máquina>:30998`.
 
-Rede completa com rádio real: siga a **[instalação](docs/instalacao.md)**.
+Rede completa com rádio real: siga a **[instalação](docs/installation.pt-BR.md)**.
 
 ## Documentação
 
 | | |
 |---|---|
-| 🧭 **[Visão geral da documentação](docs/README.md)** | por onde começar, conforme o seu objetivo |
-| 🏗️ **[Arquitetura](docs/arquitetura.md)** | máquinas, componentes, redes, IPs, portas e pastas |
-| ⚙️ **[Instalação](docs/instalacao.md)** | do zero até o celular navegando |
-| 🕹️ **[Operação](docs/operacao.md)** | o dia a dia: ligar, trocar de core, reboot, testes |
-| 🎓 **[Tutoriais](docs/README.md#tutoriais)** | passo a passo: primeiro teste, celular na rede, troca de core, OCUDU em k8s, experimentos… |
-| 🧩 **Componentes** | [Open5GS](docs/componentes/open5gs.md) · [free5GC](docs/componentes/free5gc.md) · [UERANSIM](docs/componentes/ueransim.md) · [OCUDU](docs/componentes/ocudu.md) · [Painel](docs/componentes/painel.md) |
-| 🔧 **[Hardware de referência](docs/hardware/e810-liteon.md)** | Intel E810 + LiteOn FlexFi: PTP/GNSS, DPDK, XDP, célula n78 |
-| 🩺 **[Solução de problemas](docs/troubleshooting.md)** | sintomas → causa → solução |
-| 🛠️ **[Desenvolvimento](docs/desenvolvimento.md)** | mapa do código e como estender |
+| 🧭 **[Visão geral da documentação](docs/README.pt-BR.md)** | por onde começar, conforme o seu objetivo |
+| 🏗️ **[Arquitetura](docs/architecture.pt-BR.md)** | máquinas, componentes, redes, IPs, portas e pastas |
+| ⚙️ **[Instalação](docs/installation.pt-BR.md)** | do zero até o celular navegando |
+| 🕹️ **[Operação](docs/operation.pt-BR.md)** | o dia a dia: ligar, trocar de core, reboot, testes |
+| 🎓 **[Tutoriais](docs/README.pt-BR.md#tutoriais)** | passo a passo: primeiro teste, celular na rede, troca de core, OCUDU em k8s, experimentos… |
+| 🧩 **Componentes** | [Open5GS](docs/components/open5gs.pt-BR.md) · [free5GC](docs/components/free5gc.pt-BR.md) · [UERANSIM](docs/components/ueransim.pt-BR.md) · [OCUDU](docs/components/ocudu.pt-BR.md) · [Painel](docs/components/dashboard.pt-BR.md) |
+| 🔧 **[Hardware de referência](docs/hardware/e810-liteon.pt-BR.md)** | Intel E810 + LiteOn FlexFi: PTP/GNSS, DPDK, XDP, célula n78 |
+| 🩺 **[Solução de problemas](docs/troubleshooting.pt-BR.md)** | sintomas → causa → solução |
+| 🛠️ **[Desenvolvimento](docs/development.pt-BR.md)** | mapa do código e como estender |
 
 A mesma documentação aparece no painel, na aba **Documentação**.
 
@@ -133,12 +135,12 @@ InnovaNetwork/
 | v2.x | dois cores (Open5GS + free5GC), troca pelo painel |
 | v1.x | core Open5GS em k3s com UERANSIM; painel |
 
-Histórico completo: [CHANGELOG.md](CHANGELOG.md).
+Histórico completo: [CHANGELOG.md](CHANGELOG.pt-BR.md).
 
 ## Contribuir
 
 Contribuições são bem-vindas: novos perfis de hardware, correções e documentação. Veja
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.pt-BR.md).
 
 ## Licença
 

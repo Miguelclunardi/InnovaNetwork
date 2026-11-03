@@ -1,5 +1,7 @@
 # Operação
 
+> 🇬🇧 [English version](operation.md)
+
 O dia a dia da rede. Quase tudo é feito pelo **painel** (`http://<IP da máquina do core>:30998`).
 
 - [1. Login de administrador](#1-login-de-administrador)
@@ -36,7 +38,7 @@ Por segurança, **só o painel sobe sozinho** (`CORE_AUTOSTART=false`). Core e g
 | 6 | painel | **Visão geral** | celulares registrados com IP |
 
 > Se a máquina do RAN reiniciar, o pod do gNB volta **sem ligar o gNB** e mostra "parado (nó reiniciou)". É a
-> proteção de boot: ligue de novo pelo painel depois dos passos 2–4. Ver [componentes/ocudu.md](componentes/ocudu.md#proteção-de-boot).
+> proteção de boot: ligue de novo pelo painel depois dos passos 2–4. Ver [componentes/ocudu.md](components/ocudu.pt-BR.md#proteção-de-boot).
 
 Os IPs da rede local (DHCP) podem mudar após um reboot. Só o endereço para abrir o painel muda; o cluster e a
 fibra usam IPs fixos.
@@ -70,7 +72,7 @@ Tempos típicos: Open5GS → free5GC ~1 min; free5GC → Open5GS ~5 min. Todas a
 > Use sempre o cartão **Core ativo**. Parar um core e iniciar o outro pelos botões separados não mexe no gNB, que
 > fica apontando para o AMF antigo.
 
-Tutorial: [Trocar de core](tutoriais/05-trocar-de-core.md).
+Tutorial: [Trocar de core](tutorials/05-switch-core.pt-BR.md).
 
 ## 5. O gNB OCUDU
 
@@ -87,7 +89,7 @@ Pelo painel (cartão **gNB (Kubernetes)**) ou pela linha de comando, na máquina
 | Mudou… | Faça |
 |---|---|
 | um `.yml` em `~/ocudu/configs/` (nó do RAN) | reinicie o gNB. O pod lê a pasta do host; não precisa recompilar |
-| o código do OCUDU | commit → recompilar a imagem → `./ran/ocudu/install.sh` → reiniciar. Ver [tutorial 7](tutoriais/07-alterar-o-gnb.md) |
+| o código do OCUDU | commit → recompilar a imagem → `./ran/ocudu/install.sh` → reiniciar. Ver [tutorial 7](tutorials/07-change-the-gnb.pt-BR.md) |
 | o AMF do core reiniciou | reinicie o gNB (ele não refaz o N2 sozinho) |
 
 ## 6. Assinantes (SIMs)
@@ -98,7 +100,7 @@ Pelo painel (cartão **gNB (Kubernetes)**) ou pela linha de comando, na máquina
 | free5GC | painel → **Core** → **Assinantes** (WebConsole `:31000`); ou `./free5gc/install.sh --importar-open5gs` |
 
 As chaves (K/OPc) nunca vão para o git nem aparecem na tela na importação. Tutorial:
-[Celular na rede](tutoriais/04-celular-na-rede.md).
+[Celular na rede](tutorials/04-phone-on-the-network.pt-BR.md).
 
 ## 7. Mudar a configuração
 
@@ -117,7 +119,7 @@ Cuidados:
 - não rode instalador e troca de core ao mesmo tempo;
 - depois de recriar o AMF, reinicie o gNB.
 
-Tutorial: [Mudar PLMN, slices e IPs](tutoriais/06-mudar-configuracao.md).
+Tutorial: [Mudar PLMN, slices e IPs](tutorials/06-change-configuration.pt-BR.md).
 
 ## 8. Testar
 
@@ -141,4 +143,4 @@ journalctl -u open5gs-k3s-gnb-ctl -f              # agente de controle do gNB (m
 less logs/install.log                             # histórico do instalador
 ```
 
-Problemas: [troubleshooting.md](troubleshooting.md).
+Problemas: [troubleshooting.md](troubleshooting.pt-BR.md).

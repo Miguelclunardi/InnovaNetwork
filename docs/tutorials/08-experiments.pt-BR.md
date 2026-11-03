@@ -1,5 +1,7 @@
 # Tutorial 8 — Gravar e comparar experimentos
 
+> 🇬🇧 [English version](08-experiments.md)
+
 **Objetivo:** medir dois setups (ex.: dois `.yml` do gNB) e compará-los lado a lado no painel.
 **Tempo:** ~20 min. **Precisa de:** histórico persistente ligado (`DASHBOARD_PERSIST=true`, padrão) e um UE com
 tráfego.
@@ -21,7 +23,7 @@ gNB, configuração da O-RU e o `config.env`, com chaves mascaradas).
 
 ## 3. Experimento B
 
-Mude **uma coisa só** (ex.: o `.yml` — [tutorial 7](07-alterar-o-gnb.md)), repita o mesmo tráfego e grave como
+Mude **uma coisa só** (ex.: o `.yml` — [tutorial 7](07-change-the-gnb.pt-BR.md)), repita o mesmo tráfego e grave como
 `B — …`.
 
 ## 4. Comparar
@@ -43,4 +45,4 @@ Aba **Histórico** → marque A e B → **Comparar**:
 - uma variável por vez;
 - notas completas: o retrato do setup ajuda, mas não substitui saber *por que* o experimento foi feito.
 
-Detalhes do armazenamento (formato, retenção, tamanho): [componentes/painel.md](../componentes/painel.md#histórico-persistente-e-experimentos-aba-histórico).
+Detalhes do armazenamento (formato, retenção, tamanho): [componentes/painel.md](../components/dashboard.pt-BR.md#histórico-persistente-e-experimentos-aba-histórico).

@@ -1,5 +1,7 @@
 # Tutorial 6 — Mudar PLMN, slices e IPs
 
+> 🇬🇧 [English version](06-change-configuration.md)
+
 **Objetivo:** alterar a configuração da rede e aplicar sem quebrar nada.
 **Tempo:** ~15 min. **Precisa de:** core instalado; login de administrador no painel.
 

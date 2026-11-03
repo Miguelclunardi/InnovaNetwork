@@ -1,5 +1,7 @@
 # Como contribuir
 
+> 🇬🇧 [English version](CONTRIBUTING.md)
+
 Obrigado pelo interesse! O InnovaNetwork quer ser uma base replicável para redes 5G de laboratório em Kubernetes.
 Contribuições bem-vindas:
 
@@ -10,7 +12,7 @@ Contribuições bem-vindas:
 
 ## Antes de começar
 
-- Leia a [arquitetura](docs/arquitetura.md) e o [guia de desenvolvimento](docs/desenvolvimento.md).
+- Leia a [arquitetura](docs/architecture.pt-BR.md) e o [guia de desenvolvimento](docs/development.pt-BR.md).
 - Para mudanças grandes, abra uma *issue* descrevendo a ideia antes do código.
 
 ## Regras do projeto

@@ -1,7 +1,9 @@
 # Tutorial 2 — Conhecer o painel
 
+> 🇬🇧 [English version](02-dashboard-tour.md)
+
 **Objetivo:** entrar como administrador e saber o que cada aba do *Innova Center Dashboard* mostra e faz.
-**Tempo:** ~15 min. **Precisa de:** o core instalado ([tutorial 1](01-primeiro-teste-ueransim.md) ou a [instalação](../instalacao.md)).
+**Tempo:** ~15 min. **Precisa de:** o core instalado ([tutorial 1](01-first-test-ueransim.pt-BR.md) ou a [instalação](../installation.pt-BR.md)).
 
 ## 1. Abrir e entrar
 
@@ -38,9 +40,9 @@ Sem login dá para ver tudo; ações (iniciar, parar, editar) pedem o login.
 ## 4. O topo da página
 
 - **pílula do core ativo** (Open5GS ou free5GC): todas as abas seguem esse core;
-- **● Gravar experimento**: marca um período para comparar depois ([tutorial 8](08-experimentos.md));
+- **● Gravar experimento**: marca um período para comparar depois ([tutorial 8](08-experiments.pt-BR.md));
 - tema claro/escuro.
 
 ## Próximo
 
-Com rádio: [OCUDU em Kubernetes](03-ocudu-em-kubernetes.md). Referência completa: [componentes/painel.md](../componentes/painel.md).
+Com rádio: [OCUDU em Kubernetes](03-ocudu-on-kubernetes.pt-BR.md). Referência completa: [componentes/painel.md](../components/dashboard.pt-BR.md).

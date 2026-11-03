@@ -1,9 +1,11 @@
 # Tutorial 3 — OCUDU em Kubernetes
 
+> 🇬🇧 [English version](03-ocudu-on-kubernetes.md)
+
 **Objetivo:** levar o gNB OCUDU, que já funciona na máquina do RAN, para dentro do cluster como um pod, e
 controlá-lo pelo painel.
 **Tempo:** ~1 h (a compilação leva ~15 min). **Precisa de:** core instalado; máquina do RAN preparada
-([requisitos](../instalacao.md#máquina-do-ran-só-para-a-parte-3)); SSH sem senha da máquina do core para a do RAN.
+([requisitos](../installation.pt-BR.md#máquina-do-ran-só-para-a-parte-3)); SSH sem senha da máquina do core para a do RAN.
 
 > Cada passo diz **onde** rodar. 🖥️ = máquina do core (na pasta do repositório). 📡 = máquina do RAN.
 > Guarde a saída dos passos longos com `2>&1 | tee arquivo.log`.
@@ -29,7 +31,7 @@ ssh -o BatchMode=yes usuario@10.10.0.1 hostname
 ## Passo 1 — Configurar
 
 🖥️ Revise `ran/ocudu/ocudu.env` (nó, IPs, pasta do OCUDU, CPUs, hugepages). Tabela das variáveis:
-[componentes/ocudu.md](../componentes/ocudu.md#3-configuração-ocuduenv).
+[componentes/ocudu.md](../components/ocudu.pt-BR.md#3-configuração-ocuduenv).
 
 ## Passo 2 — Copiar os scripts para o nó
 
@@ -90,7 +92,7 @@ kubectl -n ocudu get deploy,cm        # ocudu-gnb 0/0 (parado) + descritor
 
 ## Passo 7 — Ligar o gNB pela linha de comando
 
-Antes: GNSS válido e O-RU sincronizada ([hardware](../hardware/e810-liteon.md#4-sincronismo-espere-o-gnss)).
+Antes: GNSS válido e O-RU sincronizada ([hardware](../hardware/e810-liteon.pt-BR.md#4-sincronismo-espere-o-gnss)).
 
 🖥️
 ```bash
@@ -137,4 +139,4 @@ Teste **↻ Reiniciar**: a aba confere o pod, o DU conectado na O-RU e o N2 no A
 ## O que você fez
 
 O nó do RAN virou parte do cluster, e o gNB passou a ser um pod com o mesmo binário, comando, configuração e
-desempenho do serviço nativo, agora ligado e desligado pelo Kubernetes. Próximo: [Celular na rede](04-celular-na-rede.md).
+desempenho do serviço nativo, agora ligado e desligado pelo Kubernetes. Próximo: [Celular na rede](04-phone-on-the-network.pt-BR.md).

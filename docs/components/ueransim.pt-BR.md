@@ -1,5 +1,7 @@
 # UERANSIM — gNB e UE simulados
 
+> 🇬🇧 [English version](ueransim.md)
+
 O **UERANSIM 3.2.6** simula um gNB e UEs 5G em software. No InnovaNetwork, cada core tem o seu par gNB + UEs,
 usado para testar o core **sem rádio**: registro, autenticação, sessão PDU e tráfego.
 
@@ -99,4 +101,4 @@ mostra os logs do AMF, SMF, UPF, gNB e UE em caso de falha. Código de saída 0/
 | registro OK, ping falha após reboot | PFCP SMF↔UPF dessincronizado: `./scripts/heal.sh` ou reiniciar o UPF pelo painel |
 | gNB simulado sem NG Setup | AMF parado ou reiniciado depois do gNB: reinicie o UERANSIM |
 
-Mais: [troubleshooting.md](../troubleshooting.md).
+Mais: [troubleshooting.md](../troubleshooting.pt-BR.md).

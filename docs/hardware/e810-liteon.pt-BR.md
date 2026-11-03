@@ -1,9 +1,11 @@
 # Hardware de referência: Intel E810 + O-RU LiteOn FlexFi
 
+> 🇬🇧 [English version](e810-liteon.md)
+
 O setup em que o InnovaNetwork foi validado. Use como referência para montar o seu: o que muda de um setup para
 outro fica em `ran/ocudu/ocudu.env` e nos `.yml` do gNB.
 
-> Contribua com o seu perfil de hardware: veja [CONTRIBUTING.md](../../CONTRIBUTING.md).
+> Contribua com o seu perfil de hardware: veja [CONTRIBUTING.md](../../CONTRIBUTING.pt-BR.md).
 
 ## 1. Peças
 
@@ -62,7 +64,7 @@ sudo systemctl restart ptp4l-gm phc2sys          # 2. acerta o relógio do siste
 # 4. ligar o gNB (painel ou ./ran/ocudu/gnb.sh iniciar)
 ```
 
-O InnovaNetwork já impede o gNB de ligar sozinho depois do boot ([proteção de boot](../componentes/ocudu.md#proteção-de-boot)).
+O InnovaNetwork já impede o gNB de ligar sozinho depois do boot ([proteção de boot](../components/ocudu.pt-BR.md#proteção-de-boot)).
 
 ## 5. XDP de ajuste do PTP
 

@@ -1,10 +1,12 @@
 # Painel — Innova Center Dashboard
 
+> 🇬🇧 [English version](dashboard.md)
+
 Página web que roda **no próprio cluster do core** (máquina do core) e junta num só lugar o InnovaNetwork
 inteiro: rádio, RU, máquinas e **o core ativo** (Open5GS ou free5GC — ver [Core ativo](#core-ativo-open5gs--free5gc)).
 
-> Guia de uso passo a passo: [tutorial 2 — Conhecer o painel](../tutoriais/02-conhecer-o-painel.md).
-> Experimentos: [tutorial 8](../tutoriais/08-experimentos.md).
+> Guia de uso passo a passo: [tutorial 2 — Conhecer o painel](../tutorials/02-dashboard-tour.pt-BR.md).
+> Experimentos: [tutorial 8](../tutorials/08-experiments.pt-BR.md).
 
 | Aba | O que mostra | De onde vem |
 |---|---|---|
@@ -278,7 +280,7 @@ pela aba Controle. Um `sudo ./install.sh` ou `--deploy-only` volta a subir tudo 
   outro.
 - Depois de iniciar, a aba confere: gNB rodando (e ainda rodando 5 s depois), **RU com DU conectado** e **N2 no
   AMF** do core ativo. O arquivo que aponta para outro AMF aparece marcado.
-- Depois de um reboot do nó, o cartão mostra **"parado (nó reiniciou)"**: a [proteção de boot](ocudu.md#proteção-de-boot)
+- Depois de um reboot do nó, o cartão mostra **"parado (nó reiniciou)"**: a [proteção de boot](ocudu.pt-BR.md#proteção-de-boot)
   impede o gNB de ligar sozinho.
 - **A máquina tem que estar preparada** (VF/DPDK, PTP, XDP): o botão não faz isso.
 

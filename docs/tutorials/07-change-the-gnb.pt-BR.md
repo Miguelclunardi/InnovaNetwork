@@ -1,7 +1,9 @@
 # Tutorial 7 — Alterar o gNB
 
+> 🇬🇧 [English version](07-change-the-gnb.md)
+
 **Objetivo:** mudar a configuração (`.yml`) ou o código do OCUDU e colocar a mudança no ar.
-**Tempo:** 5 min (`.yml`) · ~30 min (código). **Precisa de:** gNB no Kubernetes ([tutorial 3](03-ocudu-em-kubernetes.md)).
+**Tempo:** 5 min (`.yml`) · ~30 min (código). **Precisa de:** gNB no Kubernetes ([tutorial 3](03-ocudu-on-kubernetes.pt-BR.md)).
 
 | Mudou… | Recompilar? | O que fazer |
 |---|---|---|
@@ -67,4 +69,4 @@ Imagens antigas ocupam ~140 MB cada; limpe com 📡 `sudo k3s crictl rmi <imagem
 - A compilação usa `OCUDU_BUILD_JOBS` CPUs fora das reservadas ao gNB, mas pesa na máquina: evite durante
   experimentos.
 - `OCUDU_IMAGE_MARCH="native"` otimiza para a CPU do nó; a imagem não serve para outra CPU diferente.
-- Para comparar antes/depois, grave um experimento com cada versão ([tutorial 8](08-experimentos.md)).
+- Para comparar antes/depois, grave um experimento com cada versão ([tutorial 8](08-experiments.pt-BR.md)).

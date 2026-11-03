@@ -1,11 +1,13 @@
 # OCUDU — gNB real em Kubernetes
 
+> 🇬🇧 [English version](ocudu.md)
+
 O gNB **OCUDU** (CU + DU no mesmo processo, O-RAN split 7.2, DPDK) roda como o pod `ocudu-gnb` no **nó do RAN**,
 uma máquina que entra no cluster k3s como agente, dedicada ao rádio.
 
 > **Depende do seu setup.** O InnovaNetwork leva para o Kubernetes um gNB que **já funciona** na máquina. A
 > preparação do host (kernel, CPUs isoladas, hugepages, VF/DPDK, PTP/GNSS) e os `.yml` do gNB são do seu setup.
-> Referência: [hardware/e810-liteon.md](../hardware/e810-liteon.md).
+> Referência: [hardware/e810-liteon.md](../hardware/e810-liteon.pt-BR.md).
 
 - [1. Como funciona](#1-como-funciona)
 - [2. Arquivos](#2-arquivos)
@@ -141,7 +143,7 @@ lidas pelo painel.
 | Mudou… | Precisa |
 |---|---|
 | um `.yml` | reiniciar o gNB (o pod lê a pasta do host) |
-| o código do OCUDU | commit → `no-ran.sh imagem` → `./ran/ocudu/install.sh` → reiniciar ([tutorial](../tutoriais/07-alterar-o-gnb.md)) |
+| o código do OCUDU | commit → `no-ran.sh imagem` → `./ran/ocudu/install.sh` → reiniciar ([tutorial](../tutorials/07-change-the-gnb.pt-BR.md)) |
 
 <a id="proteção-de-boot"></a>
 ## 8. Proteção de boot
