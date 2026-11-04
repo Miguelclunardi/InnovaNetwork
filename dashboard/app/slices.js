@@ -10,6 +10,8 @@ function slTraffic(t) {
   const rate = (x) => `<span class="sl-rate">↓ ${fmtRate(x.dl)} · ↑ ${fmtRate(x.ul)}</span>`;
   if (t.src === "tun") return `<div>${rate(t)}</div><div class="muted sl-src" title="${esc(t.tun)}: counters of the UE TUN of this PDU session">↓ ${fmtBytes(t.dl_bytes)} · ↑ ${fmtBytes(t.ul_bytes)} <span>in total</span></div>`;
   if (t.src === "radio") return `<div>${rate(t)}</div><div class="muted sl-src" title="the UE is in this slice only, so its radio rate is its traffic in the slice">radio (gNB)</div>`;
+  if (t.src === "slice") return `<div>${rate(t)}</div><div class="muted sl-src" title="UPF total of this slice minus the other UEs in it (measured exactly): this is the traffic of this UE in this slice">from the slice total</div>`;
+  if (t.src === "slice_est") return `<div>≈ ${rate(t)}</div><div class="muted sl-src" title="UPF total of this slice minus the other UEs in it; real UEs are measured on the radio, so this is an estimate">estimate (slice total − others)</div>`;
   if (t.src === "shared") return `<div class="muted sl-src" title="the UE is in 2+ slices and the radio measures the UE, not the session: see the Radio column">split not measured</div>`;
   return "";
 }

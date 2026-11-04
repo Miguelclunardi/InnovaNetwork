@@ -249,8 +249,11 @@ Shows how each network slice is used. It needs nothing extra: it reads what the 
     its `net/dev` every 2 s, and learns which TUN/IP belongs to which IMSI from the UE pod log
     (`TUN interface[uesimtunN, IP] is up`). Nothing is installed or changed in the core or the UE pod.
   - real UEs in one slice only: the radio rate of the UE (gNB), which is its traffic in that slice.
-  - real UEs in two or more slices: shown as "split not measured" (the core keeps no per-UE counters; it would
-    need counting rules in the UPF).
+  - real UEs in two or more slices (e.g. the Telit): the radio measures the whole UE, not each session, so its
+    part of a slice is **the slice total (UPF) minus the other UEs measured in that slice**. Exact when the
+    others are simulated UEs or idle (e.g. the Telit alone in `internet2`); marked "≈ estimate" when real UEs
+    measured by the radio had to be subtracted. Shown as "split not measured" only when two such UEs share a
+    slice.
 - **Radio rate**: the gNB measures per UE, not per slice. A UE with sessions in two slices (e.g. the Telit with
   `internet` and `internet2`) shows the same radio rate in both rows, marked **shared**; the UPF numbers are the
   ones split per slice.

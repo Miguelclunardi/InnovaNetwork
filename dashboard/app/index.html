@@ -215,8 +215,9 @@
       <div class="tablewrap"><table id="sl-matrix"></table></div>
       <div class="muted" style="margin-top:6px;font-size:12px">Each cell is the PDU session of the UE in that slice (IP).
         Under it, the traffic of the UE in that slice: exact for simulated UEs (counters of the UE TUN of the
-        session); for a real UE, its radio rate when it is in that slice only. The radio rate belongs to the UE, not to
-        a session, so for a UE in two slices the split is not measured.</div></div>
+        session); for a real UE, its radio rate when it is in that slice only. For a real UE in two slices (the radio
+        measures the UE, not the session), its part of each slice is the slice total minus the other UEs in it:
+        exact when the others are simulated or idle, an estimate (≈) otherwise.</div></div>
     <div class="card" style="margin-top:12px"><h2>Refused session requests</h2><div id="sl-refused"></div></div>
     <p class="note">Traffic per slice is read on the UPF tunnel of each slice (one DNN per slice: <code>ogstun</code>,
       <code>ogstun2</code>…), so it is exact per slice. The slice list is read from the running core (AMF/UPF configuration, every 30 s).</p>

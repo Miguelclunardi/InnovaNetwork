@@ -1593,6 +1593,16 @@ def slices_view(window):
                 dlb, ulb = add(dlb, i.get("tx_bytes")), add(ulb, i.get("rx_bytes"))
                 sdl = [add(a, b) for a, b in zip(sdl, series.get(t + "_tx") or [None] * len(sdl))]
                 sul = [add(a, b) for a, b in zip(sul, series.get(t + "_rx") or [None] * len(sul))]
+        # A real UE in 2+ slices: the radio cannot split its traffic, but the slice total can. Its share of this
+        # slice = UPF total of the slice - what is measured for the other UEs in it. Exact when the others are
+        # simulated UEs (TUN counters) or idle; an estimate when real UEs measured by the radio are subtracted.
+        rest = [u for u in ues if u["traffic"]["src"] == "shared"]
+        if len(rest) == 1 and dl is not None and ul is not None:
+            others = [u["traffic"] for u in ues if u["traffic"]["src"] in ("tun", "radio")]
+            est = any(t["src"] == "radio" and ((t.get("dl") or 0) + (t.get("ul") or 0)) > 0 for t in others)
+            rest[0]["traffic"] = {"src": "slice_est" if est else "slice",
+                                  "dl": max(dl - sum(t.get("dl") or 0 for t in others), 0.0),
+                                  "ul": max(ul - sum(t.get("ul") or 0 for t in others), 0.0)}
         out.append({"key": s["key"], "sst": s["sst"], "sd": s["sd"], "dnns": s["dnns"],
                     "dnn": ", ".join(names) or "(no DNN)",
                     "cidr": ", ".join(x["cidr"] for x in s["dnns"]), "upf_iface": ", ".join(tuns),
