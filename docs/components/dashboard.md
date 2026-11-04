@@ -19,7 +19,7 @@ place: radio, RU, machines and **the active core** (Open5GS or free5GC — see
 | **History** | **persistent** metrics (radio 1 s, core, machines, energy, events) of any period; **experiments** ("● Record experiment" button at the top) with name, notes and a snapshot of the setup; side-by-side **comparison** of 2+ experiments (KPIs with the best highlighted + overlaid charts); CSV export | SQLite in `/var/lib/open5gs-k3s/dashboard` (`DASHBOARD_PERSIST=true`) |
 | **Settings** | edits `config.env` (administrator password): fields per section with the file's own explanation, diff before saving, installer validation, backup and restore, and the command to apply | `config.env` of the core machine |
 | **Core** | always: gNBs, registered UEs, sessions, UE traffic at the UPF per DNN (N6) and on the gNB link (N3), CPU/memory/threads of each NF, errors/warnings per NF, UPF interfaces. Optional: NF Prometheus metrics | host `/proc` (`open5gs-*d` processes and UPF interfaces) + logs; Prometheus only with `OPEN5GS_METRICS=true` |
-| **Slices** | one card per slice (DNN, SST/SD, sessions, UPF downlink/uplink now, share of the traffic, totals); DL/UL charts per slice; a **UE × slice** table (IP of each session, UEs in 2+ slices marked, radio rate per UE); refused session requests per slice (e.g. phones asking for `ims`) | `SLICES` of `config.env` + AMF/SMF logs + UPF tunnel counters (host `/proc`) |
+| **Slices** | one card per slice (DNN, SST/SD, sessions, UPF downlink/uplink now, share of the traffic, totals); DL/UL charts per slice; a **UE × slice** table (IP of each session, UEs in 2+ slices marked, radio rate per UE); refused session requests per slice (e.g. phones asking for `ims`) | running core configuration (AMF/UPF or SMF ConfigMaps) + AMF/SMF logs + UPF tunnel counters (host `/proc`) |
 
 Address: `http://<core-IP>:30998` (`DASHBOARD_NODEPORT`). No password by default; with `DASHBOARD_PASSWORD`, the
 browser asks for user `admin` and the password.
@@ -231,9 +231,12 @@ the Core tab explains how to enable it, and the Overview keeps showing gNBs, UEs
 
 Shows how each network slice is used. It needs nothing extra: it reads what the dashboard already collects.
 
-- **Which slices exist**: `SLICES` of `config.env` (the installer passes them to the pod as the `SLICES`
-  variable, `SST:SD:DNN:CIDR:TUN;…`). Each slice has its own DNN and, in Open5GS, its own UPF tunnel
-  (`ogstun`, `ogstun2`…).
+- **Which slices exist**: read from the **running core**, every 30 s — nothing to reinstall when the core
+  configuration changes. Open5GS: the S-NSSAIs of the AMF ConfigMap (`plmn_support`) paired, in order, with the
+  DNN/subnet/tunnel of the UPF ConfigMap (`session`), the same order the installer writes them from `SLICES`.
+  free5GC: slice → DNN → pool from the SMF ConfigMap (`sNssaiUpfInfos`). The dashboard may read only those
+  ConfigMaps (RBAC `resourceNames`). If it cannot (e.g. installed before this change), it uses `SLICES` of
+  `config.env` and says so at the top of the tab.
 - **Who is in each slice**: the PDU sessions taken from the SMF log (IMSI, DNN, IP). The AMF log line
   `UE SUPI[imsi-…] DNN[…] S_NSSAI[SST:… SD:0x…]` gives the slice the UE asked for each DNN; if it differs from the
   slice configured for that DNN the table shows **other S-NSSAI**.

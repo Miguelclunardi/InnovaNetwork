@@ -349,7 +349,9 @@ def dashboard_rbac():
     rules = [{"apiGroups": [""], "resources": ["pods", "pods/log"], "verbs": ["get", "list", "watch"]},
              {"apiGroups": [""], "resources": ["pods"], "verbs": ["delete"]},
              {"apiGroups": ["apps"], "resources": ["deployments"], "verbs": ["get", "list", "watch"]},
-             {"apiGroups": ["apps"], "resources": ["deployments/scale"], "verbs": ["get", "patch", "update"]}]
+             {"apiGroups": ["apps"], "resources": ["deployments/scale"], "verbs": ["get", "patch", "update"]},
+             # Slices tab: slice -> DNN -> pool from the running SMF configuration (this ConfigMap only)
+             {"apiGroups": [""], "resources": ["configmaps"], "resourceNames": ["smf-config"], "verbs": ["get"]}]
     return [{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role",
              "metadata": {"name": "innovanetwork-dashboard", "namespace": NS}, "rules": rules},
             {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding",

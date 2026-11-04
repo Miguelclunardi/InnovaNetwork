@@ -705,6 +705,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+  # Slices tab: the slices that exist come from the running AMF and UPF configuration (these two only)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["${OPEN5GS_RELEASE}-amf", "${OPEN5GS_RELEASE}-upf"]
+    verbs: ["get"]
 ---
 # Control tab (DASHBOARD_CONTROL): scale Deployments and delete pods. Empty when off.
 apiVersion: rbac.authorization.k8s.io/v1

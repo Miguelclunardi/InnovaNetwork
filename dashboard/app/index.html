@@ -217,7 +217,7 @@
         The radio rate belongs to the UE, not to a session: a UE in two slices shares it between them.</div></div>
     <div class="card" style="margin-top:12px"><h2>Refused session requests</h2><div id="sl-refused"></div></div>
     <p class="note">Traffic per slice is read on the UPF tunnel of each slice (one DNN per slice: <code>ogstun</code>,
-      <code>ogstun2</code>…), so it is exact per slice. Slices come from <code>SLICES</code> in <code>config.env</code>.</p>
+      <code>ogstun2</code>…), so it is exact per slice. The slice list is read from the running core (AMF/UPF configuration, every 30 s).</p>
   </section>
 
   <section id="tab-ru" class="tab">

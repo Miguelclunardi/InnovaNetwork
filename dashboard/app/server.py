@@ -97,13 +97,13 @@ PERSIST_CHUNK = int(_env("PERSIST_CHUNK_SECONDS", "60"))
 HISTORY = None
 WEBUI_PORT = _env("WEBUI_PORT")      # NodePort of the Open5GS WebUI (empty = no Subscribers sub-tab)
 UPF_DEVS = dict(kv.split("=", 1) for kv in _env("UPF_DEVS").split(";") if "=" in kv)
-# Slices from config.env: "SST:SD:DNN:CIDR:TUN;..." (one DNN per slice, so one UPF tunnel per slice in Open5GS)
-SLICES = []
+# Slices from config.env ("SST:SD:DNN:CIDR:TUN;..."): only a fallback; the Slices tab reads the running core
+SLICES_ENV = []
 for _s in _env("SLICES").split(";"):
     _f = _s.split(":")
     if len(_f) >= 4 and _f[0].isdigit():
-        SLICES.append({"key": "%d-%s" % (int(_f[0]), _f[1].lower()), "sst": int(_f[0]), "sd": _f[1].lower(),
-                       "dnn": _f[2], "cidr": _f[3], "tun": _f[4] if len(_f) > 4 else ""})
+        SLICES_ENV.append({"sst": int(_f[0]), "sd": _f[1].lower(),
+                           "dnns": [{"dnn": _f[2], "cidr": _f[3], "tun": _f[4] if len(_f) > 4 else ""}]})
 HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
 # MiEnergy energy meter (/Data page with "key": number). It measures the ENERGY_METER_HOST machine.
 ENERGY_METER_URL = _env("ENERGY_METER_URL")          # e.g. http://192.168.68.105/Data (empty = off)
@@ -1368,12 +1368,114 @@ def ue_identity(rnti):
             "kind": "ueransim" if imsi in SIM_IMSIS else "real", "sessions": ips}
 
 
+def _yaml_items(text, key):
+    """Items of a YAML list `key:` (Open5GS configs) as dicts of scalars. Small reader: enough for
+    plmn_support/s_nssai and session lists, which hold only scalars (no PyYAML in the image)."""
+    lines = [ln.split("#", 1)[0].rstrip() for ln in text.splitlines()]
+    lines = [ln for ln in lines if ln.strip()]
+    out = []
+    for i, ln in enumerate(lines):
+        if ln.strip() != key + ":":
+            continue
+        ind = len(ln) - len(ln.lstrip())
+        cur = None
+        for ln2 in lines[i + 1:]:
+            ind2 = len(ln2) - len(ln2.lstrip())
+            st = ln2.strip()
+            if ind2 < ind or (ind2 == ind and not st.startswith("-")):
+                break
+            if st.startswith("-"):
+                cur = {}
+                out.append(cur)
+                st = st[1:].strip()
+            m = re.match(r"([A-Za-z_]+):\s*(.*)$", st)
+            if m and cur is not None and m.group(2) != "":
+                cur.setdefault(m.group(1), m.group(2).strip().strip('"\''))
+    return out
+
+
+class SliceCatalog:
+    """The slices that exist in the running core, read from its ConfigMaps every 30 s:
+    Open5GS: S-NSSAIs of the AMF (plmn_support) + DNN/subnet/tunnel of the UPF (session), paired in order
+    (the installer writes both from SLICES, same order); free5GC: slice -> DNN -> pool of the SMF.
+    If the ConfigMaps cannot be read, SLICES of config.env (given at install) is used."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cache = {}     # core name -> (time, slices, source, error)
+
+    def _open5gs(self, d):
+        ns, rel = d["namespace"], d["release"] or "open5gs"
+        amf = K8S.get_json("/api/v1/namespaces/%s/configmaps/%s-amf" % (ns, rel)).get("data", {})
+        upf = K8S.get_json("/api/v1/namespaces/%s/configmaps/%s-upf" % (ns, rel)).get("data", {})
+        amf_y = next(iter(amf.values()), "")
+        upf_y = next(iter(upf.values()), "")
+        nssai, seen = [], set()
+        for x in _yaml_items(amf_y, "s_nssai"):
+            if str(x.get("sst", "")).isdigit():
+                k = (int(x["sst"]), str(x.get("sd", "")).lower())
+                if k not in seen:
+                    seen.add(k)
+                    nssai.append(k)
+        sess = [x for x in _yaml_items(upf_y, "session") if x.get("subnet")]
+        slices = [{"sst": sst, "sd": sd, "dnns": []} for sst, sd in nssai]
+        for i, x in enumerate(sess):
+            dnn = {"dnn": x.get("dnn", ""), "cidr": x["subnet"], "tun": x.get("dev", "ogstun")}
+            if i < len(slices):
+                slices[i]["dnns"].append(dnn)
+            elif slices:
+                slices[-1]["dnns"].append(dnn)   # more DNNs than slices: kept with the last one
+        return slices
+
+    def _free5gc(self, d):
+        cm = K8S.get_json("/api/v1/namespaces/%s/configmaps/smf-config" % d["namespace"]).get("data", {})
+        cfg = json.loads(next(iter(cm.values()), "{}"))
+        nodes = (((cfg.get("configuration") or {}).get("userplaneInformation") or {}).get("upNodes") or {})
+        slices = {}
+        for n in nodes.values():
+            for si in n.get("sNssaiUpfInfos") or []:
+                sn = si.get("sNssai") or {}
+                k = (int(sn.get("sst", 0)), str(sn.get("sd", "")).lower())
+                e = slices.setdefault(k, {"sst": k[0], "sd": k[1], "dnns": []})
+                for di in si.get("dnnUpfInfoList") or []:
+                    if di.get("dnn") not in [x["dnn"] for x in e["dnns"]]:
+                        e["dnns"].append({"dnn": di.get("dnn", ""), "tun": "upfgtp",
+                                          "cidr": ", ".join(p.get("cidr", "") for p in di.get("pools") or [])})
+        return list(slices.values())
+
+    def get(self):
+        name = CORES.active()
+        d = CORES.defs[name]
+        now = time.time()
+        with self.lock:
+            c = self.cache.get(name)
+            if c and now - c[0] < 30:
+                return c[1], c[2], c[3]
+        err = None
+        try:
+            slices = self._free5gc(d) if d["kind"] == "free5gc" else self._open5gs(d)
+            src = "core"
+            if not slices:
+                raise ValueError("no slices in the core configuration")
+        except Exception as e:  # noqa: BLE001 — e.g. no RBAC yet (old install): fall back to config.env
+            slices, src, err = [dict(x, dnns=[dict(y) for y in x["dnns"]]) for x in SLICES_ENV], "config.env", str(e)
+        for x in slices:
+            x["key"] = "%d-%s" % (x["sst"], x["sd"])
+        with self.lock:
+            self.cache[name] = (now, slices, src, err)
+        return slices, src, err
+
+
+SLICE_CATALOG = SliceCatalog()
+
+
 def slices_view(window):
-    """Slices tab: per slice, the UEs with a session in it, the UPF tunnel traffic (exact per slice in Open5GS:
-    one DNN and one tunnel per slice) and the refused session requests. The radio rate is per UE, not per slice:
-    a UE with sessions in two slices shows it in both, marked as shared."""
+    """Slices tab: per slice (as configured in the running core), the UEs with a session in it, the UPF tunnel
+    traffic (exact per slice in Open5GS: one tunnel per DNN) and the refused session requests. The radio rate is
+    per UE, not per slice: a UE with sessions in two slices shows it in both, marked as shared."""
     cdef = CORES.cur_def()
     st = CORES.cur().state
+    slices, source, source_err = SLICE_CATALOG.get()
     with st.lock:
         sessions = dict(st.sessions)
         sess_slice = dict(st.sess_slice)
@@ -1392,36 +1494,50 @@ def slices_view(window):
             upf = {k: dict(v) for k, v in COREPROCS.ifaces.items()}
         series = COREPROCS.traffic.window(time.time() - window)
     shared_tun = cdef["kind"] == "free5gc"   # free5GC: one gtp5g device (upfgtp) for every DNN
+
+    def add(a, b):
+        return b if a is None else a if b is None else a + b
+
     out = []
     known = set()
-    for s in SLICES:
-        known.add(s["dnn"])
-        tun = "upfgtp" if shared_tun else s["tun"]
+    for s in slices:
+        names = [x["dnn"] for x in s["dnns"]]
+        known.update(names)
+        tuns = sorted({x["tun"] for x in s["dnns"] if x.get("tun")}) or (["upfgtp"] if shared_tun else [])
         ues = []
         for (imsi, dnn), x in sorted(sessions.items()):
-            if dnn != s["dnn"]:
+            if dnn not in names:
                 continue
             asked = sess_slice.get((imsi, dnn))
             r = radio.get(imsi) or {}
-            ues.append({"imsi": imsi, "name": UE_NAMES.get(imsi, ""), "ipv4": x.get("ipv4"), "since": x.get("ts"),
-                        "kind": "ueransim" if imsi in SIM_IMSIS else "real",
+            ues.append({"imsi": imsi, "name": UE_NAMES.get(imsi, ""), "dnn": dnn, "ipv4": x.get("ipv4"),
+                        "since": x.get("ts"), "kind": "ueransim" if imsi in SIM_IMSIS else "real",
                         "slices": per_imsi[imsi], "slice_mismatch": bool(asked and asked != s["key"]),
                         "radio_dl": r.get("dl"), "radio_ul": r.get("ul"), "on_radio": imsi in radio})
-        i = upf.get(tun) or {}
-        out.append(dict(s, ues=ues, sessions=len(ues),
-                        rejected=sum(n for (k, d), n in rej.items() if k == s["key"] and d == s["dnn"]),
-                        upf_iface=tun, upf_shared=shared_tun,
-                        dl_bps=i.get("tx_bps"), ul_bps=i.get("rx_bps"),
-                        dl_bytes=i.get("tx_bytes"), ul_bytes=i.get("rx_bytes"),
-                        series={"t": series.get("t", []), "dl": series.get(tun + "_tx", []),
-                                "ul": series.get(tun + "_rx", [])}))
-    # Refused requests for a DNN that is not one of the slices (e.g. "ims" asked by phones)
+        dl = ul = dlb = ulb = None
+        sdl, sul = [None] * len(series.get("t", [])), [None] * len(series.get("t", []))
+        if not shared_tun:
+            for t in tuns:
+                i = upf.get(t) or {}
+                dl, ul = add(dl, i.get("tx_bps")), add(ul, i.get("rx_bps"))
+                dlb, ulb = add(dlb, i.get("tx_bytes")), add(ulb, i.get("rx_bytes"))
+                sdl = [add(a, b) for a, b in zip(sdl, series.get(t + "_tx") or [None] * len(sdl))]
+                sul = [add(a, b) for a, b in zip(sul, series.get(t + "_rx") or [None] * len(sul))]
+        out.append({"key": s["key"], "sst": s["sst"], "sd": s["sd"], "dnns": s["dnns"],
+                    "dnn": ", ".join(names) or "(no DNN)",
+                    "cidr": ", ".join(x["cidr"] for x in s["dnns"]), "upf_iface": ", ".join(tuns),
+                    "ues": ues, "sessions": len(ues),
+                    "rejected": sum(n for (k, d), n in rej.items() if k == s["key"] and d in names),
+                    "upf_shared": shared_tun, "dl_bps": dl, "ul_bps": ul, "dl_bytes": dlb, "ul_bytes": ulb,
+                    "series": {"t": series.get("t", []), "dl": sdl, "ul": sul}})
+    # Refused requests for a DNN that is not in any slice (e.g. "ims" asked by phones)
     other = collections.Counter()
     for (k, d), n in rej.items():
         if d not in known:
             other["%s|%s" % (k, d)] += n
     refused = [{"slice": k.split("|")[0], "dnn": k.split("|")[1], "count": n} for k, n in other.most_common()]
     return {"core": CORES.active(), "core_label": cdef["label"], "upf_shared": shared_tun, "slices": out,
+            "source": source, "source_error": source_err,
             "refused_other": refused, "radio_source": bool(GNBLOG.last_push), "now": time.time()}
 
 

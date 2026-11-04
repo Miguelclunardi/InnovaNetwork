@@ -9,10 +9,13 @@ const Slices = {
   async refresh() {
     const d = await api("api/slices?window=" + $("#sl-window").value);
     const sl = d.slices || [];
-    $("#sl-sub").textContent = `${d.core_label} · ${sl.length} slice(s)` +
-      (d.upf_shared ? " · this core uses one UPF device for every DNN: traffic per slice is not available" : "");
+    const parts = [esc(d.core_label), `${sl.length} slice(s)`,
+      d.source === "core" ? "read from the running core" : "from config.env (core configuration not readable: reinstall the dashboard)"];
+    if (d.upf_shared) parts.push("this core uses one UPF device for every DNN: traffic per slice is not available");
+    $("#sl-sub").innerHTML = parts.map((x) => `<span>${x}</span>`).join(" · ");
+    $("#sl-sub").title = d.source_error || "";
     if (!sl.length) {
-      $("#sl-kpis").innerHTML = '<div class="muted">No slices received (SLICES env empty: reinstall the dashboard).</div>';
+      $("#sl-kpis").innerHTML = '<div class="muted">No slices found in the core configuration.</div>';
       return;
     }
 
@@ -20,8 +23,9 @@ const Slices = {
     const tot = sl.reduce((a, s) => a + (s.dl_bps || 0) + (s.ul_bps || 0), 0);
     $("#sl-kpis").innerHTML = sl.map((s, i) => {
       const share = tot ? (100 * ((s.dl_bps || 0) + (s.ul_bps || 0)) / tot) : null;
-      const sub = d.upf_shared ? `${s.sessions} session(s) · ${esc(s.cidr)}`
-        : `↑ ${fmtRate(s.ul_bps)} · ${s.sessions} session(s) · ${share == null ? "no traffic" : fmt(share, 0) + "% of the traffic"}`;
+      const nses = `<span>${s.sessions}</span> <span>session(s)</span>`;
+      const sub = d.upf_shared ? `${nses} · ${esc(s.cidr)}`
+        : `↑ ${fmtRate(s.ul_bps)} · ${nses} · ${share == null ? "<span>no traffic</span>" : fmt(share, 0) + "% <span>of the traffic</span>"}`;
       return `<div class="kpi" style="border-top:3px solid ${colorFor(i)}">
         <div class="label">${esc(s.dnn)} · ${esc(sliceName(s))}</div>
         <div class="value">${d.upf_shared ? s.sessions : "↓ " + fmtRate(s.dl_bps)}</div>
@@ -54,7 +58,8 @@ const Slices = {
         const c = u.cells[i];
         if (!c) return '<td class="muted">–</td>';
         const warn = c.slice_mismatch ? ' <span class="tag warn" title="the AMF log shows another S-NSSAI for this DNN">other S-NSSAI</span>' : "";
-        return `<td><span class="tag ok">✓</span> ${esc(c.ipv4 || "")}${warn}</td>`;
+        const dnn = s.dnns && s.dnns.length > 1 ? ` <span class="muted">${esc(c.dnn)}</span>` : "";
+        return `<td><span class="tag ok">✓</span> ${esc(c.ipv4 || "")}${dnn}${warn}</td>`;
       }).join("");
       const radio = u.on_radio ? `${fmtRate(u.radio_dl)} / ${fmtRate(u.radio_ul)}${n > 1 ? ' <span class="tag" title="the radio rate is per UE: it is split between its slices">shared</span>' : ""}`
         : '<span class="muted">' + (u.kind === "ueransim" ? "simulated (no gNB radio)" : "not on the radio") + "</span>";
