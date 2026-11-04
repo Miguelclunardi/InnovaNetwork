@@ -4,6 +4,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
 
 ## [Unreleased]
 
+### Added
+- `scripts/ue-traffic.sh`: iperf3 traffic on all UERANSIM UEs at the same time (download, upload or both),
+  with per-UE throughput; no internet needed.
+
 ### Changed
 - **English everywhere:** documentation, commands, script output and code comments are in English. Every
   document keeps a Portuguese translation (`*.pt-BR.md`). Docs renamed to English paths (`docs/architecture.md`,

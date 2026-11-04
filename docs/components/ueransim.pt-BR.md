@@ -85,6 +85,23 @@ RESULTADO: 7 verificações OK, 0 falhas
 O ping ao gateway testa o plano de usuário (N3) sem depender da internet; o ping externo testa N6/NAT. `-v`
 mostra os logs do AMF, SMF, UPF, gNB e UE em caso de falha. Código de saída 0/1, útil para automação.
 
+### Teste de tráfego em todos os UEs
+
+`./scripts/ue-traffic.sh` gera tráfego em **todos** os UEs ao mesmo tempo, com iperf3: um servidor por UE na
+máquina do core (portas 5301, 5302, …) e um cliente em cada `uesimtunN`. O tráfego atravessa todo o plano de
+usuário (UE → gNB → UPF → N6 → máquina do core) e não depende da internet. Mostra a vazão de cada UE a cada
+2 s e um `TOTAL` por UE no fim; acompanhe a aba **Core** (tráfego do UPF) enquanto roda.
+
+```bash
+./scripts/ue-traffic.sh 60                 # 60 s de download, 20 Mbit/s por UE
+./scripts/ue-traffic.sh 60 up              # upload (ou: both)
+TRAFFIC_RATE=50M ./scripts/ue-traffic.sh   # outra taxa por UE
+```
+
+Precisa do `iperf3` na máquina do core (`sudo apt install iperf3`); a imagem do UE já tem. Servidores públicos de
+teste de velocidade não são usados de propósito: todos os UEs saem pelo mesmo IP público (NAT) e são bloqueados
+(HTTP 429).
+
 ## 5. No painel
 
 - **Visão geral**: os UEs simulados aparecem marcados como **UERANSIM**, separados dos SIMs reais.

@@ -6,6 +6,10 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- `scripts/ue-traffic.sh`: tráfego iperf3 em todos os UEs do UERANSIM ao mesmo tempo (download, upload ou os
+  dois), com a vazão de cada UE; não precisa de internet.
+
 ### Alterado
 - **Tudo em inglês:** documentação, comandos, saída dos scripts e comentários do código. Cada documento mantém
   uma tradução em português (`*.pt-BR.md`). Documentos renomeados para caminhos em inglês (`docs/architecture.md`,

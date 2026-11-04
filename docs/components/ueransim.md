@@ -83,6 +83,22 @@ RESULT: 7 checks OK, 0 failures
 The ping to the gateway tests the user plane (N3) without depending on the internet; the external ping tests
 N6/NAT. `-v` shows the AMF, SMF, UPF, gNB and UE logs on failure. Exit code 0/1, useful for automation.
 
+### Traffic test on all UEs
+
+`./scripts/ue-traffic.sh` generates traffic on **all** UEs at the same time, with iperf3: one server per UE
+on the core machine (ports 5301, 5302, …) and one client on each `uesimtunN`. The traffic crosses the whole
+user plane (UE → gNB → UPF → N6 → core machine) and does not depend on the internet. It prints each UE's
+throughput every 2 s and a `TOTAL` per UE at the end; watch the **Core** tab (UPF traffic) while it runs.
+
+```bash
+./scripts/ue-traffic.sh 60                 # 60 s download, 20 Mbit/s per UE
+./scripts/ue-traffic.sh 60 up              # upload (or: both)
+TRAFFIC_RATE=50M ./scripts/ue-traffic.sh   # another rate per UE
+```
+
+Needs `iperf3` on the core machine (`sudo apt install iperf3`); the UE image already has it. Public speed-test
+servers are not used on purpose: all UEs leave through the same public IP (NAT) and get blocked (HTTP 429).
+
 ## 5. In the dashboard
 
 - **Overview**: the simulated UEs show marked as **UERANSIM**, separate from the real SIMs.
