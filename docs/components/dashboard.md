@@ -351,6 +351,11 @@ it the oldest blocks are deleted). The pod writes its buffer when stopped (SIGTE
 You can also view **any period** (1 h, 24 h, 7 days, custom) and export CSV (`timestamp, series, IMSI, field,
 value`). Deleting an experiment (only the marker; the data stays) needs the administrator password.
 
+Reading a period uses little memory, however long it is: the stored blocks are read in batches and folded into the
+charts and KPIs as they go (the CSV is also streamed). Means, minimums, maximums, counts and BLER are exact; p50
+and p95 come from a sample of up to 20000 values per field, so they are exact for periods up to ~5.5 h of 1 s
+data and a close estimate beyond that.
+
 ## Settings tab (editing `config.env`)
 
 Enabled with `DASHBOARD_CONFIG_EDIT=true` (default in the config of this repository) +
