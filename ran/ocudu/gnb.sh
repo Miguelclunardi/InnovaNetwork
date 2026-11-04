@@ -8,7 +8,6 @@
 #    ./ran/ocudu/gnb.sh log [-f]      gNB output (the full log is /tmp/gnb.log on the node)
 #    ./ran/ocudu/gnb.sh configs       .yml files available on the node and the AMF of each
 #
-#  The pt-BR commands still work: iniciar = start, parar = stop, estado = status.
 #  The native ocudu-gnb@ service must be stopped: both use the same RU and VF
 #  (the pod refuses to start if a gnb is running on the host).
 # =============================================================================
@@ -34,7 +33,7 @@ state() {
 }
 
 case "${1:-}" in
-  start|iniciar)
+  start)
     cfg="${2:-$(cur_cfg)}"
     ssh -o BatchMode=yes "${OCUDU_NODE_SSH}" "test -r '${OCUDU_CONFIG_DIR}/${cfg}.yml'" \
       || die "${cfg}.yml does not exist in ${OCUDU_CONFIG_DIR} on the node"
@@ -49,17 +48,17 @@ case "${1:-}" in
     state
     echo "follow it: $0 log -f"
     ;;
-  stop|parar)
+  stop)
     k scale deploy/ocudu-gnb --replicas=0 >/dev/null
     echo "stopping…"
     k wait --for=delete pod -l app.kubernetes.io/name=ocudu-gnb --timeout=60s >/dev/null 2>&1 || true
     state
     ;;
-  status|estado)  state ;;
+  status)  state ;;
   log)     shift; k logs deploy/ocudu-gnb --tail=200 "$@" ;;
   configs)
     ssh -o BatchMode=yes "${OCUDU_NODE_SSH}" "cd '${OCUDU_CONFIG_DIR}' && for f in *.yml; do
       a=\$(awk '/^cu_cp:/{c=1} c&&/^ *addr:/{print \$2; exit}' \"\$f\"); [ -n \"\$a\" ] && printf '%-40s AMF %s\n' \"\${f%.yml}\" \"\$a\"; done; true"
     ;;
-  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

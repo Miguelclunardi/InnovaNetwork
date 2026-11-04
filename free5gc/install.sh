@@ -13,7 +13,6 @@
 #                                     the keys go straight from one database to the other, unseen)
 #         ./free5gc/install.sh --stopped      (installs and leaves everything at 0 replicas)
 #         ./free5gc/install.sh --no-ueransim
-#  The Portuguese option names of earlier versions still work.
 # =============================================================================
 set -Eeuo pipefail
 
@@ -26,11 +25,11 @@ DRY=false; ONLY_SUBS=false; IMPORT=false; STOPPED=false; NO_UERANSIM=false
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY=true ;;
-    --subscribers|--assinantes) ONLY_SUBS=true ;;
-    --import-open5gs|--importar-open5gs) IMPORT=true; ONLY_SUBS=true ;;
-    --stopped|--parado) STOPPED=true ;;
-    --no-ueransim|--sem-ueransim) NO_UERANSIM=true ;;
-    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --subscribers) ONLY_SUBS=true ;;
+    --import-open5gs) IMPORT=true; ONLY_SUBS=true ;;
+    --stopped) STOPPED=true ;;
+    --no-ueransim) NO_UERANSIM=true ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option: $a" ;;
   esac
 done

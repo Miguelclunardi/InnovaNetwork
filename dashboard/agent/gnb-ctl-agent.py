@@ -231,6 +231,7 @@ def k8s_status(st):
         journal = kubectl("logs", name, "--tail=25", timeout=10).splitlines()[-25:]
     except (OSError, subprocess.TimeoutExpired):
         journal = []
+    # "NÃO liga sozinho": boot message of gNB pods created before 2026-11-03 (drop it once the pod is recreated)
     waiting = any("NÃO liga sozinho" in l or "does NOT start by itself" in l for l in journal) and not mine
     st["k8s"].update(pod=name, phase=pod["status"].get("phase"), restarts=cs.get("restartCount", 0),
                      waiting_boot=waiting, node=pod["spec"].get("nodeName"))

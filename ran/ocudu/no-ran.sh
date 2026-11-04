@@ -14,7 +14,6 @@
 #                                                 the join.env of "prepare"; the token is deleted at the end)
 #    sudo ~/innovanetwork-ran/no-ran.sh leave     leaves the cluster (removes the k3s agent)
 #         ~/innovanetwork-ran/no-ran.sh status    shows what is installed (no sudo)
-#  The Portuguese names of earlier versions (imagem, importar, entrar, sair, estado) still work.
 #
 #  Does not touch: PTP, VF/DPDK, XDP, hugepages, isolated CPUs, netplan, the ocudu-gnb@ service.
 # =============================================================================
@@ -171,10 +170,10 @@ do_state() {
 }
 
 case "${1:-}" in
-  image|imagem)     do_image ;;
-  import|importar)  need_root import; do_import ;;
-  join|entrar)      do_join ;;
-  leave|sair)       do_leave ;;
-  status|estado)    do_state ;;
-  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  image)     do_image ;;
+  import)    need_root import; do_import ;;
+  join)      do_join ;;
+  leave)     do_leave ;;
+  status)    do_state ;;
+  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

@@ -15,7 +15,7 @@
 #    6. ./ran/ocudu/gnb.sh start [yml]         starts the gNB (the native service must be stopped)
 #
 #  Other options:  --dry-run (generates and validates on the server; does not apply) · --remove (deletes
-#  the namespace). The Portuguese names of earlier versions (copiar, preparar, --remover) still work.
+#  the namespace).
 # =============================================================================
 set -Eeuo pipefail
 OC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,11 +123,11 @@ do_deploy() {
 }
 
 case "${1:-}" in
-  copy|copiar)        do_copy ;;
-  prepare|preparar)   do_prepare ;;
+  copy)        do_copy ;;
+  prepare)     do_prepare ;;
   --dry-run)          do_deploy true ;;
-  --remove|--remover) k delete namespace "${OCUDU_NAMESPACE}" --ignore-not-found ;;
+  --remove)    k delete namespace "${OCUDU_NAMESPACE}" --ignore-not-found ;;
   "")                 do_deploy false ;;
-  -h|--help)          sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help)          sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)                  die "unknown option: $1 (see --help)" ;;
 esac

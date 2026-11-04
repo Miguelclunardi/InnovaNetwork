@@ -14,10 +14,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
   were removed (they stay in the git history, up to commit `7ee35ad`).
 - **Dashboard in English or Portuguese:** EN/PT button at the top (or `?lang=pt` / `?lang=en`); translations in
   `dashboard/i18n/pt.json`.
-- `ran/ocudu/gnb.sh`: commands `start`/`stop`/`status` (the Portuguese `iniciar`/`parar`/`estado` still work).
+- `ran/ocudu/gnb.sh`: commands `start`/`stop`/`status` (**breaking:** `iniciar`/`parar`/`estado` were removed).
 - State codes sent by the dashboard API are in English (`running`/`stopped`/`starting`/`stopping`; GPS
   `locked`/`searching`/`adjusting`/`unlocked`/`stalled`; UE `registered`/`deregistered`).
-- English option names, with the Portuguese ones kept as aliases: `free5gc/install.sh --subscribers`,
+- English option names (**breaking:** the Portuguese names were removed): `free5gc/install.sh --subscribers`,
   `--import-open5gs`, `--stopped`, `--no-ueransim`; `ran/ocudu/install.sh copy|prepare|--remove`;
   `ran/ocudu/no-ran.sh image|import|join|leave|status`. Script prefixes are now `[warn]` and `[error]`.
 - The Open5GS and UERANSIM values hashes ignore comments, so editing a comment no longer recreates pods.

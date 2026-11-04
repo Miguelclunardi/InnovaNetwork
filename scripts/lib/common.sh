@@ -446,11 +446,11 @@ render_open5gs_values() {
     if [[ -n "${MONGODB_IMAGE_REPOSITORY}" ]]; then
       echo "global:"
       echo "  security:"
-      echo "    allowInsecureImages: true   # imagem MongoDB customizada"
+      echo "    allowInsecureImages: true   # custom MongoDB image"
     fi
     echo "populate:"
     echo "  enabled: true"
-    echo "  initCommands: []              # assinantes via scripts/subscribers.sh (idempotente)"
+    echo "  initCommands: []              # subscribers through scripts/subscribers.sh (idempotent)"
     echo "mongodb:"
     echo "  persistence:"
     echo "    enabled: $(is_true "${MONGODB_PERSISTENCE}" && echo true || echo false)"

@@ -307,7 +307,7 @@ function gpsInfo(g, ptp) {
     case "locked": case "travado": return { v: ptpOk ? "GPS locked · PTP ok" : "GPS locked · PTP stopped", s: sub, c: ptpOk ? "ok" : "warn" };
     case "searching": case "procurando": return { v: "GPS searching for satellites", s: "ts2phc has no valid GPS time: wait before starting the gNB", c: "warn" };
     case "adjusting": case "unlocked": case "ajustando": case "sem_trava": return { v: "GPS adjusting", s: sub, c: "warn" };
-    case "stalled": case "parado": return { v: "ts2phc silent", s: sub, c: "err" };
+    case "stalled": return { v: "ts2phc silent", s: sub, c: "err" };
     default: return { v: "GPS no data", s: g.line || "", c: "" };
   }
 }

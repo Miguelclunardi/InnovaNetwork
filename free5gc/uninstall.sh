@@ -11,7 +11,7 @@ F5_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${F5_DIR}/free5gc.env"
 if [[ "${1:-}" != "--sim" ]]; then
   read -r -p "Delete the namespace ${F5_NAMESPACE} (free5GC and its subscribers)? [y/N] " r
-  [[ "${r,,}" == [ys]* ]] || { echo "nothing done"; exit 0; }
+  [[ "${r,,}" == y* ]] || { echo "nothing done"; exit 0; }
 fi
 helm -n "${F5_NAMESPACE}" uninstall "${F5_UERANSIM_RELEASE}" >/dev/null 2>&1 || true
 kubectl delete namespace "${F5_NAMESPACE}" --ignore-not-found --wait=true

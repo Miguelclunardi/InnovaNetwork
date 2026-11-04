@@ -55,8 +55,6 @@ a future option.
 | `ran/ocudu/gnb.sh` | core machine | `start [yml]` · `stop` · `status` · `log [-f]` · `configs` |
 | `ran/ocudu/lib/render.py` | core machine | generates the Namespace, descriptor ConfigMap and Deployment |
 
-The Portuguese command names of earlier versions (`copiar`, `preparar`, `--remover`, `imagem`, `importar`,
-`entrar`, `sair`, `estado`, `iniciar`, `parar`) still work as aliases.
 
 ## 3. Configuration (`ocudu.env`)
 
