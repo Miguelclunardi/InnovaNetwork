@@ -97,6 +97,13 @@ PERSIST_CHUNK = int(_env("PERSIST_CHUNK_SECONDS", "60"))
 HISTORY = None
 WEBUI_PORT = _env("WEBUI_PORT")      # NodePort of the Open5GS WebUI (empty = no Subscribers sub-tab)
 UPF_DEVS = dict(kv.split("=", 1) for kv in _env("UPF_DEVS").split(";") if "=" in kv)
+# Slices from config.env: "SST:SD:DNN:CIDR:TUN;..." (one DNN per slice, so one UPF tunnel per slice in Open5GS)
+SLICES = []
+for _s in _env("SLICES").split(";"):
+    _f = _s.split(":")
+    if len(_f) >= 4 and _f[0].isdigit():
+        SLICES.append({"key": "%d-%s" % (int(_f[0]), _f[1].lower()), "sst": int(_f[0]), "sd": _f[1].lower(),
+                       "dnn": _f[2], "cidr": _f[3], "tun": _f[4] if len(_f) > 4 else ""})
 HOST_INTERVAL = float(_env("HOST_INTERVAL", "2"))
 # MiEnergy energy meter (/Data page with "key": number). It measures the ENERGY_METER_HOST machine.
 ENERGY_METER_URL = _env("ENERGY_METER_URL")          # e.g. http://192.168.68.105/Data (empty = off)
@@ -108,8 +115,8 @@ RU_ADDR = _env("RU_ADDR")            # management IP (display only)
 # Control tab (start/stop/restart). Requires the administrator password (Settings tab).
 CONTROL = _env("CONTROL", "false").lower() in ("1", "true", "yes", "sim", "on")
 UERANSIM_RELEASE = _env("UERANSIM_RELEASE", "ueransim")
-RAN_AMF_IP = _env("RAN_AMF_IP")       # IP do AMF na fibra (confere o N2 no log)
-RAN_UPF_IP = _env("RAN_UPF_IP")       # IP do UPF na fibra (confere o N3 no log)
+RAN_AMF_IP = _env("RAN_AMF_IP")       # AMF IP on the gNB link (checks N2 in the log)
+RAN_UPF_IP = _env("RAN_UPF_IP")       # UPF IP on the gNB link (checks N3 in the log)
 GNB_CTL_TARGET = _env("GNB_CTL_TARGET")   # user@host of the OCUDU gNB (empty = no gNB control)
 # Second core (free5GC). Empty = Open5GS only.
 FREE5GC_NAMESPACE = _env("FREE5GC_NAMESPACE")
@@ -474,6 +481,18 @@ class GnbCollector(threading.Thread):
             du = {"last": self.du.last()[1], "series": self.du.window(since)}
         return {"now": now, "status": st, "ues": ues, "cells": cells, "du": du}
 
+    def rates(self):
+        """Active UEs on the radio: RNTI -> last valid DL/UL rate (bit/s). Light: does not copy the series."""
+        now = time.time()
+        out = {}
+        with self.lock:
+            for (pci, rnti), e in self.ues.items():
+                if now - e["last"] >= UE_INACTIVE_SECONDS:
+                    continue
+                last = self._last_valid(e["series"], now)
+                out[rnti] = {"dl": last.get("dl_brate"), "ul": last.get("ul_brate"), "pci": pci}
+        return out
+
 
 # ----------------------------------------------------------------------------
 #  Core collector (pods, events from the AMF/SMF/UPF logs, Prometheus metrics)
@@ -491,7 +510,11 @@ RE_SESS_ADD = re.compile(r"UE SUPI\[imsi-(\d+)\] DNN\[([^\]]+)\] IPv4\[([^\]]*)\
 RE_NGAP_IDS = re.compile(r"RAN_UE_NGAP_ID\[(\d+)\] AMF_UE_NGAP_ID\[(\d+)\]")
 RE_IDENT = re.compile(r"\[(?:imsi-(\d{15})|suci-0-(\d{3})-(\d{2,3})-[^-\]]+-0-[^-\]]+-(\d+))[\]:]")
 RE_SESS_DEL = re.compile(r"Removed Session: UE IMSI:\[imsi-(\d+)\] DNN:\[([^:\]]+)")
-# free5GC (formato "[INFO][AMF][Gmm][amf_ue_ngap_id:RU:2,AU:3(3GPP)][supi:SUPI:imsi-...] mensagem")
+# Session request in the AMF: the slice asked for each DNN; smContextRef[NULL] = a new session
+RE_SNSSAI = re.compile(r"UE SUPI\[imsi-(\d{15})\] DNN\[([^\]]+)\] S_NSSAI\[SST:(\d+)(?: SD:0x([0-9a-fA-F]{6}))?\]"
+                       r" smContextRef\[([^\]]*)\]")
+RE_SM_FAIL = re.compile(r"\[imsi-(\d{15}):\d+\] create_sm_context failed\(\) \[\d+\]")
+# free5GC (format "[INFO][AMF][Gmm][amf_ue_ngap_id:RU:2,AU:3(3GPP)][supi:SUPI:imsi-...] message")
 RE5_LVL = re.compile(r"^\[(ERRO|WARN|FATA|PANI)\]")
 RE5_HEAD = re.compile(r"^(\[[^\]]*\])+\s*")
 RE5_IDS = re.compile(r"\[amf_ue_ngap_id:RU:\d*,AU:(\d+)\(\w+\)\]\[supi:SUPI:imsi-(\d{15})\]")
@@ -582,6 +605,9 @@ class CoreState:
         self.events = collections.OrderedDict()   # normalized key -> event (groups repeats)
         self.counters = collections.Counter()
         self.amf_ids = collections.OrderedDict()   # AMF_UE_NGAP_ID -> IMSI
+        self.sess_slice = {}   # (imsi, dnn) -> slice key "sst-sd" asked in the AMF (Open5GS)
+        self.req = {}          # imsi -> (slice key, dnn) of the last new session request (Open5GS)
+        self.slice_rej = collections.Counter()   # (slice key or "?", dnn) -> rejected session requests
         self._n = 0
         self._ident = (None, -99)    # (imsi, line no.) of the last identity seen in the AMF log
         self._pend = (None, -99)     # (AMF_UE_NGAP_ID, line no.) still without identity
@@ -625,6 +651,9 @@ class CoreState:
                 self.gnbs.clear()
                 self.nof_gnbs = None
                 self.ues.clear()
+                self.sess_slice.clear()
+                self.req.clear()
+                self.slice_rej.clear()
             elif component == "smf":
                 self.sessions.clear()
                 self.psi.clear()
@@ -668,6 +697,19 @@ class CoreState:
                 if m:
                     self._ue(m.group(1), "deregistered", ts, False)
                     self._event(ts, comp, "info", "UE %s deregistered" % m.group(1))
+                m = RE_SNSSAI.search(line)
+                if m:
+                    key = "%s-%s" % (m.group(3), (m.group(4) or "").lower())
+                    self.sess_slice[(m.group(1), m.group(2))] = key
+                    if m.group(5) == "NULL":
+                        self.req[m.group(1)] = (key, m.group(2))
+                m = RE_SM_FAIL.search(line)
+                if m and m.group(1) in self.req:
+                    # Session refused, usually a DNN without a pool in the SMF (the phones ask for "ims")
+                    key, dnn = self.req.pop(m.group(1))
+                    self.slice_rej[(key, dnn)] += 1
+                    self.counters["session_rejected"] += 1
+                    self._ue(m.group(1), "session for DNN %s refused (slice %s)" % (dnn, key), ts)
                 m = RE_DNN_NOK.search(line)
                 if m:
                     # Usually the UE asking for an extra DNN (e.g. ims) that is not in the subscription: harmless
@@ -730,6 +772,7 @@ class CoreState:
                     # e.g. the phone asks for a DNN without giving the slice and free5GC uses the 1st allowed slice
                     self._ue(m.group(1), "session rejected by the SMF (DNN/slice outside the configuration)", ts)
                     self.counters["dnn_not_subscribed"] += 1
+                    self.slice_rej[("?", "?")] += 1   # the free5GC log does not say the slice
                 m = RE5_REJECT.search(line)
                 if m:
                     self._ue(m.group(1), "rejected", ts)
@@ -1299,7 +1342,7 @@ class CoreProcs:
             return {"enabled": True, "error": self.error, "nfs": sorted(self.nfs.values(), key=lambda e: e["nf"]),
                     "ifaces": sorted(self.ifaces.values(), key=lambda e: e["iface"]),
                     "cpu": self.cpu.window(since), "traffic": self.traffic.window(since),
-                    "devs": dict(UPF_DEVS, upfgtp="todas as DNNs")}
+                    "devs": dict(UPF_DEVS, upfgtp="all DNNs")}
 
 
 RE_LOG_CRNTI = re.compile(r"\[(?:RRC|CU-CP) *\] \[\w\] ue=(\d+) c-rnti=0x([0-9a-fA-F]+)")
@@ -1323,6 +1366,63 @@ def ue_identity(rnti):
         ips = [{"dnn": d, "ipv4": s.get("ipv4")} for (i, d), s in sorted(st.sessions.items()) if i == imsi]
     return {"amf_ue_id": amf_id, "imsi": imsi, "name": UE_NAMES.get(imsi, ""),
             "kind": "ueransim" if imsi in SIM_IMSIS else "real", "sessions": ips}
+
+
+def slices_view(window):
+    """Slices tab: per slice, the UEs with a session in it, the UPF tunnel traffic (exact per slice in Open5GS:
+    one DNN and one tunnel per slice) and the refused session requests. The radio rate is per UE, not per slice:
+    a UE with sessions in two slices shows it in both, marked as shared."""
+    cdef = CORES.cur_def()
+    st = CORES.cur().state
+    with st.lock:
+        sessions = dict(st.sessions)
+        sess_slice = dict(st.sess_slice)
+        rej = dict(st.slice_rej)
+    # Radio: IMSI -> rate, through the gNB log (RNTI -> AMF id -> IMSI)
+    radio = {}
+    for rnti, r in GNB.rates().items():
+        imsi = ue_identity(rnti).get("imsi")
+        if imsi:
+            radio[imsi] = r
+    per_imsi = collections.Counter(i for i, _ in sessions)
+    upf = {}
+    series = {"t": []}
+    if COREPROCS:
+        with COREPROCS.lock:
+            upf = {k: dict(v) for k, v in COREPROCS.ifaces.items()}
+        series = COREPROCS.traffic.window(time.time() - window)
+    shared_tun = cdef["kind"] == "free5gc"   # free5GC: one gtp5g device (upfgtp) for every DNN
+    out = []
+    known = set()
+    for s in SLICES:
+        known.add(s["dnn"])
+        tun = "upfgtp" if shared_tun else s["tun"]
+        ues = []
+        for (imsi, dnn), x in sorted(sessions.items()):
+            if dnn != s["dnn"]:
+                continue
+            asked = sess_slice.get((imsi, dnn))
+            r = radio.get(imsi) or {}
+            ues.append({"imsi": imsi, "name": UE_NAMES.get(imsi, ""), "ipv4": x.get("ipv4"), "since": x.get("ts"),
+                        "kind": "ueransim" if imsi in SIM_IMSIS else "real",
+                        "slices": per_imsi[imsi], "slice_mismatch": bool(asked and asked != s["key"]),
+                        "radio_dl": r.get("dl"), "radio_ul": r.get("ul"), "on_radio": imsi in radio})
+        i = upf.get(tun) or {}
+        out.append(dict(s, ues=ues, sessions=len(ues),
+                        rejected=sum(n for (k, d), n in rej.items() if k == s["key"] and d == s["dnn"]),
+                        upf_iface=tun, upf_shared=shared_tun,
+                        dl_bps=i.get("tx_bps"), ul_bps=i.get("rx_bps"),
+                        dl_bytes=i.get("tx_bytes"), ul_bytes=i.get("rx_bytes"),
+                        series={"t": series.get("t", []), "dl": series.get(tun + "_tx", []),
+                                "ul": series.get(tun + "_rx", [])}))
+    # Refused requests for a DNN that is not one of the slices (e.g. "ims" asked by phones)
+    other = collections.Counter()
+    for (k, d), n in rej.items():
+        if d not in known:
+            other["%s|%s" % (k, d)] += n
+    refused = [{"slice": k.split("|")[0], "dnn": k.split("|")[1], "count": n} for k, n in other.most_common()]
+    return {"core": CORES.active(), "core_label": cdef["label"], "upf_shared": shared_tun, "slices": out,
+            "refused_other": refused, "radio_source": bool(GNBLOG.last_push), "now": time.time()}
 
 
 class GnbLog:
@@ -1673,7 +1773,7 @@ def _range(qs):
     return t0, min(t1, now + 60)
 
 
-STATIC_FILES = {"i18n.js", "docs.js", "control.js", "ru.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
+STATIC_FILES = {"i18n.js", "docs.js", "control.js", "ru.js", "slices.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -1810,6 +1910,8 @@ class Handler(BaseHTTPRequestHandler):
                             "ues_total": len(core["ues"]), "sessions": len(core["sessions"])}
                 d["prometheus"] = CORE_METRICS
                 return self._send(200, d)
+            if path == "/api/slices":
+                return self._send(200, slices_view(min(_q(qs, "window", 300, int), HISTORY_SECONDS)))
             if path == "/api/core/metrics":
                 return self._send(200, CORES.cur().metrics_snapshot(min(_q(qs, "window", 300, int), HISTORY_SECONDS)))
             if path == "/api/logs":
@@ -2215,14 +2317,14 @@ def main():
             log("persistent history DISABLED: error opening %s: %s" % (PERSIST_PATH, e))
     log("dashboard: cores=%s active=%s gNB=%s core metrics=%s port=%s" % (
         ",".join("%s(%s)" % (n, d["namespace"]) for n, d in CORES.defs.items()), CORES.active(),
-        GNB_METRICS_URL or "(desligado)", CORE_METRICS, PORT))
+        GNB_METRICS_URL or "(off)", CORE_METRICS, PORT))
     if GNB_METRICS_URL:
         GNB.start()
     CORES.start()
     CoreProcs.kind_fn = staticmethod(lambda: CORES.cur_def()["kind"])
     if ENERGY:
         if ENERGY_METER_HOST and ENERGY_METER_HOST not in HOSTS_STATE.h:
-            HOSTS_STATE._entry(ENERGY_METER_HOST, "", "medidor")
+            HOSTS_STATE._entry(ENERGY_METER_HOST, "", "meter")
         ENERGY.start()
     if COREPROCS:
         threading.Thread(target=COREPROCS.run, daemon=True, name="coreprocs").start()

@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
 ## [Unreleased]
 
 ### Added
+- Dashboard **Slices** tab: sessions per slice, UPF downlink/uplink per slice (live and charts), a UE × slice
+  table (UEs in two slices marked) and refused session requests per slice (`GET /api/slices`).
 - `scripts/ue-traffic.sh`: iperf3 traffic on all UERANSIM UEs at the same time (download, upload or both),
   with per-UE throughput; no internet needed.
 

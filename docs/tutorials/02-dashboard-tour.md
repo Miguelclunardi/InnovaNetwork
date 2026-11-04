@@ -23,6 +23,7 @@ The **EN/PT** button at the top switches between English and Portuguese.
 | **Overview** | summary: UEs on the radio, registered subscribers, sessions, pods, events | find your UE with IMSI, DNN and IP |
 | **Radio** | real gNB metrics per UE: throughput, MCS, CQI, BLER, SNR, PRBs | with a phone connected, open a video and watch the DL throughput go up |
 | **Core** | gNBs at the AMF, UEs, sessions, UPF traffic per DNN, CPU of each function; **Subscribers** (WebUI) | register a subscriber through the embedded WebUI |
+| **Slices** | each slice: sessions, UPF traffic, which UE is in which slice, refused requests | with the Telit on `internet` and `internet2`, see it in both columns |
 | **Logs** | log of any pod and of the real gNB, live, with a filter | filter the AMF by `Registration` |
 | **RU** | O-RU: PTP sync, power, temperature, fronthaul packets on time | check `SYNCHRONIZED` and ~90 % on time |
 | **Control** | start/stop/restart the core, UERANSIM and the gNB; switch core | restart UERANSIM and follow the steps |

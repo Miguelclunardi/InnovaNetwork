@@ -20,6 +20,7 @@
     <button role="tab" data-tab="control" class="hidden" id="tabbtn-control">Control</button>
     <button role="tab" data-tab="ran">Radio (gNB)</button>
     <button role="tab" data-tab="core">Core</button>
+    <button role="tab" data-tab="slices">Slices</button>
     <button role="tab" data-tab="ru" class="hidden" id="tabbtn-ru">RU</button>
     <button role="tab" data-tab="logs">Logs</button>
     <button role="tab" data-tab="hosts">Machines</button>
@@ -199,6 +200,26 @@
   </section>
   <!-- ======================= MACHINES ======================= -->
   <!-- ======================= RU ======================= -->
+  <section id="tab-slices" class="tab">
+    <div class="toolbar">
+      <h2 class="hd-title">Slices</h2>
+      <span class="muted" id="sl-sub"></span>
+      <label>Window <select id="sl-window"><option value="300" selected>5 min</option><option value="900">15 min</option></select></label>
+    </div>
+    <div class="kpis" id="sl-kpis"></div>
+    <div class="charts" style="margin-top:12px">
+      <div class="chart card"><h4>Downlink per slice (UPF) <span class="unit">Mbit/s</span></h4><div id="c-sl-dl"></div></div>
+      <div class="chart card"><h4>Uplink per slice (UPF) <span class="unit">Mbit/s</span></h4><div id="c-sl-ul"></div></div>
+    </div>
+    <div class="card" style="margin-top:12px"><h2>UEs and their slices</h2>
+      <div class="tablewrap"><table id="sl-matrix"></table></div>
+      <div class="muted" style="margin-top:6px;font-size:12px">Each cell is the PDU session of the UE in that slice (IP).
+        The radio rate belongs to the UE, not to a session: a UE in two slices shares it between them.</div></div>
+    <div class="card" style="margin-top:12px"><h2>Refused session requests</h2><div id="sl-refused"></div></div>
+    <p class="note">Traffic per slice is read on the UPF tunnel of each slice (one DNN per slice: <code>ogstun</code>,
+      <code>ogstun2</code>…), so it is exact per slice. Slices come from <code>SLICES</code> in <code>config.env</code>.</p>
+  </section>
+
   <section id="tab-ru" class="tab">
     <div class="toolbar">
       <h2 id="ru-title" class="hd-title">RU</h2>
@@ -487,6 +508,7 @@
 <script src="app.js"></script>
 <script src="hosts.js"></script>
 <script src="ru.js"></script>
+<script src="slices.js"></script>
 <script src="control.js"></script>
 <script src="docs.js"></script>
 <script src="settings.js"></script>

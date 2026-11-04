@@ -19,6 +19,7 @@ place: radio, RU, machines and **the active core** (Open5GS or free5GC — see
 | **History** | **persistent** metrics (radio 1 s, core, machines, energy, events) of any period; **experiments** ("● Record experiment" button at the top) with name, notes and a snapshot of the setup; side-by-side **comparison** of 2+ experiments (KPIs with the best highlighted + overlaid charts); CSV export | SQLite in `/var/lib/open5gs-k3s/dashboard` (`DASHBOARD_PERSIST=true`) |
 | **Settings** | edits `config.env` (administrator password): fields per section with the file's own explanation, diff before saving, installer validation, backup and restore, and the command to apply | `config.env` of the core machine |
 | **Core** | always: gNBs, registered UEs, sessions, UE traffic at the UPF per DNN (N6) and on the gNB link (N3), CPU/memory/threads of each NF, errors/warnings per NF, UPF interfaces. Optional: NF Prometheus metrics | host `/proc` (`open5gs-*d` processes and UPF interfaces) + logs; Prometheus only with `OPEN5GS_METRICS=true` |
+| **Slices** | one card per slice (DNN, SST/SD, sessions, UPF downlink/uplink now, share of the traffic, totals); DL/UL charts per slice; a **UE × slice** table (IP of each session, UEs in 2+ slices marked, radio rate per UE); refused session requests per slice (e.g. phones asking for `ims`) | `SLICES` of `config.env` + AMF/SMF logs + UPF tunnel counters (host `/proc`) |
 
 Address: `http://<core-IP>:30998` (`DASHBOARD_NODEPORT`). No password by default; with `DASHBOARD_PASSWORD`, the
 browser asks for user `admin` and the password.
@@ -226,6 +227,28 @@ the Core tab explains how to enable it, and the Overview keeps showing gNBs, UEs
 - Isolated cores (`isolcpus`, e.g. 0–17 of the gNB) have a blue background; a gNB core at 100 % is normal (DPDK
   loop).
 
+### Slices tab
+
+Shows how each network slice is used. It needs nothing extra: it reads what the dashboard already collects.
+
+- **Which slices exist**: `SLICES` of `config.env` (the installer passes them to the pod as the `SLICES`
+  variable, `SST:SD:DNN:CIDR:TUN;…`). Each slice has its own DNN and, in Open5GS, its own UPF tunnel
+  (`ogstun`, `ogstun2`…).
+- **Who is in each slice**: the PDU sessions taken from the SMF log (IMSI, DNN, IP). The AMF log line
+  `UE SUPI[imsi-…] DNN[…] S_NSSAI[SST:… SD:0x…]` gives the slice the UE asked for each DNN; if it differs from the
+  slice configured for that DNN the table shows **other S-NSSAI**.
+- **Traffic per slice**: the counters of the slice's UPF tunnel (rx = uplink, tx = downlink), sampled every 2 s.
+  It is exact per slice because one tunnel carries one DNN. With **free5GC** every DNN goes through one gtp5g
+  device (`upfgtp`), so the tab shows sessions but no traffic per slice.
+- **Radio rate**: the gNB measures per UE, not per slice. A UE with sessions in two slices (e.g. the Telit with
+  `internet` and `internet2`) shows the same radio rate in both rows, marked **shared**; the UPF numbers are the
+  ones split per slice.
+- **Refused session requests**: `create_sm_context failed()` in the AMF log after a new session request, counted
+  per slice and DNN since the AMF pod started. Phones ask for the `ims` DNN (voice) every minute or so; there is
+  no `ims` pool in the SMF, so these are refused — harmless, and listed apart from the configured slices.
+
+API: `GET /api/slices?window=300`.
+
 ### RU tab (LiteOn FlexFi)
 
 The RU has its own CLI over SSH on the **RJ45 management** port (factory IP `10.101.131.59/24`, manual "User guide
@@ -396,6 +419,7 @@ Enabled with `DASHBOARD_CONFIG_EDIT=true` (default in the config of this reposit
 | `GET /api/ran.csv?window=900` | CSV per UE (UTC) |
 | `GET /api/core` | pods, N2 gNBs, UEs, sessions, events, counters |
 | `GET /api/core/metrics?window=300` | NF Prometheus metrics |
+| `GET /api/slices?window=300` | per slice: sessions (UEs, IPs), UPF traffic now and series, refused requests |
 | `GET /api/logs?pod=&container=&tail=&core=` | log of a pod (of the given core; default: the active one) |
 | `GET /api/logs/stream?pod=&container=` | live log (Server-Sent Events) |
 | `GET /api/gnb-log?tail=` · `/api/gnb-log/stream` | gNB log |

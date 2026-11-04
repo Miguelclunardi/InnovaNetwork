@@ -224,6 +224,7 @@ async function refreshNow() {
       await Overview.refresh(true);
       if (currentTab === "ran") await Ran.refresh();
       else if (currentTab === "core") await Core.refresh();
+      else if (currentTab === "slices") await Slices.refresh();
       else if (currentTab === "hosts") await Machines.refresh();
       else if (currentTab === "ru") await RuTab.refresh();
       else if (currentTab === "control") await Control.refresh();
@@ -841,7 +842,7 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     await reloadConfig(true);
   } catch (e) { banner("Failed to load the configuration: " + e.message); }
   const start = (location.hash || "").slice(1) || store.get("tab", "overview");
-  showTab(["overview", "ran", "logs", "core", "ru", "control", "hosts", "history", "docs", "settings"].includes(start) ? start : "overview");
+  showTab(["overview", "ran", "logs", "core", "slices", "ru", "control", "hosts", "history", "docs", "settings"].includes(start) ? start : "overview");
   setInterval(refreshNow, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();
