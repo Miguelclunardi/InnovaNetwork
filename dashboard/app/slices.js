@@ -5,6 +5,15 @@
 const sliceName = (s) => `SST ${s.sst}${s.sd ? " · SD " + s.sd : ""}`;
 const mbit = (arr) => (arr || []).map((v) => (v == null ? null : v * 1e-6));
 
+// Traffic of one UE in one slice (cell of the UE × slice table)
+function slTraffic(t) {
+  const rate = (x) => `<span class="sl-rate">↓ ${fmtRate(x.dl)} · ↑ ${fmtRate(x.ul)}</span>`;
+  if (t.src === "tun") return `<div>${rate(t)}</div><div class="muted sl-src" title="${esc(t.tun)}: counters of the UE TUN of this PDU session">↓ ${fmtBytes(t.dl_bytes)} · ↑ ${fmtBytes(t.ul_bytes)} <span>in total</span></div>`;
+  if (t.src === "radio") return `<div>${rate(t)}</div><div class="muted sl-src" title="the UE is in this slice only, so its radio rate is its traffic in the slice">radio (gNB)</div>`;
+  if (t.src === "shared") return `<div class="muted sl-src" title="the UE is in 2+ slices and the radio measures the UE, not the session: see the Radio column">split not measured</div>`;
+  return "";
+}
+
 const Slices = {
   async refresh() {
     const d = await api("api/slices?window=" + $("#sl-window").value);
@@ -59,7 +68,7 @@ const Slices = {
         if (!c) return '<td class="muted">–</td>';
         const warn = c.slice_mismatch ? ' <span class="tag warn" title="the AMF log shows another S-NSSAI for this DNN">other S-NSSAI</span>' : "";
         const dnn = s.dnns && s.dnns.length > 1 ? ` <span class="muted">${esc(c.dnn)}</span>` : "";
-        return `<td><span class="tag ok">✓</span> ${esc(c.ipv4 || "")}${dnn}${warn}</td>`;
+        return `<td><span class="tag ok">✓</span> ${esc(c.ipv4 || "")}${dnn}${warn}${slTraffic(c.traffic || {})}</td>`;
       }).join("");
       const radio = u.on_radio ? `${fmtRate(u.radio_dl)} / ${fmtRate(u.radio_ul)}${n > 1 ? ' <span class="tag" title="the radio rate is per UE: it is split between its slices">shared</span>' : ""}`
         : '<span class="muted">' + (u.kind === "ueransim" ? "simulated (no gNB radio)" : "not on the radio") + "</span>";

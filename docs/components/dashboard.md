@@ -243,6 +243,14 @@ Shows how each network slice is used. It needs nothing extra: it reads what the 
 - **Traffic per slice**: the counters of the slice's UPF tunnel (rx = uplink, tx = downlink), sampled every 2 s.
   It is exact per slice because one tunnel carries one DNN. With **free5GC** every DNN goes through one gtp5g
   device (`upfgtp`), so the tab shows sessions but no traffic per slice.
+- **Traffic of each UE in each slice** (cell of the UE × slice table):
+  - simulated UEs: **exact**, from the counters of the UE TUN of that PDU session (`uesimtunN`, one TUN per
+    session). The dashboard finds the `nr-ue` process in the host `/proc` (the pod uid is in its cgroup), reads
+    its `net/dev` every 2 s, and learns which TUN/IP belongs to which IMSI from the UE pod log
+    (`TUN interface[uesimtunN, IP] is up`). Nothing is installed or changed in the core or the UE pod.
+  - real UEs in one slice only: the radio rate of the UE (gNB), which is its traffic in that slice.
+  - real UEs in two or more slices: shown as "split not measured" (the core keeps no per-UE counters; it would
+    need counting rules in the UPF).
 - **Radio rate**: the gNB measures per UE, not per slice. A UE with sessions in two slices (e.g. the Telit with
   `internet` and `internet2`) shows the same radio rate in both rows, marked **shared**; the UPF numbers are the
   ones split per slice.

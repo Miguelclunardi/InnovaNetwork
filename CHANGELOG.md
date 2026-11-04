@@ -8,7 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
 - Dashboard **Slices** tab: sessions per slice, UPF downlink/uplink per slice (live and charts), a UE × slice
   table (UEs in two slices marked) and refused session requests per slice (`GET /api/slices`). The slice list
   is read from the running core configuration (the dashboard may read the AMF/UPF ConfigMaps, or the free5GC
-  SMF one).
+  SMF one). Each cell of the UE × slice table shows the traffic of that UE in that slice (exact for UERANSIM UEs,
+  radio rate for real UEs in one slice).
 - `scripts/ue-traffic.sh`: iperf3 traffic on all UERANSIM UEs at the same time (download, upload or both),
   with per-UE throughput; no internet needed.
 

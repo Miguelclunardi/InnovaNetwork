@@ -513,6 +513,8 @@ RE_SESS_DEL = re.compile(r"Removed Session: UE IMSI:\[imsi-(\d+)\] DNN:\[([^:\]]
 # Session request in the AMF: the slice asked for each DNN; smContextRef[NULL] = a new session
 RE_SNSSAI = re.compile(r"UE SUPI\[imsi-(\d{15})\] DNN\[([^\]]+)\] S_NSSAI\[SST:(\d+)(?: SD:0x([0-9a-fA-F]{6}))?\]"
                        r" smContextRef\[([^\]]*)\]")
+# UERANSIM UE log: which TUN (and IP) each PDU session got
+RE_UE_TUN = re.compile(r"\[(?:imsi-)?(\d{15})\|app\].*PDU session\[(\d+)\].*TUN interface\[(uesimtun\d+), ([\d.]+)\]")
 RE_SM_FAIL = re.compile(r"\[imsi-(\d{15}):\d+\] create_sm_context failed\(\) \[\d+\]")
 # free5GC (format "[INFO][AMF][Gmm][amf_ue_ngap_id:RU:2,AU:3(3GPP)][supi:SUPI:imsi-...] message")
 RE5_LVL = re.compile(r"^\[(ERRO|WARN|FATA|PANI)\]")
@@ -546,8 +548,9 @@ class LogFollower:
     """Reads a pod log in chunks (sinceTime) and passes new lines to the parser.
     If the pod changes (new uid), it re-reads from the start and the parser resets its state."""
 
-    def __init__(self, component, container, parser, namespace=None):
+    def __init__(self, component, container, parser, namespace=None, pick=None):
         self.ns = namespace or NAMESPACE
+        self.pick = pick or (lambda p: p["component"] == self.component)
         self.component = component
         self.container = container
         self.parser = parser
@@ -557,14 +560,15 @@ class LogFollower:
         self.seen_at_last_ts = set()
 
     def poll(self, pods):
-        p = next((p for p in pods if p["component"] == self.component and p["phase"] == "Running"), None)
+        p = next((p for p in pods if self.pick(p) and p["phase"] == "Running"), None)
         if not p:
             return
+        container = self.container or (p.get("containers") or [""])[0]
         if p["uid"] != self.uid:
             self.uid, self.pod, self.last_ts = p["uid"], p["name"], None
             self.seen_at_last_ts = set()
             self.parser.reset(self.component)
-        params = {"timestamps": "true", "container": self.container}
+        params = {"timestamps": "true", "container": container}
         if self.last_ts:
             params["sinceTime"] = self.last_ts
         else:
@@ -608,6 +612,7 @@ class CoreState:
         self.sess_slice = {}   # (imsi, dnn) -> slice key "sst-sd" asked in the AMF (Open5GS)
         self.req = {}          # imsi -> (slice key, dnn) of the last new session request (Open5GS)
         self.slice_rej = collections.Counter()   # (slice key or "?", dnn) -> rejected session requests
+        self.ue_tuns = {}      # UERANSIM: ipv4 -> {"imsi", "psi", "tun"} (from the UE pod log)
         self._n = 0
         self._ident = (None, -99)    # (imsi, line no.) of the last identity seen in the AMF log
         self._pend = (None, -99)     # (AMF_UE_NGAP_ID, line no.) still without identity
@@ -658,6 +663,8 @@ class CoreState:
                 self.sessions.clear()
                 self.psi.clear()
                 self.pend.clear()
+            if component == "ues":
+                self.ue_tuns.clear()
             for k in [k for k, e in self.events.items() if e["src"] == component]:
                 del self.events[k]
 
@@ -668,6 +675,12 @@ class CoreState:
             u["registered"] = registered
 
     def line(self, comp, ts, line):
+        if comp == "ues":
+            m = RE_UE_TUN.search(line)
+            if m:
+                with self.lock:
+                    self.ue_tuns[m.group(4)] = {"imsi": m.group(1), "psi": int(m.group(2)), "tun": m.group(3)}
+            return
         if self.kind == "free5gc":
             return self._line_f5(comp, ts, line)
         with self.lock:
@@ -865,6 +878,9 @@ class CoreCollector(threading.Thread):
         self.pods_error = None
         pre = "open5gs-" if core["kind"] == "open5gs" else ""
         self.followers = [LogFollower(nf, pre + nf, self.state, self.ns) for nf in ("amf", "smf", "upf")]
+        # simulated UEs: TUN interface of each PDU session (Slices tab, traffic per UE and slice)
+        self.followers.append(LogFollower("ues", None, self.state, self.ns,
+                                          pick=lambda p: p.get("label") == "ues"))
         self.metrics = {}           # nf -> {"latest": {name: [(labels, v)]}, "types": {}, "error": str}
         self.metric_series = {}     # nf -> Series({nome: soma})
         self.metrics_ts = None
@@ -1234,6 +1250,8 @@ class CoreProcs:
         self.traffic = Series("core:upf")    # {iface_rx/iface_tx: bit/s} do UPF
         self.nfs = {}
         self.ifaces = {}
+        self.uetun = {}        # UERANSIM: pod uid -> {tun: {"dl_bps", "ul_bps", "dl_bytes", "ul_bytes"}}
+        self.uetun_prev = None
         self.prev = None
         self.error = None
         self.hz = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
@@ -1256,6 +1274,7 @@ class CoreProcs:
     def sample(self):
         now = time.time()
         procs = {}
+        nrue = []
         for pid in os.listdir(self.proc):
             if not pid.isdigit():
                 continue
@@ -1264,7 +1283,10 @@ class CoreProcs:
             except OSError:
                 continue
             r = st.rfind(")")
-            nf = self._nf(st[st.find("(") + 1:r])
+            comm = st[st.find("(") + 1:r]
+            if comm == "nr-ue":
+                nrue.append(pid)
+            nf = self._nf(comm)
             if not nf:
                 continue
             f = st[r + 2:].split()
@@ -1283,6 +1305,7 @@ class CoreProcs:
                         net[name] = (int(v[0]), int(v[8]))
             except (OSError, IndexError, ValueError):
                 pass
+        self._sample_ues(now, nrue)
         with self.lock:
             prev, self.prev = self.prev, (now, procs, net)
             if not prev:
@@ -1312,6 +1335,35 @@ class CoreProcs:
                              "rx_bps": tr.get(name + "_rx"), "tx_bps": tr.get(name + "_tx")}
             self.ifaces = ifs
             self.traffic.add(now, tr)
+
+    def _sample_ues(self, now, pids):
+        """Counters of each uesimtunN of the UERANSIM UE processes (one TUN = one PDU session).
+        Inside the UE, rx = downlink and tx = uplink. The pod uid comes from the process cgroup."""
+        cur = {}
+        for pid in pids:
+            try:
+                m = re.search(r"pod([0-9a-f_-]{36})", self._read("%s/%s/cgroup" % (self.proc, pid)))
+                if not m:
+                    continue
+                uid = m.group(1).replace("_", "-")
+                for line in self._read("%s/%s/net/dev" % (self.proc, pid)).splitlines()[2:]:
+                    name, _, rest = line.partition(":")
+                    name, v = name.strip(), rest.split()
+                    if name.startswith("uesimtun"):
+                        cur.setdefault(uid, {})[name] = (int(v[0]), int(v[8]))
+            except (OSError, IndexError, ValueError):
+                continue
+        prev, self.uetun_prev = self.uetun_prev, (now, cur)
+        out = {}
+        for uid, tuns in cur.items():
+            for tun, (rx, tx) in tuns.items():
+                e = out.setdefault(uid, {})[tun] = {"dl_bytes": rx, "ul_bytes": tx, "dl_bps": None, "ul_bps": None}
+                a = prev and prev[1].get(uid, {}).get(tun)
+                if a and rx >= a[0] and tx >= a[1]:
+                    dt = max(now - prev[0], 1e-3)
+                    e["dl_bps"], e["ul_bps"] = (rx - a[0]) * 8 / dt, (tx - a[1]) * 8 / dt
+        with self.lock:
+            self.uetun = out
 
     @staticmethod
     def role(name):
@@ -1480,6 +1532,7 @@ def slices_view(window):
         sessions = dict(st.sessions)
         sess_slice = dict(st.sess_slice)
         rej = dict(st.slice_rej)
+        tuns_by_ip = dict(st.ue_tuns)
     # Radio: IMSI -> rate, through the gNB log (RNTI -> AMF id -> IMSI)
     radio = {}
     for rnti, r in GNB.rates().items():
@@ -1489,9 +1542,12 @@ def slices_view(window):
     per_imsi = collections.Counter(i for i, _ in sessions)
     upf = {}
     series = {"t": []}
+    uepod = next((p["uid"] for p in CORES.cur().pods if p.get("label") == "ues" and p["phase"] == "Running"), None)
+    uetun = {}
     if COREPROCS:
         with COREPROCS.lock:
             upf = {k: dict(v) for k, v in COREPROCS.ifaces.items()}
+            uetun = dict(COREPROCS.uetun.get(uepod) or {})
         series = COREPROCS.traffic.window(time.time() - window)
     shared_tun = cdef["kind"] == "free5gc"   # free5GC: one gtp5g device (upfgtp) for every DNN
 
@@ -1510,10 +1566,24 @@ def slices_view(window):
                 continue
             asked = sess_slice.get((imsi, dnn))
             r = radio.get(imsi) or {}
+            # Traffic of this UE in this slice: exact from the UE TUN (simulated UEs); for a real UE, the radio
+            # rate when it is in this slice only (with 2+ slices the radio rate cannot be split)
+            t = tuns_by_ip.get(x.get("ipv4"))
+            c = uetun.get(t["tun"]) if t and t["imsi"] == imsi else None
+            if c:
+                tr = {"src": "tun", "tun": t["tun"], "dl": c["dl_bps"], "ul": c["ul_bps"],
+                      "dl_bytes": c["dl_bytes"], "ul_bytes": c["ul_bytes"]}
+            elif imsi in radio and per_imsi[imsi] == 1:
+                tr = {"src": "radio", "dl": r.get("dl"), "ul": r.get("ul")}
+            elif imsi in radio:
+                tr = {"src": "shared"}
+            else:
+                tr = {"src": None}
             ues.append({"imsi": imsi, "name": UE_NAMES.get(imsi, ""), "dnn": dnn, "ipv4": x.get("ipv4"),
                         "since": x.get("ts"), "kind": "ueransim" if imsi in SIM_IMSIS else "real",
                         "slices": per_imsi[imsi], "slice_mismatch": bool(asked and asked != s["key"]),
-                        "radio_dl": r.get("dl"), "radio_ul": r.get("ul"), "on_radio": imsi in radio})
+                        "radio_dl": r.get("dl"), "radio_ul": r.get("ul"), "on_radio": imsi in radio,
+                        "traffic": tr})
         dl = ul = dlb = ulb = None
         sdl, sul = [None] * len(series.get("t", [])), [None] * len(series.get("t", []))
         if not shared_tun:
