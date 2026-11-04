@@ -1877,18 +1877,40 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/history/events":
             return self._send(200, HISTORY.events(t0, t1, min(_q(qs, "limit", 500, int), 5000)))
         if path == "/api/history/csv":
-            raw = HISTORY._load(t0, t1, [x for x in _q(qs, "series", "").split(",") if x] or None)
+            # Streamed to the connection block by block (a long period does not fit in memory at once)
+            names = [x for x in _q(qs, "series", "").split(",") if x] or None
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", 'attachment; filename="history-%d.csv"' % int(t0))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
             out = io.StringIO()
             w = csv.writer(out)
-            w.writerow(("timestamp_utc", "serie", "imsi", "campo", "valor"))
-            for s, e in sorted(raw.items()):
-                imsi = (e["meta"] or {}).get("imsi", "")
-                for t, v in e["rows"]:
-                    ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".%03dZ" % int((t % 1) * 1000)
-                    for k, x in sorted(v.items()):
-                        w.writerow((ts, s, imsi, k, x))
-            return self._send(200, out.getvalue(), "text/csv; charset=utf-8",
-                              {"Content-Disposition": 'attachment; filename="historico-%d.csv"' % int(t0)})
+            w.writerow(("timestamp_utc", "series", "imsi", "field", "value"))
+            imsis = {}
+            try:
+                for s, meta, ts, cols in HISTORY._chunks(t0, t1, names):
+                    if meta:
+                        imsis[s] = meta.get("imsi", "")
+                    imsi = imsis.get(s, "")
+                    keys = sorted(cols)
+                    for i, t in enumerate(ts):
+                        if not t0 <= t <= t1:
+                            continue
+                        stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".%03dZ" % int((t % 1) * 1000)
+                        for k in keys:
+                            x = cols[k][i]
+                            if x is not None:
+                                w.writerow((stamp, s, imsi, k, x))
+                    self.wfile.write(out.getvalue().encode())
+                    out.seek(0)
+                    out.truncate()
+                self.wfile.write(out.getvalue().encode())
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return None
         return self._send(404, {"error": "not found"})
 
     def _history_post(self, path):

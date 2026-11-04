@@ -13,6 +13,7 @@
 import json
 import math
 import os
+import random
 import sqlite3
 import threading
 import time
@@ -162,9 +163,10 @@ class History:
                 self.log("history: write error:", e)
 
     # ------------------------------------------------------------------ reading
-    def _load(self, t0, t1, series=None, prefix=None):
-        """{series: {"meta": ..., "rows": [(t, {field: v})]}} of the period, including what is still in the buffer."""
-        q = "SELECT series, meta, data FROM chunks WHERE t1 >= ? AND t0 <= ?"
+    def _chunks(self, t0, t1, series=None, prefix=None, batch=64):
+        """Yields (series, meta, times, {field: values}) one block at a time, in time order, including what is
+        still in the buffer. Only one batch of blocks is in memory at a time, so long periods do not use more RAM."""
+        q = "SELECT rowid FROM chunks WHERE t1 >= ? AND t0 <= ?"
         args = [t0, t1]
         if series:
             q += " AND series IN (%s)" % ",".join("?" * len(series))
@@ -173,31 +175,30 @@ class History:
             q += " AND (" + " OR ".join("series LIKE ?" for _ in prefix) + ")"
             args += [p + "%" for p in prefix]
         q += " ORDER BY t0"
-        out = {}
         with self.dblock:
-            res = self.db.execute(q, args).fetchall()
-        for s, meta, data in res:
-            d = json.loads(zlib.decompress(data))
-            e = out.setdefault(s, {"meta": None, "rows": []})
-            if meta:
-                e["meta"] = json.loads(meta)
-            keys = [k for k in d if k != "t"]
-            for i, t in enumerate(d["t"]):
-                if t0 <= t <= t1:
-                    e["rows"].append((t, {k: d[k][i] for k in keys if d[k][i] is not None}))
+            ids = [r[0] for r in self.db.execute(q, args).fetchall()]
+        for i in range(0, len(ids), batch):
+            part = ids[i:i + batch]
+            with self.dblock:
+                rows = self.db.execute("SELECT series, meta, data FROM chunks WHERE rowid IN (%s) ORDER BY t0"
+                                       % ",".join("?" * len(part)), part).fetchall()
+            for s, meta, data in rows:
+                d = json.loads(zlib.decompress(data))
+                ts = d.pop("t")
+                yield s, (json.loads(meta) if meta else None), ts, d
         with self.lock:
             pending = {s: list(v) for s, v in self.buf.items()}
         for s, rows in pending.items():
             if (series and s not in series) or (prefix and not s.startswith(tuple(prefix))):
                 continue
-            e = out.setdefault(s, {"meta": None, "rows": []})
-            if e["meta"] is None and self.meta_fn:
+            meta = None
+            if self.meta_fn:
                 try:
-                    e["meta"] = self.meta_fn(s)
+                    meta = self.meta_fn(s)
                 except Exception:  # noqa: BLE001
                     pass
-            e["rows"] += [(t, v) for t, v in rows if t0 <= t <= t1]
-        return out
+            keys = {k for _, v in rows for k in v}
+            yield s, meta, [t for t, _ in rows], {k: [v.get(k) for _, v in rows] for k in keys}
 
     def series_list(self, t0, t1):
         with self.dblock:
@@ -206,19 +207,22 @@ class History:
         return [{"series": s, "t0": a, "t1": b, "n": n, "meta": json.loads(m) if m else None} for s, a, b, n, m in res]
 
     def data(self, t0, t1, series=None, prefix=None, points=1200, rel=False):
-        """Series resampled into up to `points` buckets: mean and max of each field."""
-        raw = self._load(t0, t1, series, prefix)
+        """Series resampled into up to `points` buckets: mean and max of each field (streamed block by block)."""
         span = max(t1 - t0, 1.0)
         step = max(1.0, span / points)
-        out = {}
-        for s, e in raw.items():
-            if not e["rows"]:
-                continue
-            buckets = {}
-            for t, v in e["rows"]:
-                b = int((t - t0) // step)
-                acc = buckets.setdefault(b, {})
-                for k, x in v.items():
+        acc_all, metas = {}, {}
+        for s, meta, ts, cols in self._chunks(t0, t1, series, prefix):
+            if meta is not None or s not in metas:
+                metas[s] = meta if meta is not None else metas.get(s)
+            buckets = acc_all.setdefault(s, {})
+            for i, t in enumerate(ts):
+                if not t0 <= t <= t1:
+                    continue
+                acc = buckets.setdefault(int((t - t0) // step), {})
+                for k, vals in cols.items():
+                    x = vals[i]
+                    if x is None:
+                        continue
                     a = acc.get(k)
                     if a is None:
                         acc[k] = [x, 1, x]
@@ -227,13 +231,17 @@ class History:
                         a[1] += 1
                         if x > a[2]:
                             a[2] = x
+        out = {}
+        for s, buckets in acc_all.items():
+            if not buckets:
+                continue
             keys = sorted({k for acc in buckets.values() for k in acc})
             bs = sorted(buckets)
             d = {"t": [round((b * step) if rel else (t0 + b * step + step / 2), 3) for b in bs]}
             for k in keys:
                 d[k] = [round(buckets[b][k][0] / buckets[b][k][1], 4) if k in buckets[b] else None for b in bs]
                 d[k + "__max"] = [round(buckets[b][k][2], 4) if k in buckets[b] else None for b in bs]
-            out[s] = {"meta": e["meta"], "data": d}
+            out[s] = {"meta": metas.get(s), "data": d}
         return {"t0": t0, "t1": t1, "step": step, "series": out}
 
     def events(self, t0, t1, limit=500):
@@ -246,54 +254,83 @@ class History:
                 "counts": [{"src": s, "level": l, "n": n} for s, l, n in cnt]}
 
     def summary(self, t0, t1):
-        """KPIs of the period to compare setups (computed at full resolution)."""
-        raw = self._load(t0, t1)
+        """KPIs of the period to compare setups. Streamed block by block: avg/min/max/n and the counter sums are
+        exact; p50/p95 come from a bounded sample of each field (exact while a field has up to SAMPLE values)."""
+        SAMPLE = 20000
+        st = {}       # series -> {"meta", "rows", "f": {field: [sum, n, min, max, sample]}}
+        for s, meta, ts, cols in self._chunks(t0, t1):
+            e = st.setdefault(s, {"meta": None, "rows": 0, "f": {}})
+            if meta is not None:
+                e["meta"] = meta
+            idx = [i for i, t in enumerate(ts) if t0 <= t <= t1]
+            e["rows"] += len(idx)
+            for k, vals in cols.items():
+                f = e["f"].get(k)
+                if f is None:
+                    f = e["f"][k] = [0.0, 0, None, None, []]
+                for i in idx:
+                    x = vals[i]
+                    if x is None:
+                        continue
+                    f[0] += x
+                    f[1] += 1
+                    if f[2] is None or x < f[2]:
+                        f[2] = x
+                    if f[3] is None or x > f[3]:
+                        f[3] = x
+                    if len(f[4]) < SAMPLE:
+                        f[4].append(x)
+                    else:   # reservoir sampling: every value has the same chance to stay
+                        j = random.randrange(f[1])
+                        if j < SAMPLE:
+                            f[4][j] = x
 
-        def stats(vals, scale=1.0):
-            v = sorted(x * scale for x in vals if x is not None)
-            if not v:
+        def stats(e, k, scale=1.0):
+            f = e["f"].get(k)
+            if not f or not f[1]:
                 return None
-            return {"avg": sum(v) / len(v), "p50": _pct(v, 50), "p95": _pct(v, 95), "max": v[-1], "min": v[0],
-                    "n": len(v)}
+            v = sorted(x * scale for x in f[4])
+            return {"avg": f[0] * scale / f[1], "p50": _pct(v, 50), "p95": _pct(v, 95),
+                    "max": f[3] * scale, "min": f[2] * scale, "n": f[1]}
+
+        def total(e, k):
+            f = e["f"].get(k)
+            return f[0] if f else 0
 
         out = {"t0": t0, "t1": t1, "duration": t1 - t0, "cell": {}, "ues": [], "hosts": {}, "nfs": {}, "upf": {}}
-        for s, e in raw.items():
-            rows = e["rows"]
-            col = lambda k: [v.get(k) for _, v in rows]  # noqa: E731
+        for s, e in st.items():
             if s.startswith("cell:"):
-                out["cell"] = {k: stats(col(k), sc) for k, sc in
+                out["cell"] = {k: stats(e, k, sc) for k, sc in
                                (("dl_brate", 1e-6), ("ul_brate", 1e-6), ("pdsch_prbs", 1), ("pusch_prbs", 1),
                                 ("nof_ues", 1), ("avg_latency", 1), ("late_dl_harqs", 1), ("late_ul_harqs", 1))}
             elif s.startswith("ue:"):
-                ok = lambda k: sum(x or 0 for x in col(k))  # noqa: E731
-                dl_tb, ul_tb = ok("dl_nof_ok") + ok("dl_nof_nok"), ok("ul_nof_ok") + ok("ul_nof_nok")
+                dl_tb = total(e, "dl_nof_ok") + total(e, "dl_nof_nok")
+                ul_tb = total(e, "ul_nof_ok") + total(e, "ul_nof_nok")
                 m = e["meta"] or {}
                 out["ues"].append({
                     "series": s, "imsi": m.get("imsi"), "name": m.get("name"), "kind": m.get("kind"),
-                    "seconds": len(rows),
-                    "dl_brate": stats(col("dl_brate"), 1e-6), "ul_brate": stats(col("ul_brate"), 1e-6),
-                    "dl_mcs": stats(col("dl_mcs")), "ul_mcs": stats(col("ul_mcs")), "cqi": stats(col("cqi")),
-                    "dl_ri": stats(col("dl_ri")), "pusch_snr_db": stats(col("pusch_snr_db")),
-                    "pusch_rsrp_db": stats(col("pusch_rsrp_db")),
-                    "dl_bler": 100.0 * ok("dl_nof_nok") / dl_tb if dl_tb else None,
-                    "ul_bler": 100.0 * ok("ul_nof_nok") / ul_tb if ul_tb else None,
+                    "seconds": e["rows"],
+                    "dl_brate": stats(e, "dl_brate", 1e-6), "ul_brate": stats(e, "ul_brate", 1e-6),
+                    "dl_mcs": stats(e, "dl_mcs"), "ul_mcs": stats(e, "ul_mcs"), "cqi": stats(e, "cqi"),
+                    "dl_ri": stats(e, "dl_ri"), "pusch_snr_db": stats(e, "pusch_snr_db"),
+                    "pusch_rsrp_db": stats(e, "pusch_rsrp_db"),
+                    "dl_bler": 100.0 * total(e, "dl_nof_nok") / dl_tb if dl_tb else None,
+                    "ul_bler": 100.0 * total(e, "ul_nof_nok") / ul_tb if ul_tb else None,
                     "dl_tbs": dl_tb, "ul_tbs": ul_tb,
                 })
             elif s.startswith("host:"):
-                out["hosts"][s[5:]] = {k: stats(col(k)) for k in ("cpu", "mem", "temp", "load1")}
+                out["hosts"][s[5:]] = {k: stats(e, k) for k in ("cpu", "mem", "temp", "load1")}
             elif s == "core:cpu":
-                keys = {k for _, v in rows for k in v}
-                out["nfs"] = {k: stats(col(k)) for k in sorted(keys)}
+                out["nfs"] = {k: stats(e, k) for k in sorted(e["f"])}
             elif s == "core:upf":
-                keys = {k for _, v in rows for k in v}
-                out["upf"] = {k: stats(col(k), 1e-6) for k in sorted(keys)}
+                out["upf"] = {k: stats(e, k, 1e-6) for k in sorted(e["f"])}
             elif s == "ru":
-                out["ru"] = {k: stats(col(k)) for k in ("power", "temp", "temp_cpu", "late_pct", "rx_total")}
+                out["ru"] = {k: stats(e, k) for k in ("power", "temp", "temp_cpu", "late_pct", "rx_total")}
                 for k in ("sync", "rf", "du"):
-                    st = stats(col("ok_" + k), 100.0)
-                    out["ru"]["ok_" + k] = st["avg"] if st else None
+                    x = stats(e, "ok_" + k, 100.0)
+                    out["ru"]["ok_" + k] = x["avg"] if x else None
             elif s == "energy":
-                out["energy"] = {k: stats(col(k)) for k in ("power", "voltage", "current")}
+                out["energy"] = {k: stats(e, k) for k in ("power", "voltage", "current")}
         # UEs: merge the series of the same IMSI (the RNTI changes on every connection)
         merged = {}
         for u in out["ues"]:
