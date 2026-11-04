@@ -1,6 +1,5 @@
 /* Innova Center Dashboard — Documentation tab: the project .md files (the same content as git),
-   read from the project folder on the core machine. Markdown rendered here, without libraries.
-   In Portuguese mode, a doc with a translation (<name>.pt-BR.md) opens in Portuguese. */
+   read from the project folder on the core machine. Markdown rendered here, without libraries. */
 "use strict";
 
 const Md = {
@@ -125,9 +124,7 @@ const Docs = {
     if (this.loaded) return;
     const d = await api("api/docs");
     this.loaded = true;
-    // <name>.pt-BR.md are translations: not listed, opened instead of <name>.md in Portuguese mode
-    this.all = new Set((d.docs || []).map((x) => x.path));
-    this.list = (d.docs || []).filter((x) => !/\.pt-BR\.md$/i.test(x.path));
+    this.list = d.docs || [];
     this.git = d.git || {};
     const g = this.git;
     $("#docs-git").innerHTML = !d.enabled ? "project folder not mounted in the dashboard (needs the administrator password in config.env)"
@@ -153,8 +150,7 @@ const Docs = {
   async open(path, anchor) {
     if (!path) { $("#docs-view").innerHTML = '<div class="empty">No document.</div>'; return; }
     try {
-      const pt = path.replace(/\.md$/i, ".pt-BR.md");
-      const src = I18N.lang === "pt" && this.all && this.all.has(pt) ? pt : path;
+      const src = path;
       const d = await api("api/docs/file?path=" + encodeURIComponent(src));
       this.cur = path;
       store.set("docs.cur", path);

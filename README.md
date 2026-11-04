@@ -16,8 +16,6 @@
   <img alt="5G SA" src="https://img.shields.io/badge/5G-Standalone-555">
 </p>
 
-<p align="center"><a href="README.pt-BR.md">Leia em português</a></p>
-
 ---
 
 **InnovaNetwork** builds and runs a lab 5G SA network **entirely on Kubernetes (k3s)**: the core, the real radio
@@ -103,8 +101,7 @@ Complete network with a real radio: follow the **[installation](docs/installatio
 | 🩺 **[Troubleshooting](docs/troubleshooting.md)** | symptom → cause → fix |
 | 🛠️ **[Development](docs/development.md)** | code map and how to extend it |
 
-The same documentation is shown in the dashboard, in the **Documentation** tab (in Portuguese too: every document
-has a `*.pt-BR.md` translation).
+The same documentation is shown in the dashboard, in the **Documentation** tab.
 
 ## Repository layout
 
@@ -117,7 +114,7 @@ InnovaNetwork/
 ├── dashboard/                            # dashboard (app/), core-machine agents (agent/), translations (i18n/)
 ├── scripts/                              # installer library, boot recovery, subscribers
 ├── helm/                                 # Multus and chart post-renderers
-└── docs/                                 # documentation (English; Portuguese in *.pt-BR.md)
+└── docs/                                 # documentation
 ```
 
 ## Requirements

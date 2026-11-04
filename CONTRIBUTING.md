@@ -21,7 +21,7 @@ Contributions are welcome:
 | **Idempotency:** running an installer again only applies what changed | installing and updating are the same operation |
 | **What depends on the hardware stays isolated** (`ran/`, `docs/hardware/`) and is stated explicitly | whoever replicates it knows what to adapt |
 | **Secrets never go into git:** SIM keys, passwords, tokens | the repository is public |
-| **English** for documentation, code, comments, commands and output; every document keeps a Portuguese translation (`*.pt-BR.md`) updated in the same commit | the dashboard shows the docs of the version in use, in both languages |
+| **English** for documentation, code, comments, commands, output and commit messages | one language for everyone who replicates the project |
 | **Dashboard texts** are written in English; add the Portuguese to `dashboard/i18n/pt.json` and run `dashboard/i18n/build.py` | the PT mode translates on the page |
 | **No new dependencies** in the dashboard (Python standard library only) | simple, offline installation |
 

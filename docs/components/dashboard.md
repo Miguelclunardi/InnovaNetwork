@@ -9,7 +9,7 @@ place: radio, RU, machines and **the active core** (Open5GS or free5GC — see
 
 | Tab | What it shows | Where it comes from |
 |---|---|---|
-| **Documentation** | the project `.md` documents (README, `docs/`, `free5gc/`), with search, the branch and commit in use and a link to GitHub; in Portuguese mode, the `*.pt-BR.md` translation | project folder mounted read-only in the pod |
+| **Documentation** | the project `.md` documents (README, `docs/`, `free5gc/`), with search, the branch and commit in use and a link to GitHub | project folder mounted read-only in the pod |
 | **Overview** | UEs on the radio (throughput, MCS, CQI, RI, BLER, SNR), subscribers seen by the core (registration, DNN → IP sessions), pods (state, restarts, IP, RAN-link IP), core events (identical warnings/errors grouped with a counter) | gNB metrics + Kubernetes API + AMF/SMF/UPF logs |
 | **Radio (gNB)** | UEs identified by **name, IMSI, IP and type** (real SIM / UERANSIM), not only RNTI; RNTIs idle for more than 2 min are hidden ("Show old" button); cell throughput and PRBs; DL/UL throughput per UE; for the chosen UE: BLER, MCS, CQI/rank, PUSCH SNR/RSRP, buffers, TA/PHR; scheduler latency and failures (late HARQ, PDCCH, UCI). 1/5/15 min window, pause, CSV export | gNB metrics WebSocket (OCUDU `remote_control`) |
 | **Logs** | log of any pod/container of the namespace (core and UERANSIM) and of the **real gNB**; live, filter by text or `/regex/`, filter by level, colors, download | Kubernetes API; gNB log agent |
@@ -31,8 +31,7 @@ or `?lang=en`.
 
 - The page is written in English; the Portuguese mode translates the page in the browser (`app/i18n.js`, built
   from `dashboard/i18n/pt.json` — see [development](../development.md#dashboard-texts-and-translations)).
-- Logs, code and the body of the documentation are not translated; the Documentation tab opens the `*.pt-BR.md`
-  translation of each document instead.
+- Logs, code and the documentation are not translated (they are in English).
 - Dates and times follow the language (`pt-BR` or `en-GB` format).
 
 ### Administrator login (one for every tab)

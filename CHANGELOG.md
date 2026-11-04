@@ -9,11 +9,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
   with per-UE throughput; no internet needed.
 
 ### Changed
-- **English everywhere:** documentation, commands, script output and code comments are in English. Every
-  document keeps a Portuguese translation (`*.pt-BR.md`). Docs renamed to English paths (`docs/architecture.md`,
-  `docs/components/`, `docs/tutorials/`…).
+- **English everywhere:** documentation, commands, script output and code comments are in English. Docs renamed
+  to English paths (`docs/architecture.md`, `docs/components/`, `docs/tutorials/`…). The Portuguese documents
+  were removed (they stay in the git history, up to commit `7ee35ad`).
 - **Dashboard in English or Portuguese:** EN/PT button at the top (or `?lang=pt` / `?lang=en`); translations in
-  `dashboard/i18n/pt.json`. The Documentation tab opens the `*.pt-BR.md` version in Portuguese mode.
+  `dashboard/i18n/pt.json`.
 - `ran/ocudu/gnb.sh`: commands `start`/`stop`/`status` (the Portuguese `iniciar`/`parar`/`estado` still work).
 - State codes sent by the dashboard API are in English (`running`/`stopped`/`starting`/`stopping`; GPS
   `locked`/`searching`/`adjusting`/`unlocked`/`stalled`; UE `registered`/`deregistered`).

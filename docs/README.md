@@ -1,7 +1,5 @@
 # InnovaNetwork documentation
 
-*Em português: [README.pt-BR.md](README.pt-BR.md) (every document has a `*.pt-BR.md` translation).*
-
 Start from your goal:
 
 | I want to… | Read |
