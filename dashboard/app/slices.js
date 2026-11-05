@@ -16,6 +16,15 @@ function slTraffic(t) {
   return "";
 }
 
+// Sessions whose UPF traffic is not in the tunnel of the slice they are in (slice from the AMF, DNN of another
+// slice, e.g. a CPE on slice 2 with DNN "internet"): the slice totals are per tunnel, so say it on the card
+function tunNote(s) {
+  const n = [];
+  if (s.carried_other) n.push(`${s.carried_other} <span>session(s) of another slice in this tunnel</span>`);
+  if (s.outside_tunnel) n.push(`${s.outside_tunnel} <span>session(s) counted in another tunnel</span>`);
+  return n.length ? `<div class="sub" title="the UPF counts traffic per tunnel (one per DNN); the slice of a session comes from the AMF">${n.join(" · ")}</div>` : "";
+}
+
 const Slices = {
   async refresh() {
     const d = await api("api/slices?window=" + $("#sl-window").value);
@@ -43,6 +52,7 @@ const Slices = {
         <div class="sub">${sub}</div>
         <div class="bar" style="margin-top:6px"><i style="width:${share == null ? 0 : share.toFixed(0)}%;background:${colorFor(i)}"></i></div>
         <div class="sub">${s.upf_iface ? "UPF " + esc(s.upf_iface) : ""}${s.dl_bytes != null ? " · total ↓ " + fmtBytes(s.dl_bytes) + " ↑ " + fmtBytes(s.ul_bytes) : ""}</div>
+        ${tunNote(s)}
       </div>`;
     }).join("");
 
@@ -68,8 +78,9 @@ const Slices = {
       const cells = sl.map((s, i) => {
         const c = u.cells[i];
         if (!c) return '<td class="muted">–</td>';
-        const warn = c.slice_mismatch ? ' <span class="tag warn" title="the AMF log shows another S-NSSAI for this DNN">other S-NSSAI</span>' : "";
-        const dnn = s.dnns && s.dnns.length > 1 ? ` <span class="muted">${esc(c.dnn)}</span>` : "";
+        const warn = (c.slice_mismatch ? ' <span class="tag warn" title="the AMF log shows another S-NSSAI for this DNN">other S-NSSAI</span>' : "") +
+          (c.via_slice ? ` <span class="tag warn" title="the UPF traffic of this session goes through the tunnel of its DNN, which belongs to another slice: it counts in that slice's total">other tunnel</span> <span class="muted">${esc(c.via_tunnel || "")}</span>` : "");
+        const dnn = (s.dnns && s.dnns.length > 1) || c.via_slice ? ` <span class="muted">${esc(c.dnn)}</span>` : "";
         return `<td><span class="tag ok">✓</span> ${esc(c.ipv4 || "")}${dnn}${warn}${slTraffic(c.traffic || {})}</td>`;
       }).join("");
       const radio = u.on_radio ? `${fmtRate(u.radio_dl)} / ${fmtRate(u.radio_ul)}${n > 1 ? ' <span class="tag" title="the radio rate is per UE: it is split between its slices">shared</span>' : ""}`

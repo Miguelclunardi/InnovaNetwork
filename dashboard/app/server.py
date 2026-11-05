@@ -1524,7 +1524,10 @@ SLICE_CATALOG = SliceCatalog()
 def slices_view(window):
     """Slices tab: per slice (as configured in the running core), the UEs with a session in it, the UPF tunnel
     traffic (exact per slice in Open5GS: one tunnel per DNN) and the refused session requests. The radio rate is
-    per UE, not per slice: a UE with sessions in two slices shows it in both, marked as shared."""
+    per UE, not per slice: a UE with sessions in two slices shows it in both, marked as shared.
+    A session belongs to the slice the AMF gave it (S-NSSAI in the AMF log); the DNN only decides when the log
+    has none. Its UPF traffic goes through the tunnel of its DNN, which can be another slice's tunnel (e.g. a
+    CPE on slice 2 with DNN "internet"): it is then listed in its slice and marked "via <tunnel>"."""
     cdef = CORES.cur_def()
     st = CORES.cur().state
     slices, source, source_err = SLICE_CATALOG.get()
@@ -1556,15 +1559,26 @@ def slices_view(window):
 
     out = []
     known = set()
+    keys = {s["key"] for s in slices}
+    dnn_slice = {}   # DNN -> key of the slice whose UPF tunnel carries it
+    for s in slices:
+        for x in s["dnns"]:
+            dnn_slice.setdefault(x["dnn"], s["key"])
+    home = {}        # (imsi, dnn) -> slice of the session: the AMF S-NSSAI, else the slice of the DNN
+    for k in sessions:
+        asked = sess_slice.get(k)
+        home[k] = asked if asked in keys else dnn_slice.get(k[1])
     for s in slices:
         names = [x["dnn"] for x in s["dnns"]]
         known.update(names)
         tuns = sorted({x["tun"] for x in s["dnns"] if x.get("tun")}) or (["upfgtp"] if shared_tun else [])
         ues = []
         for (imsi, dnn), x in sorted(sessions.items()):
-            if dnn not in names:
+            if home.get((imsi, dnn)) != s["key"]:
                 continue
             asked = sess_slice.get((imsi, dnn))
+            via = dnn_slice.get(dnn)
+            via = via if via and via != s["key"] else None
             r = radio.get(imsi) or {}
             # Traffic of this UE in this slice: exact from the UE TUN (simulated UEs); for a real UE, the radio
             # rate when it is in this slice only (with 2+ slices the radio rate cannot be split)
@@ -1582,6 +1596,9 @@ def slices_view(window):
             ues.append({"imsi": imsi, "name": UE_NAMES.get(imsi, ""), "dnn": dnn, "ipv4": x.get("ipv4"),
                         "since": x.get("ts"), "kind": "ueransim" if imsi in SIM_IMSIS else "real",
                         "slices": per_imsi[imsi], "slice_mismatch": bool(asked and asked != s["key"]),
+                        "slice_src": "amf" if asked in keys else "dnn", "via_slice": via,
+                        "via_tunnel": next((y.get("tun") for z in slices if z["key"] == via
+                                            for y in z["dnns"] if y["dnn"] == dnn), None) if via else None,
                         "radio_dl": r.get("dl"), "radio_ul": r.get("ul"), "on_radio": imsi in radio,
                         "traffic": tr})
         dl = ul = dlb = ulb = None
@@ -1593,16 +1610,6 @@ def slices_view(window):
                 dlb, ulb = add(dlb, i.get("tx_bytes")), add(ulb, i.get("rx_bytes"))
                 sdl = [add(a, b) for a, b in zip(sdl, series.get(t + "_tx") or [None] * len(sdl))]
                 sul = [add(a, b) for a, b in zip(sul, series.get(t + "_rx") or [None] * len(sul))]
-        # A real UE in 2+ slices: the radio cannot split its traffic, but the slice total can. Its share of this
-        # slice = UPF total of the slice - what is measured for the other UEs in it. Exact when the others are
-        # simulated UEs (TUN counters) or idle; an estimate when real UEs measured by the radio are subtracted.
-        rest = [u for u in ues if u["traffic"]["src"] == "shared"]
-        if len(rest) == 1 and dl is not None and ul is not None:
-            others = [u["traffic"] for u in ues if u["traffic"]["src"] in ("tun", "radio")]
-            est = any(t["src"] == "radio" and ((t.get("dl") or 0) + (t.get("ul") or 0)) > 0 for t in others)
-            rest[0]["traffic"] = {"src": "slice_est" if est else "slice",
-                                  "dl": max(dl - sum(t.get("dl") or 0 for t in others), 0.0),
-                                  "ul": max(ul - sum(t.get("ul") or 0 for t in others), 0.0)}
         out.append({"key": s["key"], "sst": s["sst"], "sd": s["sd"], "dnns": s["dnns"],
                     "dnn": ", ".join(names) or "(no DNN)",
                     "cidr": ", ".join(x["cidr"] for x in s["dnns"]), "upf_iface": ", ".join(tuns),
@@ -1610,6 +1617,22 @@ def slices_view(window):
                     "rejected": sum(n for (k, d), n in rej.items() if k == s["key"] and d in names),
                     "upf_shared": shared_tun, "dl_bps": dl, "ul_bps": ul, "dl_bytes": dlb, "ul_bytes": ulb,
                     "series": {"t": series.get("t", []), "dl": sdl, "ul": sul}})
+    # A real UE in 2+ slices: the radio cannot split its traffic, but the UPF tunnel total can. Its share in a
+    # tunnel = tunnel total - what is measured for the other sessions carried by that tunnel (whatever slice they
+    # are listed in). Exact when the others are simulated UEs (TUN counters) or idle; an estimate when real UEs
+    # measured by the radio are subtracted.
+    for o in out:
+        dl, ul = o["dl_bps"], o["ul_bps"]
+        carried = [u for x in out for u in x["ues"] if (u.get("via_slice") or x["key"]) == o["key"]]
+        rest = [u for u in carried if u["traffic"]["src"] == "shared"]
+        if len(rest) == 1 and dl is not None and ul is not None:
+            others = [u["traffic"] for u in carried if u["traffic"]["src"] in ("tun", "radio")]
+            est = any(t["src"] == "radio" and ((t.get("dl") or 0) + (t.get("ul") or 0)) > 0 for t in others)
+            rest[0]["traffic"] = {"src": "slice_est" if est else "slice",
+                                  "dl": max(dl - sum(t.get("dl") or 0 for t in others), 0.0),
+                                  "ul": max(ul - sum(t.get("ul") or 0 for t in others), 0.0)}
+        o["carried_other"] = sum(1 for x in out if x["key"] != o["key"] for u in x["ues"] if u.get("via_slice") == o["key"])
+        o["outside_tunnel"] = sum(1 for u in o["ues"] if u.get("via_slice"))
     # Refused requests for a DNN that is not in any slice (e.g. "ims" asked by phones)
     other = collections.Counter()
     for (k, d), n in rej.items():
