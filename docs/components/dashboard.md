@@ -353,9 +353,11 @@ Shells in the browser, several at once (tabs like the VS Code terminal panel). T
 - **Profiles** (the list next to **+ New terminal**): this machine (`bash -l`), the gNB host of `GNB_CTL_SSH` and
   every `DASHBOARD_HOSTS` machine (`ssh -t user@host`, same SSH key as the other agents).
 - **Use:** **+ New terminal** opens another one; click a tab to switch, double-click to rename, × or middle click
-  to close. Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes (Ctrl+C stays an interrupt). Terminals stay
-  open while you use other dashboard tabs; closing one, or reloading the page, ends its shell (and what it
-  started — use `tmux`/`nohup` for long jobs). Up to 12 terminals at the same time.
+  to close. Copy/paste like VS Code: Ctrl+C copies the selection (without a selection it stays an interrupt),
+  Ctrl+V pastes; Ctrl+Shift+C / Ctrl+Shift+V (and Cmd+C / Cmd+V on macOS) also work. Works over plain HTTP too;
+  right click keeps the browser menu. Terminals stay open while you use other dashboard tabs; closing one, or
+  reloading the page, ends its shell (and what it started — use `tmux`/`nohup` for long jobs). Up to 12
+  terminals at the same time.
 - **sudo:** off by default (the agent runs with `NoNewPrivileges`). `DASHBOARD_TERMINAL_SUDO=true` allows it.
 - **Security:** anyone with the administrator password gets a shell on the core machine (and SSH to the other
   machines). Keep `DASHBOARD_TERMINAL=false` on networks you do not trust. The token travels in the WebSocket

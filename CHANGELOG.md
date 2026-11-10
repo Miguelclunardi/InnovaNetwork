@@ -41,6 +41,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
   gNB pod.
 
 ### Fixed
+- Dashboard **Terminal** tab: copy/paste like VS Code — Ctrl+C copies the selection (without one it still
+  interrupts), Ctrl+V pastes, Ctrl+Shift+C/V and Cmd+C/V keep working. Copying now works over plain HTTP
+  (`navigator.clipboard` is not available there; a temporary textarea + `execCommand("copy")` is used).
 - `install.sh --deploy-only` no longer aborts at "Subscribers" when the Control tab scaled `populate` (or the
   whole core) to 0: populate is started only for the sync and scaled back; with MongoDB stopped the step is
   skipped with a warning. Also fixes `scripts/subscribers.sh` in the same situation.

@@ -545,7 +545,7 @@
   "Setup of": "Setup de",
   "SFP+ (management, no VLAN)": "SFP+ (gestão sem VLAN)",
   "shared": "compartilhada",
-  "Shells run on the core machine as the install user. Ctrl+Shift+C copies, Ctrl+Shift+V pastes. Closing a terminal (or reloading the page) ends its shell.": "Os shells rodam na máquina do core, com o usuário da instalação. Ctrl+Shift+C copia, Ctrl+Shift+V cola. Fechar um terminal (ou recarregar a página) encerra o shell dele.",
+  "Shells run on the core machine as the install user. Select text and press Ctrl+C to copy (without a selection Ctrl+C interrupts), Ctrl+V pastes. Closing a terminal (or reloading the page) ends its shell.": "Os shells rodam na máquina do core, com o usuário da instalação. Selecione o texto e use Ctrl+C para copiar (sem seleção, Ctrl+C interrompe), Ctrl+V cola. Fechar um terminal (ou recarregar a página) encerra o shell dele.",
   "Show secrets": "Mostrar segredos",
   "Sign in": "Entrar",
   "sign in with the administrator password": "entre com a senha de administrador",

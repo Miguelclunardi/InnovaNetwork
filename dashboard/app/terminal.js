@@ -3,6 +3,8 @@
    Terminals stay open while you switch dashboard tabs; they end when closed or when the page reloads. */
 "use strict";
 
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform || "");
+
 const Term = {
   tabs: [],          // {id, name, profile, term, fit, ws, pane, btn, alive}
   cur: null,
@@ -102,17 +104,50 @@ const Term = {
     };
     term.onData((d) => { if (ws.readyState === 1) ws.send(JSON.stringify({ i: d })); });
     term.onResize(({ cols, rows }) => { if (ws.readyState === 1) ws.send(JSON.stringify({ r: [cols, rows] })); });
-    // Ctrl+Shift+C copies the selection (Ctrl+C stays an interrupt); Ctrl+Shift+V pastes (browser default)
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyC") {
-        const s = term.getSelection();
-        if (s && navigator.clipboard) navigator.clipboard.writeText(s).catch(() => {});
-        return false;
-      }
-      return true;
-    });
+    // Keys like VS Code. Copy: Ctrl+C with a selection (without one, ^C still goes to the shell),
+    // Ctrl+Shift+C, Cmd+C on macOS. Paste: Ctrl+V, Ctrl+Shift+V, Cmd+V — xterm ignores the key and the
+    // browser fires its native paste event on xterm's textarea (navigator.clipboard is blocked over HTTP).
+    term.attachCustomKeyEventHandler((e) => this.keys(e, term));
     setTimeout(() => this.refresh(), 800);
     return t;
+  },
+
+  // false = xterm ignores the key (nothing is sent to the shell)
+  keys(e, term) {
+    if (e.altKey) return true;
+    const cmd = MAC && e.metaKey && !e.ctrlKey, ctrl = e.ctrlKey && !e.metaKey;
+    if (!cmd && !ctrl) return true;
+    const k = (e.key || "").toLowerCase();
+    if (k === "c") {
+      if (ctrl && !e.shiftKey && !term.hasSelection()) return true;   // plain Ctrl+C: interrupt
+      if (e.type === "keydown") {
+        e.preventDefault();
+        if (term.hasSelection()) { this.copy(term.getSelection(), term); term.clearSelection(); }
+      }
+      return false;
+    }
+    // no preventDefault: the browser pastes into xterm's textarea (Ctrl+V on macOS stays ^V)
+    if (k === "v" && (cmd || !MAC)) return false;
+    return true;
+  },
+
+  // navigator.clipboard only exists in a secure context (HTTPS/localhost); over plain HTTP use a
+  // temporary textarea + execCommand("copy"), then give the focus back to the terminal
+  copy(text, term) {
+    const fallback = () => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:-9999px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch { /* no clipboard */ }
+      ta.remove();
+      term.focus();
+    };
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => term.focus(), fallback);
+    } else fallback();
   },
 
   select(id) {
