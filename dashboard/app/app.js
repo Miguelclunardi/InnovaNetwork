@@ -111,6 +111,7 @@ function showTab(name) {
   if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
   refreshNow();
   if (name === "logs") Logs.ensureSources();
+  if (name === "terminal" && typeof Term !== "undefined") Term.onShow();
   setTimeout(() => Charts.resizeAll(), 30);
 }
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -842,7 +843,7 @@ $("#core-filter").addEventListener("input", () => Core.refresh());
     await reloadConfig(true);
   } catch (e) { banner("Failed to load the configuration: " + e.message); }
   const start = (location.hash || "").slice(1) || store.get("tab", "overview");
-  showTab(["overview", "ran", "logs", "core", "slices", "ru", "control", "hosts", "history", "docs", "settings"].includes(start) ? start : "overview");
+  showTab(["overview", "ran", "logs", "core", "slices", "ru", "control", "hosts", "history", "docs", "settings", "terminal"].includes(start) ? start : "overview");
   setInterval(refreshNow, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNow(); });
 })();
@@ -858,6 +859,7 @@ async function reloadConfig(first = false) {
     $("#rec").classList.toggle("hidden", !CONFIG.persist);
     $("#tabbtn-ru").classList.toggle("hidden", !CONFIG.ru);
     $("#tabbtn-control").classList.toggle("hidden", !CONFIG.control);
+    if (typeof Term !== "undefined") Term.updateTab();
     document.body.classList.toggle("no-ru", !CONFIG.ru);
     paintCore();
     if (first) {

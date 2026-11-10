@@ -488,6 +488,7 @@ step_dashboard() {
     remove_hosts_agent
     remove_ru_agent
     remove_gnb_ctl_agent
+    remove_term_agent
     return 0
   fi
   step "Innova Center Dashboard (NodePort ${DASHBOARD_NODEPORT})"
@@ -517,6 +518,69 @@ step_dashboard() {
   setup_hosts_agent
   setup_ru_agent
   setup_gnb_ctl_agent
+  setup_term_agent
+}
+
+remove_term_agent() {
+  [[ -f "${TERM_UNIT_FILE}" ]] || return 0
+  systemctl disable --now open5gs-k3s-term.service >/dev/null 2>&1 || true
+  rm -f "${TERM_UNIT_FILE}" "${INSTALL_DIR}/dashboard-agent/term.env"; systemctl daemon-reload
+  ok "unit open5gs-k3s-term removed"
+}
+
+# Terminal tab (administrator): term-agent.py opens the shells here, as the install user, and connects
+# them to the dashboard (outgoing connections only). Profiles: this machine, the gNB host (GNB_CTL_SSH)
+# and the DASHBOARD_HOSTS machines, over the user's SSH keys.
+setup_term_agent() {
+  if ! is_true "${DASHBOARD_TERMINAL}" || [[ -z "${DASHBOARD_ADMIN_PASSWORD}" ]]; then remove_term_agent; return 0; fi
+  [[ "${TARGET_USER}" != root ]] || { warn "the Terminal tab needs a regular install user"; return 0; }
+  local dst="${INSTALL_DIR}/dashboard-agent" unit profiles e hn uh nnp="NoNewPrivileges=true"
+  profiles="$(hostname -s)|bash -l"
+  if [[ -n "${GNB_CTL_SSH}" ]]; then profiles+=";${GNB_CTL_SSH%%@*}|ssh -t ${GNB_CTL_SSH}"; fi
+  for e in "${DASHBOARD_HOSTS[@]}"; do
+    IFS='|' read -r hn uh _ <<<"$e"
+    [[ ";${profiles}" == *";${hn}|"* ]] || profiles+=";${hn}|ssh -t ${uh}"
+  done
+  install -d -m 0755 -o root -g root "${dst}"
+  install -m 0755 -o root -g root "${PROJECT_DIR}/dashboard/agent/term-agent.py" "${dst}/term-agent.py"
+  install -m 0640 -o root -g "${TARGET_GROUP}" /dev/null "${dst}/term.env"
+  {
+    echo "DASHBOARD_URL=http://${K3S_NODE_IP:-127.0.0.1}:${DASHBOARD_NODEPORT}"
+    echo "INGEST_TOKEN=${DASHBOARD_INGEST_TOKEN}"
+    echo "TERM_PROFILES=${profiles}"
+    echo "KUBECONFIG=${TARGET_HOME}/.kube/config"
+  } >"${dst}/term.env"
+  # sudo inside the browser terminals only with DASHBOARD_TERMINAL_SUDO=true
+  if is_true "${DASHBOARD_TERMINAL_SUDO}"; then nnp="NoNewPrivileges=false"; fi
+  unit=$(cat <<EOU
+# Gerado por open5GK3S/install.sh
+[Unit]
+Description=InnovaNetwork: shells for the dashboard Terminal tab (administrator)
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${TARGET_USER}
+WorkingDirectory=${TARGET_HOME}
+EnvironmentFile=${dst}/term.env
+ExecStart=/usr/bin/python3 -u ${dst}/term-agent.py
+Restart=always
+RestartSec=5
+${nnp}
+
+[Install]
+WantedBy=multi-user.target
+EOU
+)
+  if [[ "$(cat "${TERM_UNIT_FILE}" 2>/dev/null)" != "${unit}" ]]; then
+    printf '%s\n' "${unit}" >"${TERM_UNIT_FILE}"; systemctl daemon-reload
+  fi
+  systemctl enable open5gs-k3s-term.service >/dev/null 2>&1
+  systemctl restart open5gs-k3s-term.service
+  ok "Terminal tab: shells as ${TARGET_USER} (journalctl -u open5gs-k3s-term)"
+  if is_true "${DASHBOARD_TERMINAL_SUDO}"; then warn "Terminal tab: sudo allowed in the browser terminals (DASHBOARD_TERMINAL_SUDO=true)"; fi
+  return 0
 }
 
 remove_gnb_ctl_agent() {

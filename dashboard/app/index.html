@@ -6,6 +6,7 @@
 <title>Innova Center Dashboard · InnovaNetwork</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="uPlot.min.css">
+<link rel="stylesheet" href="xterm.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -27,6 +28,7 @@
     <button role="tab" data-tab="history">History</button>
     <button role="tab" data-tab="docs">Documentation</button>
     <button role="tab" data-tab="settings" class="hidden" id="tabbtn-settings">Settings</button>
+    <button role="tab" data-tab="terminal" class="hidden" id="tabbtn-terminal">Terminal</button>
   </nav>
   <div class="topright">
     <div class="statusbox" id="status-box">
@@ -358,6 +360,26 @@
     <pre class="cfgdiff" id="cfg-dialog-body" style="max-height:60vh"></pre>
     <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="cfg-dialog-close">Close</button></div>
   </dialog>
+  <!-- ======================= TERMINAL (administrator) ======================= -->
+  <section id="tab-terminal" class="tab">
+    <div class="card termcard">
+      <div class="term-bar">
+        <div id="term-tabs" class="term-tabs"></div>
+        <select id="term-profile" title="Where the new terminal opens"></select>
+        <button class="btn" id="term-new" title="Open another terminal">+ New terminal</button>
+        <span class="muted" id="term-status"></span>
+      </div>
+      <div id="term-panes" class="term-panes">
+        <div id="term-empty" class="term-empty">
+          <p>No terminal open.</p>
+          <button class="btn" id="term-empty-open">Open a terminal</button>
+          <p class="muted">Shells run on the core machine as the install user. Ctrl+Shift+C copies, Ctrl+Shift+V pastes.
+            Closing a terminal (or reloading the page) ends its shell.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ======================= SETTINGS ======================= -->
   <!-- ======================= CONTROL ======================= -->
   <section id="tab-control" class="tab">
@@ -516,5 +538,8 @@
 <script src="docs.js"></script>
 <script src="settings.js"></script>
 <script src="history.js"></script>
+<script src="xterm.min.js"></script>
+<script src="addon-fit.min.js"></script>
+<script src="terminal.js"></script>
 </body>
 </html>

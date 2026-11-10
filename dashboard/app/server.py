@@ -37,6 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import configedit
 import control
 import history
+import term
 
 # ----------------------------------------------------------------------------
 #  Configuration (environment variables)
@@ -114,6 +115,8 @@ RU_NAME = _env("RU_NAME")
 RU_ADDR = _env("RU_ADDR")            # management IP (display only)
 # Control tab (start/stop/restart). Requires the administrator password (Settings tab).
 CONTROL = _env("CONTROL", "false").lower() in ("1", "true", "yes", "sim", "on")
+# Terminal tab (administrator): shells on the core machine through term-agent.py (dashboard/app/term.py)
+TERMINAL = _env("TERMINAL", "false").lower() in ("1", "true", "yes", "sim", "on")
 UERANSIM_RELEASE = _env("UERANSIM_RELEASE", "ueransim")
 RAN_AMF_IP = _env("RAN_AMF_IP")       # AMF IP on the gNB link (checks N2 in the log)
 RAN_UPF_IP = _env("RAN_UPF_IP")       # UPF IP on the gNB link (checks N3 in the log)
@@ -1828,6 +1831,7 @@ if GNBCTL:
 CONTROLLER = (control.Controller({n: control.CoreOps(K8S, d, UERANSIM_RELEASE) for n, d in CORES.defs.items()},
                                  CORES.active, CORES.set_active, _control_event, GNBCTL) if CONTROL and CONFIG else None)
 MASK = "••••••••"
+TERM = term.TermHub() if TERMINAL and CONFIG and INGEST_TOKEN else None
 
 
 def settings_view(reveal):
@@ -1992,7 +1996,7 @@ def _range(qs):
     return t0, min(t1, now + 60)
 
 
-STATIC_FILES = {"i18n.js", "docs.js", "control.js", "ru.js", "slices.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
+STATIC_FILES = {"terminal.js", "xterm.min.js", "xterm.min.css", "addon-fit.min.js", "i18n.js", "docs.js", "control.js", "ru.js", "slices.js", "history.js", "settings.js", "index.html", "app.js", "hosts.js", "style.css", "uPlot.iife.min.js", "uPlot.min.css", "favicon.svg", "logo.svg"}
 
 
 def _q(qs, name, default=None, cast=str):
@@ -2064,6 +2068,8 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path
         if path == "/api/health":
             return self._send(200, {"ok": True, "uptime": time.time() - STARTED})
+        if path == "/api/ingest/term/ws":
+            return self._term_agent_ws(qs)
         if not self._auth_ok():
             return self._send(401, {"error": "authentication required"},
                               extra={"WWW-Authenticate": 'Basic realm="open5GK3S"'})
@@ -2082,7 +2088,16 @@ class Handler(BaseHTTPRequestHandler):
                                         "local_host": LOCAL_HOST_NAME, "ru": RU_NAME or None,
                                         "control": bool(CONTROLLER), "ocudu_ctl": bool(GNBCTL), "amf_ip": cd["amf_ip"],
                                         "core": cd["name"], "core_name": cd["label"], "core_kind": cd["kind"],
-                                        "cores": CORES.view(), "ueransim_release": UERANSIM_RELEASE})
+                                        "cores": CORES.view(), "ueransim_release": UERANSIM_RELEASE,
+                                        "terminal": bool(TERM)})
+            if path == "/api/term":
+                if not TERM:
+                    return self._send(404, {"error": "Terminal tab disabled (DASHBOARD_TERMINAL=false)"})
+                if not self._admin():
+                    return None
+                return self._send(200, TERM.status())
+            if path == "/api/term/ws":
+                return self._term_browser_ws(qs)
             if path == "/api/admin":
                 return self._send(200, {"enabled": bool(CONFIG), "admin": bool(CONFIG) and ADMIN.check(self.headers.get("X-Admin-Token", ""))})
             if path == "/api/docs":
@@ -2270,6 +2285,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         return self._send(400, {"error": "unknown action"})
 
+    # ---- Terminal tab (term.py): browser and agent WebSockets
+    def _term_browser_ws(self, qs):
+        # browsers cannot set headers on a WebSocket: the administrator token comes in the query
+        if not TERM:
+            return self._send(404, {"error": "Terminal tab disabled"})
+        if not ADMIN.check(_q(qs, "t", "")):
+            return self._send(401, {"error": "sign in with the administrator password", "admin": True})
+        ws = term.ws_accept(self)
+        if not ws:
+            return self._send(400, {"error": "WebSocket upgrade expected"})
+        TERM.run(ws, _q(qs, "profile", ""), _q(qs, "cols", 80, int), _q(qs, "rows", 24, int))
+        return None
+
+    def _term_agent_ws(self, qs):
+        if not TERM:
+            return self._send(404, {"error": "Terminal tab disabled"})
+        if not hmac.compare_digest(self.headers.get("X-Ingest-Token", ""), INGEST_TOKEN):
+            return self._send(403, {"error": "invalid token"})
+        ws = term.ws_accept(self)
+        if not ws:
+            return self._send(400, {"error": "WebSocket upgrade expected"})
+        if not TERM.attach(_q(qs, "id", ""), ws):
+            ws.close()
+        return None
+
     def _admin(self):
         """Requires the administrator session (X-Admin-Token header). Answers 401/404 if missing."""
         if not CONFIG:
@@ -2355,6 +2395,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._settings_post(u.path)
         if u.path == "/api/control":
             return self._control_post()
+        if u.path == "/api/ingest/term/poll":
+            if not TERM:
+                return self._send(404, {"error": "Terminal tab disabled"})
+            if not hmac.compare_digest(self.headers.get("X-Ingest-Token", ""), INGEST_TOKEN):
+                return self._send(403, {"error": "invalid token"})
+            try:
+                info = self._json_body(64 * 1024)
+            except (ValueError, configedit.ConfigError):
+                info = {}
+            return self._send(200, {"sessions": TERM.poll(info)})
         if u.path not in ("/api/ingest/gnb-log", "/api/ingest/host", "/api/ingest/ru", "/api/ingest/gnb-ctl"):
             return self._send(404, {"error": "not found"})
         if not INGEST_TOKEN:

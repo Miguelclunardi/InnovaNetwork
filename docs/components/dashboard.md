@@ -19,6 +19,7 @@ place: radio, RU, machines and **the active core** (Open5GS or free5GC — see
 | **History** | **persistent** metrics (radio 1 s, core, machines, energy, events) of any period; **experiments** ("● Record experiment" button at the top) with name, notes and a snapshot of the setup; side-by-side **comparison** of 2+ experiments (KPIs with the best highlighted + overlaid charts); CSV export | SQLite in `/var/lib/open5gs-k3s/dashboard` (`DASHBOARD_PERSIST=true`) |
 | **Settings** | edits `config.env` (administrator password): fields per section with the file's own explanation, diff before saving, installer validation, backup and restore, and the command to apply | `config.env` of the core machine |
 | **Core** | always: gNBs, registered UEs, sessions, UE traffic at the UPF per DNN (N6) and on the gNB link (N3), CPU/memory/threads of each NF, errors/warnings per NF, UPF interfaces. Optional: NF Prometheus metrics | host `/proc` (`open5gs-*d` processes and UPF interfaces) + logs; Prometheus only with `OPEN5GS_METRICS=true` |
+| **Terminal** | shells in the browser (several tabs, like VS Code) on the core machine and, over SSH, on the gNB host and the other machines. Administrator only | `term-agent` on the core machine |
 | **Slices** | one card per slice (DNN, SST/SD, sessions, UPF downlink/uplink now, share of the traffic, totals); DL/UL charts per slice; a **UE × slice** table (IP of each session, UEs in 2+ slices marked, radio rate per UE); refused session requests per slice (e.g. phones asking for `ims`) | running core configuration (AMF/UPF or SMF ConfigMaps) + AMF/SMF logs + UPF tunnel counters (host `/proc`) |
 
 Address: `http://<core-IP>:30998` (`DASHBOARD_NODEPORT`). No password by default; with `DASHBOARD_PASSWORD`, the
@@ -127,6 +128,8 @@ annotation, and the pod restarts by itself.
 | `OPEN5GS_METRICS` | `false` | Prometheus on the NFs (Core tab). **Changing it restarts the core** on the next install |
 | `DASHBOARD_CONFIG_EDIT` | `true` | Settings tab and administrator password |
 | `DASHBOARD_CONTROL` | `true` | Control tab (needs `DASHBOARD_CONFIG_EDIT`) |
+| `DASHBOARD_TERMINAL` | `true` | Terminal tab (needs `DASHBOARD_CONFIG_EDIT`) |
+| `DASHBOARD_TERMINAL_SUDO` | `false` | `true` = sudo works inside the browser terminals |
 | `CORE_AUTOSTART` | `false` | `false` = at boot only the dashboard comes up; the core is started from the Control tab |
 | `GNB_CTL_MODE` | `k8s` | how the gNB card controls OCUDU: `k8s` (pod) or `systemd` (native service) |
 | `GNB_CTL_SSH`, `GNB_CTL_DIR` | `user@10.10.0.1`, OCUDU folder | access to the gNB node and folder of the `configs/*.yml` |
@@ -337,6 +340,31 @@ sets the replicas to 1). `CORE_AUTOSTART=true` goes back to the old behavior (ev
   prevents the gNB from starting by itself.
 - **The machine must be prepared** (VF/DPDK, PTP, XDP): the button does not do that.
 
+### Terminal tab (administrator)
+
+Shells in the browser, several at once (tabs like the VS Code terminal panel). The tab only shows up after the
+**administrator login** and closes every terminal on logout.
+
+- **Where the shells run:** on the core machine, as the install user (the same user that runs `kubectl` and
+  `install.sh`), through the agent `open5gs-k3s-term` (`dashboard/agent/term-agent.py`). The dashboard pod has no
+  privileges, so it only relays: browser ⇄ `GET /api/term/ws` (WebSocket) ⇄ dashboard ⇄ agent. The agent only
+  makes outgoing connections (long poll `POST /api/ingest/term/poll` + WebSocket `/api/ingest/term/ws`, ingest
+  token): nothing new listens on the network.
+- **Profiles** (the list next to **+ New terminal**): this machine (`bash -l`), the gNB host of `GNB_CTL_SSH` and
+  every `DASHBOARD_HOSTS` machine (`ssh -t user@host`, same SSH key as the other agents).
+- **Use:** **+ New terminal** opens another one; click a tab to switch, double-click to rename, × or middle click
+  to close. Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes (Ctrl+C stays an interrupt). Terminals stay
+  open while you use other dashboard tabs; closing one, or reloading the page, ends its shell (and what it
+  started — use `tmux`/`nohup` for long jobs). Up to 12 terminals at the same time.
+- **sudo:** off by default (the agent runs with `NoNewPrivileges`). `DASHBOARD_TERMINAL_SUDO=true` allows it.
+- **Security:** anyone with the administrator password gets a shell on the core machine (and SSH to the other
+  machines). Keep `DASHBOARD_TERMINAL=false` on networks you do not trust. The token travels in the WebSocket
+  address over plain HTTP, like the other administrator calls.
+- **"terminal agent not connected":** `journalctl -u open5gs-k3s-term` on the core machine; after changing the
+  profiles run `sudo ./install.sh --dashboard-only`.
+- `xterm.min.js` is xterm.js 5.5.0 (MIT, `LICENSE-xterm.txt`) with its raw control characters written as `\u00XX`
+  escapes: a ConfigMap (YAML) cannot hold them.
+
 ### Energy (MiEnergy meter)
 
 The MiEnergy meter (single-phase) has a page `http://<IP>/Data` with ~70 readings (`v_a`, `i_a`, `p_a`, `fp_a`,
@@ -444,6 +472,9 @@ Enabled with `DASHBOARD_CONFIG_EDIT=true` (default in the config of this reposit
 | `GET /api/hosts` · `GET /api/hosts/<name>?window=` | machines: summary · details and series |
 | `POST /api/ingest/host` | input of the machines agent (`X-Ingest-Token`) |
 | `POST /api/ingest/gnb-log` | input of the agent (`X-Ingest-Token` header) |
+| `GET /api/term` | (admin) Terminal tab: agent connected, profiles, open terminals |
+| `GET /api/term/ws?t=<admin token>&profile=&cols=&rows=` | (admin) WebSocket of one terminal |
+| `POST /api/ingest/term/poll` · `GET /api/ingest/term/ws?id=` | terminal agent (`X-Ingest-Token`) |
 
 State values in the API are in English: core components `running` / `stopped` / `starting` / `stopping`; GPS
 `locked` / `searching` / `adjusting` / `unlocked` / `stalled` / `no_data`; UE `registered` / `deregistered`.

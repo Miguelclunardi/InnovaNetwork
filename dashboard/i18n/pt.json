@@ -21,6 +21,7 @@
   ") and its UERANSIM. Stop = scale 0": ") e o UERANSIM dele. Parar = escala 0",
   "), so it is exact per slice. The slice list is read from the running core (AMF/UPF configuration, every 30 s).": "), então é exato por slice. A lista de slices é lida do core em execução (configuração do AMF/UPF, a cada 30 s).",
   "): subscribers, slices, QoS.": ") — cadastro de assinantes, slices, QoS.",
+  "+ New terminal": "+ Novo terminal",
   ", starting:": ", iniciando:",
   ", stopped:": ", parado:",
   ", stopping:": ", parando:",
@@ -116,6 +117,7 @@
   "Clock": "Hora",
   "clock from the grandmaster": "relógio vindo do grandmaster",
   "Close": "Fechar",
+  "Close terminal": "Fechar terminal",
   "closed": "encerrada",
   "collected every ~5 s ·": "coleta a cada ~5 s ·",
   "command on the core machine; the dashboard shows which one.": "na máquina do core — o painel mostra qual.",
@@ -161,6 +163,7 @@
   "Custom…": "Personalizado…",
   "Dashboard": "Painel",
   "Dashboard only: the core and the gNB are not touched.": "Só o painel: core e gNB não são tocados.",
+  "dashboard without terminal support": "painel sem suporte a terminal",
   "dashboard:": "painel:",
   "data repository": "repositório de dados",
   "days": "dias",
@@ -365,6 +368,7 @@
   "No state changes since the dashboard started.": "Sem mudanças de estado desde que o painel iniciou.",
   "No subscriber seen in the AMF logs.": "Nenhum assinante visto nos logs do AMF.",
   "no swap": "sem swap",
+  "No terminal open.": "Nenhum terminal aberto.",
   "no traffic": "sem tráfego",
   "no tunnels": "sem túneis",
   "No UE on the radio in this period.": "Nenhum UE no rádio neste período.",
@@ -395,6 +399,8 @@
   "one at a time: switching stops this one and brings the other up in order": "um por vez — trocar para o outro e sobe o novo em ordem",
   "one item per line": "um item por linha",
   "One login covers Control, Settings and the other browser tabs (8 h).": "Um login vale para Controle, Configuração e as outras abas do navegador (8 h).",
+  "Open a terminal": "Abrir um terminal",
+  "Open another terminal": "Abrir outro terminal",
   "open on GitHub": "abrir no GitHub",
   "open on the SMF": "abertas no SMF",
   "Open5GS Prometheus metrics": "Métricas Prometheus do Open5GS",
@@ -531,6 +537,7 @@
   "Setup of": "Setup de",
   "SFP+ (management, no VLAN)": "SFP+ (gestão sem VLAN)",
   "shared": "compartilhada",
+  "Shells run on the core machine as the install user. Ctrl+Shift+C copies, Ctrl+Shift+V pastes. Closing a terminal (or reloading the page) ends its shell.": "Os shells rodam na máquina do core, com o usuário da instalação. Ctrl+Shift+C copia, Ctrl+Shift+V cola. Fechar um terminal (ou recarregar a página) encerra o shell dele.",
   "Show secrets": "Mostrar segredos",
   "Sign in": "Entrar",
   "sign in with the administrator password": "entre com a senha de administrador",
@@ -577,6 +584,7 @@
   "Sync source": "Fonte de sincronismo",
   "taskset … ./gnb -c configs/&lt;file&gt;.yml": "taskset … ./gnb -c configs/&lt;arquivo&gt;.yml",
   "Temperatures": "Temperaturas",
+  "terminal agent not connected (on the core machine: journalctl -u open5gs-k3s-term)": "agente do terminal desconectado (na máquina do core: journalctl -u open5gs-k3s-term)",
   "Terminating": "Encerrando",
   "Test settings only: they apply on the next ./test.sh, no reinstall.": "Só configurações do teste: valem no próximo ./test.sh, sem reinstalar.",
   "the AMF has not seen the gNB (N2) after 60 s: does the file point to this core?": "o AMF ainda não viu o gNB (N2) após 60 s — o arquivo aponta para este core?",
@@ -680,6 +688,7 @@
   "warnings and errors": "avisos e erros",
   "was replaced": "substituído",
   "what changed in the setup, UE position, test (iperf -u -b 800M)…": "o que mudou no setup, posição do UE, teste (iperf -u -b 800M)…",
+  "Where the new terminal opens": "Onde o novo terminal abre",
   "whole core": "core inteiro",
   "Window": "Janela",
   "with warnings": "com avisos",
@@ -1315,6 +1324,14 @@
   [
    "for {0} ({1})",
    "para {0} ({1})"
+  ],
+  [
+   "{0}/{1} open",
+   "{0}/{1} abertos"
+  ],
+  [
+   "{0} — double-click to rename, middle click to close",
+   "{0} — clique duplo para renomear, botão do meio para fechar"
   ]
  ]
 }

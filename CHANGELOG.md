@@ -5,6 +5,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
 ## [Unreleased]
 
 ### Added
+- Dashboard **Terminal** tab (administrator only): shells in the browser, several at once with tabs (rename,
+  close, copy/paste), on the core machine and over SSH on the gNB host and the `DASHBOARD_HOSTS` machines.
+  Shells run in the new agent `open5gs-k3s-term` (`dashboard/agent/term-agent.py`, install user, outgoing
+  connections only); the dashboard relays the WebSockets (`dashboard/app/term.py`, xterm.js 5.5.0 vendored).
+  Options `DASHBOARD_TERMINAL` and `DASHBOARD_TERMINAL_SUDO` (sudo off by default).
 - Dashboard **Slices** tab: sessions per slice, UPF downlink/uplink per slice (live and charts), a UE × slice
   table (UEs in two slices marked) and refused session requests per slice (`GET /api/slices`). The slice list
   is read from the running core configuration (the dashboard may read the AMF/UPF ConfigMaps, or the free5GC

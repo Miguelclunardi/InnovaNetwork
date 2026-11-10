@@ -257,6 +257,7 @@ const Admin = {
     Settings.render();
     if (Settings.token && typeof currentTab !== "undefined" && currentTab === "settings") Settings.load();
     if (typeof Control !== "undefined" && Control.refresh) Control.refresh();
+    if (typeof Term !== "undefined") Term.updateTab();
   },
 };
 $("#admin-btn").addEventListener("click", () => {
