@@ -78,6 +78,7 @@ const Settings = {
         ${vars.map((v) => this.row(v)).join("")}</div>`;
     }).join("") || '<div class="card muted">No variable matches this filter.</div>';
     $$("#cfg-sections [data-var]").forEach((el) => el.addEventListener("input", () => this.changed(el)));
+    this.renderAddrs();
     this.counter();
     this.backups();
   },
@@ -105,6 +106,77 @@ const Settings = {
         ${v.kind === "array" ? ' <span class="tag">list</span>' : ""}</div>
       <div class="cfgval">${input}${help ? `<div class="cfghelp">${esc(help)}</div>` : ""}</div></div>`;
   },
+  // ---- network addresses (top of the tab): one row per machine/function with its IP in config.env.
+  // "Change" replaces that IP in every variable that uses it (e.g. innovaserver: GNB_METRICS_URL, GNB_LOG_SSH,
+  // GNB_CTL_SSH, DASHBOARD_HOSTS); the result is a normal unsaved change (review + save as usual).
+  ADDRS: [
+    { label: "innovaserver (gNB host)", ip: (g) => ([g("GNB_CTL_SSH"), g("GNB_LOG_SSH"), g("GNB_METRICS_URL")].join(" ").match(/(?<![\d.])\d+\.\d+\.\d+\.\d+(?![\d.])/) || [])[0] },
+    { label: "AMF (N2: the gNB connects here)", ip: (g) => g("AMF_N2_IP") },
+    { label: "UPF (N3)", ip: (g) => g("UPF_N3_IP") },
+    { label: "UERANSIM gNB", ip: (g) => g("GNB_SIM_IP") },
+    { label: "RU (management port)", ip: (g) => g("RU_MGMT_IP") },
+    { label: "This machine on the RU network", ip: (g) => g("RU_MGMT_LOCAL_CIDR").split("/")[0] },
+    { label: "This machine (stable k3s IP)", ip: (g) => g("STABLE_IP") },
+  ],
+  addrEditing: -1,
+  addrMsg: "",
+  curVal(v) { const e = this.edits[v.name]; return e !== undefined ? e : (v.kind === "array" ? v.items : v.value); },
+  allVars() { return this.data.sections.flatMap((s) => s.vars); },
+  ipRe(ip) { return new RegExp("(?<![\\d.])" + ip.replace(/\./g, "\\.") + "(?![\\d.])", "g"); },
+  addrUses(ip) {
+    const re = this.ipRe(ip);
+    return this.allVars().filter((v) => !v.secret && [].concat(this.curVal(v) ?? []).some((x) => { re.lastIndex = 0; return re.test(String(x)); }));
+  },
+  renderAddrs() {
+    const box = $("#cfg-addrs");
+    const g = (name) => { const v = this.original(name); return v ? String([].concat(this.curVal(v) ?? []).join(" ")) : ""; };
+    const rows = this.ADDRS.map((a, i) => {
+      let ip = "";
+      try { ip = a.ip(g) || ""; } catch { ip = ""; }
+      if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip)) return "";
+      const uses = this.addrUses(ip);
+      const mod = uses.some((v) => v.name in this.edits);
+      const val = this.addrEditing === i
+        ? `<div class="addrline"><input type="text" id="addr-new" value="${esc(ip)}" spellcheck="false" data-old="${esc(ip)}">
+             <button class="btn small" id="addr-apply">Apply</button> <button class="btn small" id="addr-cancel">Cancel</button></div>
+           ${this.addrMsg ? `<div class="cfghelp err">${esc(this.addrMsg)}</div>` : ""}`
+        : `<div class="addrline"><code class="addrip">${esc(ip)}</code> <button class="btn small" data-addr="${i}">Change</button></div>`;
+      return `<div class="cfgrow${mod ? " mod" : ""}"><div class="cfgname"><b>${esc(a.label)}</b></div>
+        <div class="cfgval">${val}<div class="cfghelp"><span>used in</span> ${uses.map((v) => `<code>${esc(v.name)}</code>`).join(", ") || "—"}</div></div></div>`;
+    }).join("");
+    box.innerHTML = rows ? `<div class="card cfgsec"><h2>Network addresses <span class="muted">change an IP everywhere config.env uses it, then review and save as usual</span></h2>${rows}</div>` : "";
+    $$("#cfg-addrs [data-addr]").forEach((b) => b.addEventListener("click", () => { this.addrEditing = +b.dataset.addr; this.addrMsg = ""; this.renderAddrs(); const n = $("#addr-new"); n.focus(); n.select(); }));
+    const ap = $("#addr-apply");
+    if (ap) {
+      ap.addEventListener("click", () => this.applyAddr());
+      $("#addr-cancel").addEventListener("click", () => { this.addrEditing = -1; this.renderAddrs(); });
+      $("#addr-new").addEventListener("keydown", (e) => { if (e.key === "Enter") this.applyAddr(); if (e.key === "Escape") { this.addrEditing = -1; this.renderAddrs(); } });
+    }
+  },
+  applyAddr() {
+    const inp = $("#addr-new");
+    const oldIp = inp.dataset.old, newIp = inp.value.trim();
+    const ok = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(newIp);
+    if (!ok) { this.addrMsg = "not a valid IPv4 address"; this.renderAddrs(); return; }
+    if (newIp !== oldIp) {
+      const re = this.ipRe(oldIp);
+      for (const v of this.addrUses(oldIp)) {
+        const rep = (x) => String(x).replace(re, newIp);
+        if (v.kind === "array") {
+          const val = this.curVal(v).map(rep);
+          if (JSON.stringify(val) === JSON.stringify(v.items)) delete this.edits[v.name]; else this.edits[v.name] = val;
+        } else {
+          const val = rep(this.curVal(v));
+          if (val === v.value) delete this.edits[v.name]; else this.edits[v.name] = val;
+        }
+      }
+      this.plan = null;
+      $("#cfg-review").classList.add("hidden");
+    }
+    this.addrEditing = -1;
+    this.addrMsg = "";
+    this.render();
+  },
   original(name) {
     for (const s of this.data.sections) for (const v of s.vars) if (v.name === name) return v;
     return null;
@@ -118,6 +190,7 @@ const Settings = {
     } else if (val === v.value) delete this.edits[v.name];
     else this.edits[v.name] = val;
     $("#cfgrow-" + CSS.escape(v.name)).classList.toggle("mod", v.name in this.edits);
+    if (this.addrEditing < 0) this.renderAddrs();
     this.plan = null;
     $("#cfg-review").classList.add("hidden");
     this.counter();

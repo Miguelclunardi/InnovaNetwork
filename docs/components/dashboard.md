@@ -429,6 +429,11 @@ Enabled with `DASHBOARD_CONFIG_EDIT=true` (default in the config of this reposit
 - **Own administrator password**, generated once by the installer and readable only by root:
   `sudo cat /opt/open5gs-k3s/state/dashboard-admin-password`. 8 h session in the browser (closed tab = signed
   out). The rest of the dashboard stays without a password (or with `DASHBOARD_PASSWORD`).
+- **Network addresses** card at the top: one row per machine/function (innovaserver/gNB host, AMF N2, UPF N3,
+  UERANSIM gNB, RU management, this machine on the RU network, `STABLE_IP`) with its current IP and the variables
+  that use it. **Change** replaces that IP (whole address only) in every non-secret variable that contains it
+  (e.g. `GNB_CTL_SSH`, `GNB_LOG_SSH`, `GNB_METRICS_URL`, `DASHBOARD_HOSTS`); the result is a normal unsaved change,
+  reviewed and saved as below.
 - **Only changes the value** of variables that already exist in the file (does not create lines). Refuses line
   breaks, `$`, `` ` ``, `\` and `"` in the values — `config.env` is read with `source` by the installer as root.
 - Before saving it shows the **diff** and runs the **same validation as the installer** (`validate_config`); on an

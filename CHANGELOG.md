@@ -5,6 +5,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
 ## [Unreleased]
 
 ### Added
+- Dashboard **Settings** tab: **Network addresses** card at the top. Each machine/function (gNB host, AMF N2,
+  UPF N3, UERANSIM gNB, RU, this machine) shows its IP and where `config.env` uses it; **Change** replaces the IP in
+  every variable that uses it, as a normal unsaved change (diff, validation and backup as usual).
 - Dashboard **Terminal** tab (administrator only): shells in the browser, several at once with tabs (rename,
   close, copy/paste), on the core machine and over SSH on the gNB host and the `DASHBOARD_HOSTS` machines.
   Shells run in the new agent `open5gs-k3s-term` (`dashboard/agent/term-agent.py`, install user, outgoing

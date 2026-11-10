@@ -319,3 +319,9 @@ button.rec.on#admin-btn { background: rgba(255,255,255,.18); border-color: #91cf
 .term-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; color: var(--log-text); text-align: center; padding: 20px; }
 .term-empty .muted { max-width: 520px; }
+
+/* ---- Settings: network addresses */
+.addrline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.addrline .addrip { font-size: 14px; font-weight: 600; }
+.addrline input[type=text] { width: 180px !important; }
+.cfghelp.err { color: var(--err); }
