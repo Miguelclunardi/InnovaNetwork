@@ -414,8 +414,12 @@ step_deploy_core() {
 
 step_subscribers() {
   step "Subscribers (MongoDB)"
-  local dep; dep=$(populate_deploy)
-  kc -n "${K8S_NAMESPACE}" rollout status "${dep}" --timeout=300s >/dev/null
+  # works with the core running, partly stopped or stopped from the Control tab
+  if ! mongodb_ready; then
+    warn "MongoDB is stopped (core stopped from the Control tab?): subscribers not synced now."
+    warn "  Start the core (Control tab) and run --deploy-only again to sync them."
+    return 0
+  fi
   sync_subscribers
 }
 

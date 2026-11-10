@@ -951,10 +951,31 @@ subscriber_lines() {  # prints "IMSI K OPC DNN SST SD" per line
   done
 }
 
-populate_exec() {  # runs a bash script in the populate pod
-  local dep; dep=$(populate_deploy)
+# Runs a bash script in the populate pod. The Control tab may have scaled populate to 0 (core stopped or
+# only partly running): it is brought up for the call and put back to 0 afterwards.
+populate_exec() {
+  local dep rep rc=0
+  dep=$(populate_deploy)
   [[ -n "${dep}" ]] || die "Open5GS 'populate' Deployment not found in namespace ${K8S_NAMESPACE}"
-  kc -n "${K8S_NAMESPACE}" exec -i "${dep}" -c populate -- /bin/bash -s <<<"$1"
+  rep=$(kc -n "${K8S_NAMESPACE}" get "${dep}" -o jsonpath='{.spec.replicas}' 2>/dev/null)
+  if [[ "${rep:-0}" == 0 ]]; then
+    info "populate is scaled to 0 (Control tab): starting it for this step"
+    kc -n "${K8S_NAMESPACE}" scale "${dep}" --replicas=1 >/dev/null
+  fi
+  if kc -n "${K8S_NAMESPACE}" rollout status "${dep}" --timeout=300s >/dev/null; then
+    kc -n "${K8S_NAMESPACE}" exec -i "${dep}" -c populate -- /bin/bash -s <<<"$1" || rc=$?
+  else
+    warn "the populate pod did not become ready"; rc=1
+  fi
+  if [[ "${rep:-0}" == 0 ]]; then kc -n "${K8S_NAMESPACE}" scale "${dep}" --replicas=0 >/dev/null; fi
+  return "${rc}"
+}
+
+# MongoDB of the core has a ready pod (the Control tab can stop the whole core)
+mongodb_ready() {
+  local n
+  n=$(kc -n "${K8S_NAMESPACE}" get deploy "${OPEN5GS_RELEASE}-mongodb" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+  [[ "${n:-0}" -ge 1 ]]
 }
 
 sync_subscribers() {
@@ -1111,6 +1132,12 @@ _restart() {  # deployments in sequence, each one waiting to be ready
 # in that order (redoes the PFCP association and the NG Setup). Returns 1 if it does not fix it.
 ensure_user_plane() {
   kc -n "${K8S_NAMESPACE}" get "$(_ues_dep)" &>/dev/null || { info "UERANSIM not deployed; nothing to check"; return 0; }
+  # the Control tab may have stopped UERANSIM (replicas 0): respect it, and never restart UPF/SMF for it
+  local d r
+  for d in "deploy/${UERANSIM_RELEASE}" "$(_ues_dep)"; do
+    r=$(kc -n "${K8S_NAMESPACE}" get "${d}" -o jsonpath='{.spec.replicas}' 2>/dev/null)
+    if [[ "${r:-0}" == 0 ]]; then info "UERANSIM is stopped (Control tab); user plane not checked"; return 0; fi
+  done
   local t=0
   until _gnb_has_ngsetup; do (( t += 3 )); (( t < 120 )) || break; sleep 3; done
   if _gnb_has_ngsetup && _wait_plane 60; then ok "${UE_COUNT} UE(s) registered and user plane OK"; return 0; fi

@@ -40,6 +40,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
 - The gNB pod script text changed (English boot message): the next `./ran/ocudu/install.sh` recreates the
   gNB pod.
 
+### Fixed
+- `install.sh --deploy-only` no longer aborts at "Subscribers" when the Control tab scaled `populate` (or the
+  whole core) to 0: populate is started only for the sync and scaled back; with MongoDB stopped the step is
+  skipped with a warning. Also fixes `scripts/subscribers.sh` in the same situation.
+- `install.sh --deploy-only` and heal no longer hang at the UERANSIM check (and then restart UPF and SMF,
+  dropping the real UEs) when the Control tab stopped UERANSIM: the check is skipped while it is scaled to 0.
+
 ## [3.0] — 2026-10-28 · tag `v3.0-innovanetwork`
 
 ### Added
