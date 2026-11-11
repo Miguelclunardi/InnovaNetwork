@@ -49,9 +49,13 @@ const RuTab = {
 
     const pm = l.pm || {};
     const P = (pm.POWER || {}).radio || {}, T = (pm.TEMPERATURE || {}).radio || {}, Tc = (pm.TEMPERATURE || {}).cpu || {};
+    const rfDbm = parseFloat(c["TX power"]), rfAnt = parseInt(info.layers, 10) || 4;
+    const rfW = isFinite(rfDbm) ? rfAnt * Math.pow(10, rfDbm / 10) / 1000 : null;   // dBm per antenna -> W in total
     const tot = (pm.RX_TOTAL || {}).count, late = (pm.RX_LATE || {}).count, early = (pm.RX_EARLY || {}).count;
     const k = [
-      { l: "Power", v: P.avg != null ? fmt(P.avg, 1) + " W" : "–", s: P.min != null ? `${fmt(P.min, 1)}–${fmt(P.max, 1)} W in the window` : "" },
+      // POWER (O-RAN PM counter) is the electrical power the RU draws; the radiated RF is far lower
+      { l: "Power consumption", v: P.avg != null ? fmt(P.avg, 1) + " W" : "–", s: P.min != null ? `${fmt(P.min, 1)}–${fmt(P.max, 1)} W in the window` : "" },
+      { l: "RF radiated", v: rfW != null ? fmt(rfW, 2) + " W" : "–", s: rfW != null ? `${fmt(rfDbm, 0)} dBm × ${rfAnt} antennas` : "" },
       { l: "Radio temperature", v: T.avg != null ? fmt(T.avg, 0) + " °C" : "–", s: T.max != null ? `max ${fmt(T.max, 0)} °C` : "",
         c: lvl(T.max, 70, 80) },
       { l: "CPU temperature", v: Tc.avg != null ? fmt(Tc.avg, 0) + " °C" : "–", s: "RU processor", c: lvl(Tc.max, 75, 85) },
@@ -65,7 +69,7 @@ const RuTab = {
 
     // charts
     const s = d.series || { t: [] };
-    Charts.make("c-ru-pt", [{ label: "Power W", fill: true }, { label: "Radio temp. °C", color: "#6b7280", scale: "y2", dec: 0 },
+    Charts.make("c-ru-pt", [{ label: "Power consumption W", fill: true }, { label: "Radio temp. °C", color: "#6b7280", scale: "y2", dec: 0 },
       { label: "Temp. CPU °C", color: "#9ca3af", scale: "y2", dec: 0, dash: [4, 3] }], { y2: true });
     Charts.set("c-ru-pt", cols(s, ["power", "temp", "temp_cpu"]));
     Charts.make("c-ru-fh", [{ label: "Received", fill: true, dec: 0 }, { label: "Early", color: "#d97706", dec: 0 },

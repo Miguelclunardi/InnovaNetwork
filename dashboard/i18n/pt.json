@@ -722,7 +722,10 @@
   "● Record experiment": "● Gravar experimento",
   "● Start": "● Iniciar",
   "🔒 Sign in as administrator": "🔒 Entrar como administrador",
-  "🔓 Admin · Sign out": "🔓 Admin · Sair"
+  "🔓 Admin · Sign out": "🔓 Admin · Sair",
+  "Power consumption": "Consumo elétrico",
+  "Power consumption W": "Consumo elétrico W",
+  "RF radiated": "RF irradiada"
  },
  "patterns": [
   [
@@ -1344,6 +1347,10 @@
   [
    "{0} — double-click to rename, middle click to close",
    "{0} — clique duplo para renomear, botão do meio para fechar"
+  ],
+  [
+   "{0} dBm × {1} antennas",
+   "{0} dBm × {1} antenas"
   ]
  ]
 }

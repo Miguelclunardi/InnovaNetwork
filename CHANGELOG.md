@@ -41,6 +41,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every 
   gNB pod.
 
 ### Fixed
+- Dashboard **RU** tab: the "Power" card is now **Power consumption** (the O-RAN `POWER` PM counter is the
+  electrical power the RU draws, in W), and a new **RF radiated** card shows the transmitted power (TX power per
+  antenna × antennas, e.g. 20 dBm × 4 = 0.40 W), so the two are not confused.
 - Dashboard **Terminal** tab: copy/paste like VS Code — Ctrl+C copies the selection (without one it still
   interrupts), Ctrl+V pastes, Ctrl+Shift+C/V and Cmd+C/V keep working. Copying now works over plain HTTP
   (`navigator.clipboard` is not available there; a temporary textarea + `execCommand("copy")` is used).
