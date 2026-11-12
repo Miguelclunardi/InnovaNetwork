@@ -628,6 +628,9 @@ class CoreState:
 
     def _ngap_ident(self, line):
         self._n += 1
+        if "InitialUEMessage" in line or "UE Context Release" in line:
+            # new NGAP message: an identity logged just before it belongs to another UE
+            self._ident = (None, -99)
         m = RE_IDENT.search(line)
         imsi = None
         if m:
