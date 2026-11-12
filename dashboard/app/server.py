@@ -1426,6 +1426,46 @@ def ue_identity(rnti):
             "kind": "ueransim" if imsi in SIM_IMSIS else "real", "sessions": ips}
 
 
+def _merge_series(ss):
+    """Concatenates Series.window() dicts in time order (fields missing in one series become None)."""
+    keys = sorted({k for x in ss for k in x if k != "t"})
+    rows = sorted((t, j, i) for j, x in enumerate(ss) for i, t in enumerate(x["t"]))
+    out = {"t": [t for t, _, _ in rows]}
+    for k in keys:
+        out[k] = [ss[j][k][i] if k in ss[j] else None for _, j, i in rows]
+    return out
+
+
+def ues_by_imsi(ues):
+    """Radio UEs with their identity, one entry per IMSI (the RNTI changes on every connection);
+    unidentified UEs stay one entry per RNTI. The entry keeps the latest RNTI and its last values."""
+    groups, order = {}, []
+    for u in ues:
+        u["ident"] = ue_identity(u["rnti"])
+        imsi = u["ident"].get("imsi")
+        if not imsi:
+            u["rntis"] = [u["rnti"]]
+            order.append(u)
+        elif imsi in groups:
+            groups[imsi].append(u)
+        else:
+            groups[imsi] = [u]
+            order.append(imsi)
+    res = []
+    for x in order:
+        if not isinstance(x, str):
+            res.append(x)
+            continue
+        g = sorted(groups[x], key=lambda u: u["first_seen"])
+        m = dict(max(g, key=lambda u: u["last_seen"]))
+        m.update(id="imsi-" + x, rntis=[u["rnti"] for u in g], active=any(u["active"] for u in g),
+                 first_seen=g[0]["first_seen"], last_seen=max(u["last_seen"] for u in g))
+        if "series" in m:
+            m["series"] = _merge_series([u["series"] for u in g])
+        res.append(m)
+    return res
+
+
 def _yaml_items(text, key):
     """Items of a YAML list `key:` (Open5GS configs) as dicts of scalars. Small reader: enough for
     plmn_support/s_nssai and session lists, which hold only scalars (no PyYAML in the image)."""
@@ -2127,8 +2167,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, self._overview())
             if path == "/api/ran":
                 snap = GNB.snapshot(min(_q(qs, "window", 300, int), HISTORY_SECONDS))
-                for u in snap["ues"]:
-                    u["ident"] = ue_identity(u["rnti"])
+                snap["ues"] = ues_by_imsi(snap["ues"])
                 snap["ident_source"] = bool(GNBLOG.last_push)
                 snap["ident_stats"] = {"rnti": len(GNBLOG.rnti_cu), "cu_amf": len(GNBLOG.cu_amf),
                                        "amf_imsi": len(CORES.cur().state.amf_ids)}
@@ -2483,8 +2522,8 @@ class Handler(BaseHTTPRequestHandler):
                               "waiting_boot": bool((gst.get("k8s") or {}).get("waiting_boot"))}} if gv else None,
             "core_active": CORES.active(), "core_name": CORES.cur_def()["label"],
             "gnb": {"status": ran["status"], "cell": cell_last,
-                    "ues": [dict({k: u[k] for k in ("id", "pci", "rnti", "active", "last", "first_seen", "last_seen")},
-                                 ident=ue_identity(u["rnti"])) for u in ran["ues"]]},
+                    "ues": ues_by_imsi([{k: u[k] for k in ("id", "pci", "rnti", "active", "last", "first_seen", "last_seen")}
+                                        for u in ran["ues"]])},
             "core": {"pods_total": len(pods), "pods_ready": sum(1 for p in pods if p["all_ready"]),
                      "restarts": sum(p["restarts"] for p in pods), "pods_error": core["pods_error"],
                      "nof_gnbs": core["nof_gnbs"], "gnbs": core["gnbs"],

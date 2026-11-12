@@ -1351,6 +1351,10 @@
   [
    "{0} dBm × {1} antennas",
    "{0} dBm × {1} antenas"
+  ],
+  [
+   "{0} connections",
+   "{0} conexões"
   ]
  ]
 }

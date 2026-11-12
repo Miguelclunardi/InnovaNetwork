@@ -35,6 +35,9 @@ function paintCore() {
   document.body.dataset.core = CONFIG.core || "open5gs";
 }
 
+// One radio entry per IMSI: how many connections (RNTIs) it had in the window
+const ueConns = (u) => (u.rntis && u.rntis.length > 1
+  ? ` <span class="muted" title="RNTIs: ${esc(u.rntis.join(", "))}">${u.rntis.length} connections</span>` : "");
 // UE identification on the radio: name / IMSI / IP (the gNB only knows the RNTI)
 function ueTitle(u) {
   const id = u.ident || {};
@@ -440,7 +443,7 @@ const Ran = {
       return `<div class="uecard ${u.id === this.selected ? "sel" : ""} ${u.active ? "" : "inactive"}" data-id="${esc(u.id)}">
         <div class="h"><span class="t" title="${esc((u.ident && u.ident.imsi) || "")}">${esc(ueTitle(u))}</span><span class="muted">${u.active ? "active" : ago(u.last_seen) + " ago"}</span></div>
         <div class="id">${ueKindTag(u)} ${ueIps(u) ? `<span class="ip">${esc(ueIps(u))}</span>` : ""}
-          <span class="muted">RNTI ${esc(u.rnti)}${u.ident && u.ident.name && u.ident.imsi ? " · …" + esc(u.ident.imsi.slice(-6)) : ""}</span></div>
+          <span class="muted">RNTI ${esc(u.rnti)}${u.ident && u.ident.name && u.ident.imsi ? " · …" + esc(u.ident.imsi.slice(-6)) : ""}</span>${ueConns(u)}</div>
         <div class="m"><div><span>DL</span> ${fmtRate(l.dl_brate)}</div><div><span>UL</span> ${fmtRate(l.ul_brate)}</div><div><span>CQI</span> ${fmt(l.cqi, 0)}</div>
         <div><span>MCS</span> ${fmt(l.dl_mcs, 0)}/${fmt(l.ul_mcs, 0)}</div><div title="last 10 s"><span>BLER</span> ${fmt(l.dl_bler_win)}/${fmt(l.ul_bler_win)}%</div><div><span>SNR</span> ${fmt(l.pusch_snr_db)}</div></div></div>`;
     }).join("") || `<div class="empty">No UE seen by the gNB in this window.</div>`;
