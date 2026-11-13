@@ -333,7 +333,7 @@ const Overview = {
     this.ranUes(ov);
     this.coreUes(ov);
     this.pods(ov);
-    this.events(ov);
+    this.gnb(ov);
   },
   kpis(ov) {
     const cell = ov.gnb.cell || {};
@@ -392,12 +392,24 @@ const Overview = {
           <td>${p.age != null ? ago(Date.now() / 1000 - p.age) : "–"}</td><td>${esc(p.ip)}</td><td>${esc(p.net1 || "")}</td></tr>`;
       }).join("");
   },
-  events(ov) {
-    const ev = ov.core.events;
-    $("#ov-events").innerHTML = ev.length ? ev.map((e) => `<div class="ev ${esc(e.level)}">
-      <span class="t">${hhmmss(e.ts)}</span><span class="src">${esc(e.src)}</span>
-      <span class="msg">${esc(e.msg)}</span><span class="cnt">${e.count > 1 ? "×" + e.count : ""}</span></div>`).join("")
-      : `<div class="empty">No events.</div>`;
+  gnb(ov) {
+    const st = ov.gnb.status || {}, cell = ov.gnb.cell || {}, ru = ov.ru || {}, r = ov.radio || {};
+    const g = r.gnb || {}, ptp = r.ptp || {}, gps = r.gps || {};
+    const tag = (ok, txt) => `<span class="tag ${ok ? "ok" : "err"}">${esc(txt)}</span>`;
+    const ptpOk = Object.keys(ptp).length > 0 && Object.values(ptp).every((v) => v === "active");
+    const n2 = ov.core.gnbs || [];
+    const rows = [
+      ["Process", r.online === false ? tag(false, "no data") : tag(g.active === "running", g.active || "–")],
+      ["Up for", st.since ? ago(st.since) : "–"],
+      ["Telemetry", tag(st.connected, st.connected ? "connected" : "no data")],
+      ["Attached UEs", cell.nof_ues ?? "–"],
+      ["Downlink / uplink", `${fmtRate(cell.dl_brate)} / ${fmtRate(cell.ul_brate)}`],
+      ["Latency (avg / max)", cell.avg_latency != null ? `${cell.avg_latency} / ${cell.max_latency} ms` : "–"],
+      ["Radio unit", ru.enabled ? `${tag(ru.online && ru.sync === "SYNCHRONIZED", ru.online ? ru.sync : "offline")} <span class="muted">${esc(ru.name || "")}${ru.temp != null ? " · " + ru.temp.toFixed(0) + " °C" : ""}</span>` : "–"],
+      ["Timing (GPS / PTP)", `${tag(gps.state === "locked", gps.state || "–")} ${tag(ptpOk, ptpOk ? "PTP active" : "PTP down")}`],
+      ["Core links (N2)", n2.length ? n2.map((x) => esc(x.addr)).join(", ") : tag(false, "none")],
+    ];
+    $("#ov-gnb").innerHTML = rows.map(([k, v]) => `<tr><td class="muted">${esc(k)}</td><td>${v}</td></tr>`).join("");
   },
 };
 

@@ -725,7 +725,17 @@
   "🔓 Admin · Sign out": "🔓 Admin · Sair",
   "Power consumption": "Consumo elétrico",
   "Power consumption W": "Consumo elétrico W",
-  "RF radiated": "RF irradiada"
+  "RF radiated": "RF irradiada",
+  "Telemetry": "Telemetria",
+  "Attached UEs": "UEs conectados",
+  "Downlink / uplink": "Downlink / uplink",
+  "Latency (avg / max)": "Latência (média / máx.)",
+  "Radio unit": "Unidade de rádio",
+  "Timing (GPS / PTP)": "Sincronismo (GPS / PTP)",
+  "Core links (N2)": "Ligações com o core (N2)",
+  "PTP active": "PTP ativo",
+  "PTP down": "PTP parado",
+  "connected": "conectado"
  },
  "patterns": [
   [
